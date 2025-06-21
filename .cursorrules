@@ -1,0 +1,66 @@
+{
+  "rules": [
+    {
+      "description": "Enforce project coding standards and structure",
+      "technology_stack": ["Next.js", "Python", "FastAPI"],
+      "rules": [
+        "Use functional components and hooks in React.",
+        "Prefer const over let where variables are immutable.",
+        "Follow Airbnb's JavaScript/TypeScript style guide.",
+        "Use camelCase for variables and PascalCase for components."
+      ]
+    },
+    {
+      "description": "Frontend development conventions",
+      "technology_stack": ["Next.js", "React", "Styled-components"],
+      "rules": [
+        "Use Next.js for routing and page creation.",
+        "Use Redux for state management.",
+        "Write CSS using Styled-components.",
+        "Dynamic import for lazy-loading components."
+      ]
+    },
+    {
+      "description": "Backend development with Python and FastAPI",
+      "technology_stack": ["Python", "FastAPI"],
+      "rules": [
+        "Implement RESTful services using FastAPI.",
+        "Use Pydantic for data validation and type annotation.",
+        "Handle asynchronous operations with async/await.",
+        "Organize code into routers and models."
+      ]
+    },
+    {
+      "description": "Testing practices",
+      "technology_stack": ["Jest", "React Testing Library"],
+      "rules": [
+        "Target at least 80% test coverage.",
+        "Write unit and snapshot tests for components.",
+        "Mock API calls in tests."
+      ]
+    },
+    {
+      "description": "Performance optimization",
+      "technology_stack": ["Next.js", "React"],
+      "rules": [
+        "Use React.memo for memoization.",
+        "Optimize useEffect hooks and limit re-renders.",
+        "Implement code splitting via dynamic imports."
+      ]
+    }
+  ]
+}
+Here is a list of updated documentation for the chosen technologies:
+
+Next.js: https://nextjs.org/docs
+React: https://react.dev/
+TypeScript: https://www.typescriptlang.org/docs/
+Redux: https://redux.js.org/
+Styled-components: https://styled-components.com/docs
+Jest: https://jestjs.io/docs/getting-started
+React Testing Library: https://testing-library.com/docs/react-testing-library/intro/
+FastAPI: https://fastapi.tiangolo.com/
+Python: https://docs.python.org/3/
+
+Always lookup the documentation of the technologies used in the project, to find the best practices and right versions to use.
+In the document @Prosjekt.txt in the root catalog, you will find the project description and other relevant information on how to build the project.

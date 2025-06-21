@@ -1,0 +1,133 @@
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { activitiesApi, errorHandler } from '../../utils/api';
+
+// Definer typer
+export interface Activity {
+  id: number;
+  name: string;
+  type: string;
+  start_time: string;
+  duration: number;
+  distance: number;
+  calories: number;
+  average_hr: number;
+  max_hr: number;
+  training_effect: number;
+  vo2_max: number;
+}
+
+interface ActivitiesState {
+  items: Activity[];
+  status: 'idle' | 'loading' | 'succeeded' | 'failed';
+  error: string | null;
+  lastSync: string | null;
+}
+
+// Initial state
+const initialState: ActivitiesState = {
+  items: [],
+  status: 'idle',
+  error: null,
+  lastSync: null
+};
+
+// Async thunks
+export const fetchActivities = createAsyncThunk(
+  'activities/fetchActivities',
+  async (_, { rejectWithValue }) => {
+    try {
+      const response = await activitiesApi.getActivities();
+      return response.activities || [];
+    } catch (error) {
+      const errorInfo = errorHandler(error);
+      return rejectWithValue(errorInfo.error);
+    }
+  }
+);
+
+export const fetchActivitiesByDateRange = createAsyncThunk(
+  'activities/fetchActivitiesByDateRange',
+  async ({ startDate, endDate, forceRefresh = false }: { 
+    startDate: string; 
+    endDate: string; 
+    forceRefresh?: boolean;
+  }, { rejectWithValue }) => {
+    try {
+      const response = await activitiesApi.getActivitiesByDateRange(startDate, endDate, forceRefresh);
+      return response.activities || [];
+    } catch (error) {
+      const errorInfo = errorHandler(error);
+      return rejectWithValue(errorInfo.error);
+    }
+  }
+);
+
+export const syncHistoricalData = createAsyncThunk(
+  'activities/syncHistoricalData',
+  async (startYear: number, { rejectWithValue }) => {
+    try {
+      const response = await activitiesApi.syncHistoricalData(startYear);
+      return response;
+    } catch (error) {
+      const errorInfo = errorHandler(error);
+      return rejectWithValue(errorInfo.error);
+    }
+  }
+);
+
+// Slice
+const activitiesSlice = createSlice({
+  name: 'activities',
+  initialState,
+  reducers: {
+    clearError: (state) => {
+      state.error = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      // fetchActivities
+      .addCase(fetchActivities.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
+      .addCase(fetchActivities.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        state.items = action.payload;
+        state.lastSync = new Date().toISOString();
+      })
+      .addCase(fetchActivities.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string || 'Kunne ikke hente aktiviteter';
+      })
+      // fetchActivitiesByDateRange
+      .addCase(fetchActivitiesByDateRange.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
+      .addCase(fetchActivitiesByDateRange.fulfilled, (state, action) => {
+        state.status = 'succeeded';
+        state.items = action.payload;
+      })
+      .addCase(fetchActivitiesByDateRange.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string || 'Kunne ikke hente aktiviteter for perioden';
+      })
+      // syncHistoricalData
+      .addCase(syncHistoricalData.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
+      .addCase(syncHistoricalData.fulfilled, (state) => {
+        state.status = 'succeeded';
+        state.lastSync = new Date().toISOString();
+      })
+      .addCase(syncHistoricalData.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string || 'Kunne ikke synkronisere historiske data';
+      });
+  },
+});
+
+export const { clearError } = activitiesSlice.actions;
+export default activitiesSlice.reducer; 
