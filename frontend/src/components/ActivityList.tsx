@@ -83,17 +83,17 @@ const ActivityList = () => {
               {
                 key: 'distance',
                 label: 'Distanse',
-                value: `${activity.distance.toFixed(2)} km`
+                value: `${(activity.distance || 0).toFixed(2)} km`
               },
               {
                 key: 'duration',
                 label: 'Varighet',
-                value: `${Math.round(activity.duration)} min`
+                value: `${Math.round(activity.duration || 0)} min`
               },
               {
                 key: 'calories',
                 label: 'Kalorier',
-                value: activity.calories.toString()
+                value: (activity.calories || 0).toString()
               },
               ...(activity.average_hr > 0 ? [{
                 key: 'average_hr',

@@ -7,13 +7,18 @@ export interface Activity {
   name: string;
   type: string;
   start_time: string;
-  duration: number;
   distance: number;
+  duration: number;
   calories: number;
   average_hr: number;
-  max_hr: number;
-  training_effect: number;
   vo2_max: number;
+  // Legger til nye, valgfrie felter for mer detaljert analyse
+  activityType?: {
+    typeKey: string;
+  };
+  averageSpeed?: number;
+  averageHR?: number;
+  startTime?: string; // Sannsynligvis samme som start_time, men for å være sikker
 }
 
 interface ActivitiesState {

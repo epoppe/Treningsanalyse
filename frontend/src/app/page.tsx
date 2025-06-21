@@ -8,6 +8,7 @@ import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
 import ActivityFilters from '../components/ActivityFilters';
 import DataSyncPanel from '../components/DataSyncPanel';
+import RunningEconomyTable from '../components/RunningEconomyTable';
 
 const MainContainer = styled.div`
   max-width: 1200px;
@@ -79,6 +80,7 @@ export default function Home() {
       <DataSyncPanel />
       <ActivityFilters onFilterChange={handleFilterChange} activityTypes={activityTypes} />
       <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />
+      <RunningEconomyTable activities={filteredActivities} />
       <ActivityList />
     </MainContainer>
   );
