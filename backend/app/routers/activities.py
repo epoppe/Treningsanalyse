@@ -1,34 +1,62 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from ..dependencies import get_data_storage, get_garmin_client
-from ..storage import DataStorage
+from ..dependencies import get_db
+from ..database.models.activity import Activity
 from ..services.garmin_client import GarminClient
+from ..storage import DataStorage
+from ..dependencies import get_data_storage, get_garmin_client
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
 
 router = APIRouter()
 
-class ActivityResponse(BaseModel):
-    activities: List[Dict[str, Any]]
-    count: int
+def enrich_activity_data(activity: Activity) -> dict:
+    activity_dict = activity.to_dict()
+    
+    # Konverter pace (min/km) til speed (m/s) hvis det finnes
+    avg_pace = activity_dict.get('average_pace')
+    if avg_pace and avg_pace > 0:
+        activity_dict['averageSpeed'] = (1000 / (avg_pace * 60))
+    else:
+        # Hvis ikke pace, sjekk om speed finnes og bruk den
+        activity_dict['averageSpeed'] = activity_dict.get('average_speed', 0)
 
-@router.get("/activities", response_model=ActivityResponse)
-async def read_activities(
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
-    storage: DataStorage = Depends(get_data_storage)
-):
-    """Henter lagrede aktiviteter, med valgfri filtrering på dato."""
+    # Legg til camelCase for HR
+    activity_dict['averageHR'] = activity_dict.get('average_hr')
+
+    # Korrekt håndtering av activityType
+    if activity.activity_type:
+        activity_dict["activityType"] = {
+            "typeKey": activity.activity_type.type_key,
+            "parentTypeKey": activity.activity_type.parent_type_key
+        }
+    else:
+        activity_dict["activityType"] = None
+        
+    return activity_dict
+
+@router.get("", response_model=List[Dict[str, Any]])
+def get_activities(db: Session = Depends(get_db)):
+    """
+    Retrieve all activities from the database and enrich them.
+    """
     try:
-        activities = storage.get_activities(start_date=start_date, end_date=end_date)
-        return {"activities": activities, "count": len(activities)}
+        activities = db.query(Activity).order_by(Activity.start_time.desc()).all()
+        
+        # Bruk den robuste berikingsfunksjonen
+        enriched_activities = [enrich_activity_data(act) for act in activities]
+        
+        return enriched_activities
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Legg til logging for feilsøking
+        print(f"Error fetching activities: {e}")
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
-@router.get("/activities/{activity_id}/details", response_model=List[Dict[str, Any]])
+@router.get("/{activity_id}/details", response_model=List[Dict[str, Any]])
 async def read_activity_details(
     activity_id: int,
     storage: DataStorage = Depends(get_data_storage),

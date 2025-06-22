@@ -589,14 +589,32 @@ class DataStorage:
         return final_df.to_dict('records')
 
     def get_activities(self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
-        return self._get_data_internal(
-            df_attr_name='activities_df',
-            id_column='id',
-            start_date_col='start_time', 
-            end_date_col='start_time',
-            start_date_val=start_date,
-            end_date_val=end_date
-        )
+        """
+        Leser alle JSON-filer med aktiviteter fra data-mappen.
+        Filtrering på dato er ikke implementert for denne JSON-leseren.
+        """
+        all_activities = []
+        json_files = [f for f in os.listdir(self.data_dir) if f.endswith('.json') and not f.startswith('sleep')]
+        
+        logger.info(f"Fant {len(json_files)} potensielle JSON-filer for aktiviteter.")
+
+        for filename in json_files:
+            file_path = os.path.join(self.data_dir, filename)
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    # Noen filer er en liste direkte, andre er et objekt med en liste
+                    if isinstance(data, list):
+                        all_activities.extend(data)
+                    elif isinstance(data, dict) and 'activities' in data and isinstance(data['activities'], list):
+                        all_activities.extend(data['activities'])
+            except json.JSONDecodeError:
+                logger.warning(f"Kunne ikke lese JSON fra {file_path}. Filen kan være korrupt eller tom.")
+            except Exception as e:
+                logger.error(f"En uventet feil oppstod ved lesing av {file_path}: {e}")
+        
+        logger.info(f"Lastet totalt {len(all_activities)} aktiviteter fra JSON-filer.")
+        return all_activities
 
     def get_sleep_data(self, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
         return self._get_data_internal(

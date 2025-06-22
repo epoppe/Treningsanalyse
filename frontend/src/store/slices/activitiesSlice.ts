@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { activitiesApi, errorHandler } from '../../utils/api';
+import { PayloadAction } from '@reduxjs/toolkit';
 
 // Definer typer
 export interface Activity {
@@ -10,9 +11,8 @@ export interface Activity {
   distance: number;
   duration: number;
   calories: number;
-  average_hr: number;
   vo2_max: number;
-  // Legger til nye, valgfrie felter for mer detaljert analyse
+  // Nye, valgfrie felter for mer detaljert analyse (bruker konsekvent camelCase)
   activityType?: {
     typeKey: string;
   };
@@ -37,12 +37,13 @@ const initialState: ActivitiesState = {
 };
 
 // Async thunks
-export const fetchActivities = createAsyncThunk(
+export const fetchActivities = createAsyncThunk<Activity[], void, { rejectValue: string }>(
   'activities/fetchActivities',
   async (_, { rejectWithValue }) => {
     try {
       const response = await activitiesApi.getActivities();
-      return response.activities || [];
+      // Backend sender nå en flat liste, så vi returnerer den direkte.
+      return response;
     } catch (error) {
       const errorInfo = errorHandler(error);
       return rejectWithValue(errorInfo.error);
@@ -96,7 +97,7 @@ const activitiesSlice = createSlice({
         state.status = 'loading';
         state.error = null;
       })
-      .addCase(fetchActivities.fulfilled, (state, action) => {
+      .addCase(fetchActivities.fulfilled, (state, action: PayloadAction<Activity[]>) => {
         state.status = 'succeeded';
         state.items = action.payload;
         state.lastSync = new Date().toISOString();

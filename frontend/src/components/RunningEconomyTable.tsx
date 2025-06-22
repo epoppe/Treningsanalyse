@@ -44,19 +44,25 @@ interface RunningEconomyTableProps {
 
 const RunningEconomyTable = ({ activities }: RunningEconomyTableProps) => {
   const runningActivities = activities
-    .filter(a => a.activityType?.typeKey === 'running' && a.averageSpeed && a.averageHR)
+    .filter(a => a.type?.toLowerCase().includes('running') && a.type?.toLowerCase() !== 'treadmill_running')
     .map(activity => {
-      const averageSpeedKmh = activity.averageSpeed * 3.6;
-      const runningEconomy = activity.averageHR > 0 
-        ? (averageSpeedKmh / activity.averageHR) * 100 
-        : 0;
-      
+      if (activity.averageSpeed && activity.averageSpeed > 0 && activity.averageHR && activity.averageHR > 0) {
+        const averageSpeedKmh = activity.averageSpeed * 3.6;
+        const runningEconomy = (averageSpeedKmh / activity.averageHR) * 100;
+        
+        return {
+          ...activity,
+          averageSpeedKmh,
+          runningEconomy
+        };
+      }
       return {
         ...activity,
-        averageSpeedKmh,
-        runningEconomy
+        averageSpeedKmh: 0,
+        runningEconomy: 0
       };
     })
+    .filter(a => a.runningEconomy > 0)
     .sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
 
   if (runningActivities.length === 0) {

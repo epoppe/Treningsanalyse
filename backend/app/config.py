@@ -13,6 +13,7 @@ load_dotenv(dotenv_path=ENV_FILE)
 
 # Standard data-mappe (relativt til backend-mappen hvis ikke absolutt sti er gitt i .env)
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
+DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATA_DIR.absolute() / 'treningsanalyse.db'}"
 
 # Sett opp token-mappe
 TOKEN_DIR = BACKEND_DIR / "tokens"
@@ -21,6 +22,9 @@ os.makedirs(token_dir_str, exist_ok=True)
 # print(f"Token-mappe opprettet: {token_dir_str}") # Kan kommenteres ut for produksjon
 
 class Settings(BaseSettings):
+    # Database URL
+    DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
+    
     # Garmin Connect konfigurasjon
     GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "").strip('"')
     GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "").strip('"')

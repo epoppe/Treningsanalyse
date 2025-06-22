@@ -205,44 +205,58 @@ class GarminClient:
         return self._is_authenticated and hasattr(garth.client, 'oauth1_token') and garth.client.oauth1_token is not None
 
     async def get_activities(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
-        """Henter aktiviteter fra Garmin Connect."""
+        """Henter aktiviteter fra Garmin Connect med paginering."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente aktiviteter.")
             return []
         
-        try:
-            logger.info(f"Henter aktiviteter fra {start_date} til {end_date} med garth.connectapi")
-            
-            activities = await asyncio.to_thread(
-                garth.connectapi,
-                "/activitylist-service/activities/search/activities",
-                params={
-                    "startDate": start_date.strftime("%Y-%m-%d"),
-                    "endDate": end_date.strftime("%Y-%m-%d"),
-                    "limit": 100
-                }
-            )
-            
-            if activities and isinstance(activities, list):
-                logger.info(f"Hentet {len(activities)} aktiviteter fra Garmin Connect.")
-                logger.debug(f"Aktivitetsdata: {json.dumps(activities[:2], cls=DateTimeEncoder, indent=2)}")
-                return activities
-            else:
-                logger.info("Ingen aktiviteter funnet i det angitte tidsrommet.")
-                return []
+        all_activities = []
+        start_index = 0
+        limit = 100
+        
+        while True:
+            try:
+                logger.info(f"Henter aktiviteter fra {start_date.date()} til {end_date.date()}, start: {start_index}, limit: {limit}")
                 
-        except AssertionError as e:
-            if "OAuth1 token is required" in str(e):
-                logger.error("OAuth1 token mangler. Autentisering kreves.")
-                self._is_authenticated = False
-            else:
-                logger.error(f"Assertion error under API-kall: {e}")
-            return []
+                activities_page = await asyncio.to_thread(
+                    garth.connectapi,
+                    "/activitylist-service/activities/search/activities",
+                    params={
+                        "startDate": start_date.strftime("%Y-%m-%d"),
+                        "endDate": end_date.strftime("%Y-%m-%d"),
+                        "start": str(start_index),
+                        "limit": str(limit)
+                    }
+                )
+                
+                if not activities_page or not isinstance(activities_page, list):
+                    logger.info(f"Ingen flere aktiviteter funnet. Stopper paginering. Totalt hentet: {len(all_activities)}.")
+                    break
+                
+                all_activities.extend(activities_page)
+                logger.info(f"Hentet {len(activities_page)} aktiviteter. Totalt så langt: {len(all_activities)}.")
+                
+                if len(activities_page) < limit:
+                    logger.info("Dette var siste side med aktiviteter.")
+                    break
+                
+                start_index += limit
+                await asyncio.sleep(1) # Liten pause for å være snill mot Garmin sine servere
+
+            except AssertionError as e:
+                if "OAuth1 token is required" in str(e):
+                    logger.error("OAuth1 token mangler. Autentisering kreves.")
+                    self._is_authenticated = False
+                else:
+                    logger.error(f"Assertion error under API-kall: {e}")
+                return [] # Avbryt ved feil
             
-        except Exception as e:
-            logger.error(f"Feil under API-kall: {e}")
-            logger.debug(traceback.format_exc())
-            return []
+            except Exception as e:
+                logger.error(f"Feil under API-kall: {e}")
+                logger.debug(traceback.format_exc())
+                return [] # Avbryt ved feil
+
+        return all_activities
 
     async def get_activity_details(self, activity_id: str) -> Optional[bytes]:
         """Laster ned detaljerte data for en enkelt aktivitet i .fit-format."""

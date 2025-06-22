@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Activity } from '../store/slices/activitiesSlice';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -36,7 +37,7 @@ export interface SleepResponse {
 export const activitiesApi = {
   // Hent alle aktiviteter
   getActivities: async (forceRefresh: boolean = false) => {
-    const response = await api.get<ActivityResponse>(`/activities${forceRefresh ? '?force_refresh=true' : ''}`);
+    const response = await api.get<Activity[]>(`/activities${forceRefresh ? '?force_refresh=true' : ''}`);
     return response.data;
   },
 
@@ -58,6 +59,12 @@ export const activitiesApi = {
   // Start synkronisering av historiske data
   syncHistoricalData: async (startYear: number) => {
     const response = await api.post<ApiResponse<any>>(`/sync/historical/${startYear}`);
+    return response.data;
+  },
+
+  // Start synkronisering fra JSON til DB
+  syncDatabase: async () => {
+    const response = await api.post<any>('/sync/database');
     return response.data;
   },
 

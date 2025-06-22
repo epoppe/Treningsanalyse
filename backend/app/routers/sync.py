@@ -2,12 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from datetime import date, datetime, timezone
 import logging
+from sqlalchemy.orm import Session
+import pytz
+import asyncio
+from fastapi import status
 
 from ..services.garmin_client import GarminClient
 from ..storage import DataStorage
 from ..services.sync_service import SyncService
-from ..dependencies import get_garmin_client, get_data_storage
+from ..dependencies import get_garmin_client, get_data_storage, get_db
+from ..database.session import SessionLocal
 from garth.exc import GarthException
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -16,9 +22,33 @@ class SyncRequest(BaseModel):
     start_date: date
     end_date: date
 
-async def run_sync(sync_service: SyncService, start_date: datetime, end_date: datetime):
-    """Hjelpefunksjon for å kjøre synkroniseringen i bakgrunnen."""
-    await sync_service.sync_activities(start_date, end_date)
+async def run_sync(garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """
+    Hjelpefunksjon for å kjøre synkroniseringen i bakgrunnen med sin egen DB-sesjon.
+    """
+    db_session = None
+    try:
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        await sync_service.sync_activities(start_date, end_date)
+    except Exception as e:
+        logger.critical(f"En feil oppstod i bakgrunnssynken: {e}", exc_info=True)
+    finally:
+        if db_session:
+            db_session.close()
+
+@router.post("/sync/database", status_code=200)
+def trigger_db_sync(
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """
+    Synkroniserer data fra lokale JSON-filer til databasen.
+    """
+    # GarminClient er ikke nødvendig her, så vi kan sette den til None
+    sync_service = SyncService(garmin_client=None, storage=storage, db_session=db)
+    result = sync_service.sync_json_to_db()
+    return result
 
 @router.post("/sync/activities", status_code=202)
 async def trigger_activity_sync(
@@ -32,8 +62,6 @@ async def trigger_activity_sync(
     """
     logger.info(f"Mottok synkroniseringsforespørsel med datoer: start_date={request.start_date}, end_date={request.end_date}")
     
-    sync_service = SyncService(garmin_client, storage)
-    
     # Konverter date til datetime med UTC tidssone for intern bruk
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
@@ -41,7 +69,8 @@ async def trigger_activity_sync(
     logger.info(f"Konverterte datoer til datetime: start_datetime={start_datetime}, end_datetime={end_datetime}")
 
     # Legg til synkroniseringsjobben i bakgrunnen
-    background_tasks.add_task(run_sync, sync_service, start_datetime, end_datetime)
+    # Service blir nå opprettet inne i run_sync med egen db-sesjon
+    background_tasks.add_task(run_sync, garmin_client, storage, start_datetime, end_datetime)
     
     return {"message": "Synkronisering av aktiviteter er startet i bakgrunnen."}
 
@@ -104,3 +133,44 @@ async def sync_historical_data(
     except Exception as e:
         logger.error(f"Uventet feil under historisk synkronisering for {start_year}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"En intern feil oppstod under historisk synkronisering: {str(e)}")
+
+@router.post("/activities", status_code=status.HTTP_202_ACCEPTED)
+async def sync_activities_endpoint(
+    sync_request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    garmin_client: GarminClient = Depends(get_garmin_client),
+):
+    start_date = sync_request.start_date
+    end_date = sync_request.end_date
+    
+    logger.info(f"Mottok synkroniseringsforespørsel med datoer: start_date={start_date}, end_date={end_date}")
+
+    # Konverter til datetime-objekter med tidssone for Garmin-klienten
+    start_datetime = pytz.utc.localize(datetime.combine(start_date, datetime.min.time()))
+    end_datetime = pytz.utc.localize(datetime.combine(end_date, datetime.max.time()))
+    logger.info(f"Konverterte datoer til datetime: start_datetime={start_datetime}, end_datetime={end_datetime}")
+
+    def run_sync():
+        db_session = SessionLocal()
+        try:
+            # DataStorage-instansen trengs, men er ikke lenger primærlageret for synk mot DB.
+            # Gi den en gyldig mappe for å unngå feil ved initialisering.
+            storage = DataStorage(data_dir=settings.DATA_DIR) 
+            sync_service = SyncService(garmin_client, storage, db_session)
+            asyncio.run(sync_service.sync_activities(start_datetime, end_datetime))
+        finally:
+            db_session.close()
+
+    background_tasks.add_task(run_sync)
+    
+    return {"message": "Activity synchronization started in the background."}
+
+@router.post("/sync-json-to-db", status_code=status.HTTP_200_OK)
+def sync_json_to_db_endpoint(db: Session = Depends(get_db)):
+    """
+    Et endepunkt for manuelt å trigge synkronisering fra JSON-filer til databasen.
+    """
+    # Denne funksjonen er nå mindre relevant, men beholdes for eventuell fremtidig bruk.
+    sync_service = SyncService(None, get_data_storage(), db) # GarminClient er ikke nødvendig her
+    result = sync_service.sync_json_to_db()
+    return result

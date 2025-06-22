@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from dotenv import load_dotenv
@@ -8,6 +8,11 @@ from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
 from .routers import garmin_data, sync, activities, sleep, analysis
+from .database.models.activity import Base
+from .database.session import engine as db_engine, SessionLocal
+from .database.models import activity as activity_model
+from .dependencies import get_db, get_garmin_client, get_data_storage
+from .services.sync_service import SyncService
 
 # Konfigurer logging 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -47,24 +52,35 @@ async def lifespan(app: FastAPI):
     app.state.data_storage = DataStorage(settings.DATA_DIR)
     logger.info("DataStorage initialisert.")
     
+    # Opprett databasetabeller
+    Base.metadata.create_all(bind=db_engine)
+    logger.info("Databasetabeller opprettet/verifisert.")
+    
     yield
     logger.info("Stopper applikasjonen...")
 
 # Opprett FastAPI app
 app = FastAPI(lifespan=lifespan)
 
-# Legg til CORS middleware
+# Konfigurer CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",  # Frontend-adressen
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Inkluder alle routere med korrekt prefix
-app.include_router(activities.router, prefix="/api", tags=["Aktiviteter"])
+app.include_router(activities.router, prefix="/api/activities", tags=["Aktiviteter"])
 app.include_router(garmin_data.router, prefix="/api", tags=["Garmin Data"])
-app.include_router(sync.router, prefix="/api", tags=["Synkronisering"])
-app.include_router(sleep.router, prefix="/api", tags=["Søvn"])
-app.include_router(analysis.router, prefix="/api", tags=["Analyse"])
+app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
+app.include_router(sleep.router, prefix="/api/sleep", tags=["Søvn"])
+app.include_router(analysis.router, prefix="/api", tags=["analysis"])
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the Treningsanalyse API"}
