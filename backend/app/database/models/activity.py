@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from .base import Base
 
@@ -16,6 +16,8 @@ class Activity(Base):
     average_hr = Column(Float)
     average_speed = Column(Float)
     average_pace = Column(Float)
+    average_running_cadence = Column(Float)
+    details = Column(JSON, nullable=True)
     
     activity_type_id = Column(Integer, ForeignKey('activity_types.id'))
     activity_type = relationship("ActivityType")

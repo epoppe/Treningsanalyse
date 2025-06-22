@@ -61,7 +61,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
     );
   }
 
-  const dates = activities.map(a => parseISO(a.start_time));
+  const dates = activities.map(a => parseISO(a.startTimeLocal));
   const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
   const groupByMonth = yearSpan >= 2;
 
@@ -71,7 +71,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
   if (groupByMonth) {
     // Først, grupper eksisterende data per måned
     const monthlyDataMap = activities.reduce((acc, activity) => {
-      const date = new Date(activity.start_time);
+      const date = new Date(activity.startTimeLocal);
       const year = getYear(date);
       const month = getMonth(date);
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -106,7 +106,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
   } else {
     // Først, grupper eksisterende data per uke
     const weeklyDataMap = activities.reduce((acc, activity) => {
-      const date = new Date(activity.start_time);
+      const date = new Date(activity.startTimeLocal);
       const week = getISOWeek(date);
       const year = getYear(date);
       const weekKey = `${year}-W${String(week).padStart(2, '0')}`;

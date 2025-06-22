@@ -9,6 +9,8 @@ import json
 from io import BytesIO
 import fitparse
 import zipfile
+from sqlalchemy.orm import Session
+from .database.models.activity import Activity
 
 logger = logging.getLogger(__name__)
 
@@ -694,3 +696,9 @@ class DataStorage:
         details_df.replace({np.nan: None}, inplace=True)
         
         return details_df.to_dict('records')
+
+    def get_existing_activity_ids(self, db: Session) -> set:
+        """Henter alle eksisterende aktivitets-ID-er fra databasen for å unngå duplikater."""
+        existing_ids = {str(result[0]) for result in db.query(Activity.id).all()}
+        logger.info(f"Fant {len(existing_ids)} eksisterende aktivitets-IDer i databasen.")
+        return existing_ids

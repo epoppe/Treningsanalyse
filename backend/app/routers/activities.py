@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Response
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from sqlalchemy.orm import Session, joinedload
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from ..dependencies import get_db
@@ -14,46 +14,76 @@ import pandas as pd
 
 router = APIRouter()
 
-def enrich_activity_data(activity: Activity) -> dict:
-    activity_dict = activity.to_dict()
-    
-    # Konverter pace (min/km) til speed (m/s) hvis det finnes
-    avg_pace = activity_dict.get('average_pace')
-    if avg_pace and avg_pace > 0:
-        activity_dict['averageSpeed'] = (1000 / (avg_pace * 60))
-    else:
-        # Hvis ikke pace, sjekk om speed finnes og bruk den
-        activity_dict['averageSpeed'] = activity_dict.get('average_speed', 0)
+class ActivityTypeResponse(BaseModel):
+    typeKey: Optional[str] = None
+    parentTypeKey: Optional[str] = None
 
-    # Legg til camelCase for HR
-    activity_dict['averageHR'] = activity_dict.get('average_hr')
+class ActivityResponse(BaseModel):
+    activityId: str
+    activityName: Optional[str]
+    startTimeLocal: datetime
+    distance: Optional[float]
+    duration: Optional[float]
+    calories: Optional[float]
+    averageHR: Optional[float]
+    averageSpeed: Optional[float]
+    averagePace: Optional[float]
+    averageRunningCadenceInStepsPerMinute: Optional[float]
+    vO2MaxValue: Optional[float]
+    activityType: Optional[ActivityTypeResponse]
+    avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
 
-    # Korrekt håndtering av activityType
-    if activity.activity_type:
-        activity_dict["activityType"] = {
-            "typeKey": activity.activity_type.type_key,
-            "parentTypeKey": activity.activity_type.parent_type_key
-        }
-    else:
-        activity_dict["activityType"] = None
-        
-    return activity_dict
-
-@router.get("", response_model=List[Dict[str, Any]])
+@router.get("", response_model=List[ActivityResponse])
 def get_activities(db: Session = Depends(get_db)):
     """
-    Retrieve all activities from the database and enrich them.
+    Retrieve all activities from the database, and format them for the API response.
     """
     try:
-        activities = db.query(Activity).order_by(Activity.start_time.desc()).all()
+        # Eager load the related activity_type to avoid N+1 query problem
+        activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).all()
         
-        # Bruk den robuste berikingsfunksjonen
-        enriched_activities = [enrich_activity_data(act) for act in activities]
-        
-        return enriched_activities
+        response_data = []
+        for act in activities:
+            # Construct the nested activity type object
+            act_type_data = None
+            if act.activity_type:
+                act_type_data = {
+                    "typeKey": act.activity_type.type_key,
+                    "parentTypeKey": act.activity_type.parent_type_key
+                }
+            elif act.type:
+                 # Fallback to the 'type' column if the relationship is not set
+                act_type_data = {"typeKey": act.type}
+
+            # Calculate average stride length
+            avg_stride_length = None
+            if act.average_speed and act.average_running_cadence and act.average_running_cadence > 0:
+                # average_speed is in m/s, cadence is in steps/min.
+                # Convert speed to m/min: average_speed * 60
+                # Stride length (m/step) = (m/min) / (steps/min)
+                avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
+
+            # Manually construct the dictionary for the response, ensuring correct field names
+            response_data.append({
+                "activityId": act.id,
+                "activityName": act.name,
+                "startTimeLocal": act.start_time,
+                "distance": act.distance,
+                "duration": act.duration,
+                "calories": act.calories,
+                "averageHR": act.average_hr,
+                "averageSpeed": act.average_speed,
+                "averagePace": act.average_pace,
+                "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
+                "vO2MaxValue": act.vo2_max,
+                "activityType": act_type_data,
+                "avgStrideLength": avg_stride_length
+            })
+
+        return response_data
     except Exception as e:
-        # Legg til logging for feilsøking
-        print(f"Error fetching activities: {e}")
+        import traceback
+        traceback.print_exc() # This will print the error to the backend console
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 @router.get("/{activity_id}/details", response_model=List[Dict[str, Any]])
@@ -91,7 +121,7 @@ async def read_activity_details(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
 
-@router.get("/activities/{activity_id}/charts/{chart_type}")
+@router.get("/{activity_id}/charts/{chart_type}")
 def get_activity_chart(
     activity_id: int, 
     chart_type: str, 

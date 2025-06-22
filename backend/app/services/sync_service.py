@@ -3,9 +3,13 @@ from typing import List, Tuple, Optional
 import asyncio
 import logging
 from sqlalchemy.orm import Session
+import json
+import fitparse
+from io import BytesIO
+from fitparse.utils import FitHeaderError
 
 from .garmin_client import GarminClient
-from ..storage import DataStorage
+from ..storage import DataStorage, DateTimeEncoder
 from ..database.models.activity import Activity, ActivityType
 
 logger = logging.getLogger(__name__)
@@ -20,6 +24,29 @@ class SyncService:
         self.garmin_client = garmin_client
         self.storage = storage
         self.db = db_session
+
+    def _parse_fit_data(self, fit_data: bytes) -> Optional[dict]:
+        """Parser FIT-data og konverterer det til en JSON-serialiserbar ordbok."""
+        try:
+            fitfile = fitparse.FitFile(BytesIO(fit_data))
+            records = []
+            for record in fitfile.get_messages('record'):
+                record_data = {}
+                for data in record:
+                    if data.value is not None and not isinstance(data.value, str):
+                        # Konverterer enheter til strenger for å unngå serialiseringsfeil
+                        value = f"{data.value} {data.units}" if data.units else data.value
+                        record_data[data.name] = value
+                if record_data:
+                    records.append(record_data)
+            return {"records": records}
+        except FitHeaderError:
+            # Dette er en forventet feil for aktiviteter uten gyldig datafil.
+            logger.warning(f"Kunne ikke parse filen da den mangler gyldig FIT-header. Dette skjer ofte med manuelle aktiviteter. Innhold (start): {fit_data[:100]}")
+            return None
+        except Exception as e:
+            logger.error(f"En uventet feil oppstod under parsing av FIT-fil: {e}", exc_info=True)
+            return None
 
     def sync_json_to_db(self) -> dict:
         """
@@ -84,7 +111,8 @@ class SyncService:
                 average_hr=act_data.get('averageHR'),
                 average_speed=avg_speed,
                 average_pace=avg_pace,
-                activity_type_id=activity_type_obj.id if activity_type_obj else None
+                activity_type_id=activity_type_obj.id if activity_type_obj else None,
+                average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute')
             )
             self.db.add(new_activity)
             added_count += 1
@@ -157,16 +185,10 @@ class SyncService:
             activities_raw = await self.garmin_client.get_activities(start_date, end_date)
             
             # Filtrer bort duplikater basert på 'activityId'
-            seen_ids = set()
-            unique_activities = []
-            for act in activities_raw:
-                act_id = act.get('activityId')
-                if act_id and act_id not in seen_ids:
-                    unique_activities.append(act)
-                    seen_ids.add(act_id)
+            existing_ids = self.storage.get_existing_activity_ids(self.db)
 
             activities_to_save = [
-                act for act in unique_activities
+                act for act in activities_raw
                 if act.get('distance', 0) is not None and act.get('distance', 0) > 0
             ]
 
@@ -177,9 +199,6 @@ class SyncService:
 
             logger.info(f"Fant {len(activities_to_save)} aktiviteter hos Garmin. Lagrer til database.")
             
-            existing_ids = {result[0] for result in self.db.query(Activity.id).all()}
-            logger.info(f"DEBUG: Fant {len(existing_ids)} eksisterende ID-er i DB. Sample: {list(existing_ids)[:5]}")
-
             activity_type_cache = {}
             added_count = 0
 
@@ -192,6 +211,12 @@ class SyncService:
 
                 if not activity_id or activity_id in existing_ids:
                     continue
+
+                # Hent detaljerte data (FIT-fil)
+                details_json = None
+                fit_data = await self.garmin_client.get_activity_details(activity_id)
+                if fit_data:
+                    details_json = self._parse_fit_data(fit_data)
 
                 # Håndter ActivityType
                 activity_type_key = act_data.get('activityType', {}).get('typeKey')
@@ -226,7 +251,9 @@ class SyncService:
                     average_hr=act_data.get('averageHR'),
                     average_speed=avg_speed,
                     average_pace=avg_pace,
-                    activity_type_id=activity_type_obj.id if activity_type_obj else None
+                    activity_type_id=activity_type_obj.id if activity_type_obj else None,
+                    average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
+                    details=details_json
                 )
                 self.db.add(new_activity)
                 added_count += 1

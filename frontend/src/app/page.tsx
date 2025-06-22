@@ -37,7 +37,10 @@ export default function Home() {
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
 
-  const activityTypes = useMemo(() => Array.from(new Set(activities.map(a => a.type))), [activities]);
+  const activityTypes = useMemo(() => {
+    const types = activities.map(a => a.activityType?.typeKey).filter(Boolean);
+    return Array.from(new Set(types as string[]));
+  }, [activities]);
 
   useEffect(() => {
     if (status === 'idle') {
@@ -53,15 +56,15 @@ export default function Home() {
     let tempActivities = [...activities];
 
     if (filters.type && filters.type !== 'all') {
-      tempActivities = tempActivities.filter(a => a.type === filters.type);
+      tempActivities = tempActivities.filter(a => a.activityType?.typeKey === filters.type);
     }
     if (filters.startDate) {
-      tempActivities = tempActivities.filter(a => new Date(a.start_time) >= new Date(filters.startDate));
+      tempActivities = tempActivities.filter(a => new Date(a.startTimeLocal) >= new Date(filters.startDate));
     }
     if (filters.endDate) {
       const endDate = new Date(filters.endDate);
       endDate.setDate(endDate.getDate() + 1);
-      tempActivities = tempActivities.filter(a => new Date(a.start_time) < endDate);
+      tempActivities = tempActivities.filter(a => new Date(a.startTimeLocal) < endDate);
     }
     setFilteredActivities(tempActivities);
   };

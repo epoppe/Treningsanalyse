@@ -73,11 +73,11 @@ const ActivityList = () => {
     <ActivityContainer>
       {activities.map((activity) => (
         <ActivityCard 
-          key={activity.id} 
+          key={activity.activityId} 
           className="hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => handleActivityClick(activity.id)}
+          onClick={() => handleActivityClick(parseInt(activity.activityId, 10))}
         >
-          <ActivityTitle>{activity.name}</ActivityTitle>
+          <ActivityTitle>{activity.activityName}</ActivityTitle>
           <ActivityDetails>
             {[
               {
@@ -95,15 +95,15 @@ const ActivityList = () => {
                 label: 'Kalorier',
                 value: (activity.calories || 0).toString()
               },
-              ...(activity.average_hr > 0 ? [{
+              ...(activity.averageHR > 0 ? [{
                 key: 'average_hr',
                 label: 'Snitt puls',
-                value: `${Math.round(activity.average_hr)} bpm`
+                value: `${Math.round(activity.averageHR)} bpm`
               }] : []),
-              ...(activity.vo2_max > 0 ? [{
+              ...(activity.vO2MaxValue > 0 ? [{
                 key: 'vo2_max',
                 label: 'VO2 Max',
-                value: Math.round(activity.vo2_max).toString()
+                value: Math.round(activity.vO2MaxValue).toString()
               }] : [])
             ].map(stat => (
               <Stat key={stat.key}>

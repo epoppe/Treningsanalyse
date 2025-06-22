@@ -1,91 +1,133 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSelector, useDispatch } from 'react-redux';
 import styled from 'styled-components';
-import { useSelector } from 'react-redux';
-import { subMonths, subYears } from 'date-fns';
-import { RootState } from '@/store';
-import WeeklyRunningAnalysis from '@/components/WeeklyRunningAnalysis';
-import RunningEconomyTable from '@/components/RunningEconomyTable';
-import DataSyncPanel from '@/components/DataSyncPanel';
+import { fetchActivities, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
+import { AppDispatch, RootState } from '../../store';
+import RunningEconomyTable from '../../components/RunningEconomyTable';
+import DataSyncPanel from '../../components/DataSyncPanel';
+import RunningEconomyChart from '../../components/RunningEconomyChart';
+import CadenceChart from '../../components/CadenceChart';
+import StrideLengthChart from '../../components/StrideLengthChart';
 
 const PageContainer = styled.div`
-  padding: 20px;
-  background-color: #1a1a1a;
-  color: #f0f0f0;
+  padding: 2rem;
+  background-color: #f4f7f6;
 `;
 
 const Title = styled.h1`
-  color: #f0f0f0;
+  color: #2c3e50;
+  margin-bottom: 2rem;
 `;
 
-const ButtonGroup = styled.div`
+const ButtonContainer = styled.div`
+  margin-bottom: 1rem;
   display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 0.5rem;
 `;
 
-const FilterButton = styled.button<{ $isActive: boolean }>`
-  background-color: ${props => props.$isActive ? '#007bff' : '#555'};
-  color: white;
-  border: none;
-  padding: 8px 12px;
+const Button = styled.button<{ $active: boolean }>`
+  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
+  color: ${props => (props.$active ? 'white' : '#2c3e50')};
+  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
+  padding: 0.5rem 1rem;
   border-radius: 4px;
   cursor: pointer;
+  transition: all 0.2s ease-in-out;
+
   &:hover {
-    background-color: ${props => props.$isActive ? '#0056b3' : '#666'};
+    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
   }
 `;
 
-const UkeanalysePage = () => {
-  const { items: activities } = useSelector((state: RootState) => state.activities);
-  const [filter, setFilter] = useState<'all' | '12m' | '3y' | '5y' | '10y'>('all');
+export default function RunningEconomyPage() {
+  const dispatch = useDispatch<AppDispatch>();
+  const activities = useSelector(selectAllActivities);
+  const status = useSelector(selectActivitiesStatus);
+  const [timeFilter, setTimeFilter] = useState('12m');
+
+  useEffect(() => {
+    if (status === 'idle') {
+      dispatch(fetchActivities());
+    }
+  }, [status, dispatch]);
 
   const filteredActivities = useMemo(() => {
-    if (filter === 'all') {
-      return activities;
-    }
-
     const now = new Date();
-    let startDate: Date;
+    let startDate = new Date();
 
-    switch (filter) {
+    switch (timeFilter) {
+      case '3m':
+        startDate.setMonth(now.getMonth() - 3);
+        break;
+      case '6m':
+        startDate.setMonth(now.getMonth() - 6);
+        break;
+      case 'ytd':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        break;
       case '12m':
-        startDate = subMonths(now, 12);
+        startDate.setFullYear(now.getFullYear() - 1);
         break;
       case '3y':
-        startDate = subYears(now, 3);
+        startDate.setFullYear(now.getFullYear() - 3);
         break;
-      case '5y':
-        startDate = subYears(now, 5);
-        break;
-      case '10y':
-        startDate = subYears(now, 10);
+      case 'all':
+        startDate = new Date(0); // Epoch
         break;
       default:
-        return activities;
+        startDate.setFullYear(now.getFullYear() - 1);
     }
+    
+    return activities.filter(a => new Date(a.startTimeLocal) >= startDate && a.activityType.typeKey.includes('running'));
+  }, [activities, timeFilter]);
 
-    return activities.filter(a => new Date(a.start_time) >= startDate);
-  }, [activities, filter]);
+  if (status === 'loading') {
+    return <PageContainer>Laster inn data...</PageContainer>;
+  }
+
+  if (status === 'failed') {
+    return <PageContainer>Klarte ikke hente data.</PageContainer>;
+  }
+
+  const runningActivities = filteredActivities.filter(
+    a => a.activityType.typeKey && a.activityType.typeKey.includes('running') && !a.activityType.typeKey.includes('treadmill')
+  );
 
   return (
     <PageContainer>
-      <DataSyncPanel />
       <Title>Løpsøkonomi</Title>
+      <DataSyncPanel />
+      
+      <ButtonContainer>
+        <Button $active={timeFilter === '3m'} onClick={() => setTimeFilter('3m')}>Siste 3 mnd</Button>
+        <Button $active={timeFilter === '6m'} onClick={() => setTimeFilter('6m')}>Siste 6 mnd</Button>
+        <Button $active={timeFilter === 'ytd'} onClick={() => setTimeFilter('ytd')}>År til dato</Button>
+        <Button $active={timeFilter === '12m'} onClick={() => setTimeFilter('12m')}>Siste 12 mnd</Button>
+        <Button $active={timeFilter === '3y'} onClick={() => setTimeFilter('3y')}>Siste 3 år</Button>
+        <Button $active={timeFilter === 'all'} onClick={() => setTimeFilter('all')}>All historikk</Button>
+      </ButtonContainer>
 
-      <ButtonGroup>
-        <FilterButton $isActive={filter === 'all'} onClick={() => setFilter('all')}>Alle data</FilterButton>
-        <FilterButton $isActive={filter === '12m'} onClick={() => setFilter('12m')}>Siste 12 mnd</FilterButton>
-        <FilterButton $isActive={filter === '3y'} onClick={() => setFilter('3y')}>Siste 3 år</FilterButton>
-        <FilterButton $isActive={filter === '5y'} onClick={() => setFilter('5y')}>Siste 5 år</FilterButton>
-        <FilterButton $isActive={filter === '10y'} onClick={() => setFilter('10y')}>Siste 10 år</FilterButton>
-      </ButtonGroup>
-
-      <WeeklyRunningAnalysis activities={filteredActivities} />
-      <RunningEconomyTable activities={filteredActivities} />
+      {runningActivities.length === 0 ? (
+        <p>Ingen løpedata tilgjengelig for valgt periode.</p>
+      ) : (
+        <>
+          <RunningEconomyChart
+            activities={runningActivities}
+            title="Løpsøkonomi"
+          />
+          <CadenceChart
+            activities={runningActivities}
+            title="Løpskadens"
+          />
+          <StrideLengthChart
+            activities={runningActivities}
+            title="Skrittlengde"
+          />
+          <RunningEconomyTable activities={runningActivities} />
+        </>
+      )}
     </PageContainer>
   );
-};
-
-export default UkeanalysePage; 
+} 

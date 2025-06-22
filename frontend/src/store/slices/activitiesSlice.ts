@@ -4,21 +4,23 @@ import { PayloadAction } from '@reduxjs/toolkit';
 
 // Definer typer
 export interface Activity {
-  id: number;
-  name: string;
-  type: string;
-  start_time: string;
-  distance: number;
-  duration: number;
-  calories: number;
-  vo2_max: number;
-  // Nye, valgfrie felter for mer detaljert analyse (bruker konsekvent camelCase)
-  activityType?: {
+  activityId: string;
+  activityName?: string;
+  activityType: {
     typeKey: string;
+    parentTypeKey?: string;
   };
-  averageSpeed?: number;
   averageHR?: number;
-  startTime?: string; // Sannsynligvis samme som start_time, men for å være sikker
+  averagePace?: number;
+  averageRunningCadenceInStepsPerMinute?: number;
+  averageSpeed?: number;
+  avgStrideLength?: number;
+  calories?: number;
+  distance?: number;
+  duration?: number;
+  startTimeLocal: string;
+  vO2MaxValue?: number;
+  details?: { [key: string]: any };
 }
 
 interface ActivitiesState {
@@ -136,4 +138,10 @@ const activitiesSlice = createSlice({
 });
 
 export const { clearError } = activitiesSlice.actions;
+
+// Selectors
+export const selectAllActivities = (state: { activities: ActivitiesState }) => state.activities.items;
+export const selectActivitiesStatus = (state: { activities: ActivitiesState }) => state.activities.status;
+export const selectActivitiesError = (state: { activities: ActivitiesState }) => state.activities.error;
+
 export default activitiesSlice.reducer; 
