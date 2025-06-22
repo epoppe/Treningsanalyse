@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import styled from 'styled-components';
 import { Activity } from '../store/slices/activitiesSlice';
-import { getISOWeek, startOfISOWeek, format, differenceInDays, startOfMonth } from 'date-fns';
+import { getISOWeek, startOfISOWeek, format, differenceInDays, startOfMonth, subMonths } from 'date-fns';
 
 const NoDataMessage = styled.div`
   background-color: #fff3cd;
@@ -52,6 +52,13 @@ const ChartHeader = styled.div`
   }
 `;
 
+const ToggleContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+`;
+
 interface WeeklyRunningAnalysisProps {
   activities: Activity[];
 }
@@ -76,8 +83,27 @@ const calculateLinearRegression = (data: { x: number; y: number }[]) => {
   return { slope, intercept };
 };
 
+const calculateMovingAverage = (data: any[], windowMonths: number) => {
+  return data.map((point, i, allPoints) => {
+    const pointDate = new Date(point.date);
+    const windowStartDate = subMonths(pointDate, windowMonths);
+    
+    const pointsInWindow = allPoints
+      .slice(0, i + 1)
+      .filter(p => new Date(p.date) >= windowStartDate && p.avgRunningEconomy !== null);
+      
+    if (pointsInWindow.length === 0) {
+      return null;
+    }
+    
+    const sum = pointsInWindow.reduce((acc, p) => acc + p.avgRunningEconomy, 0);
+    return sum / pointsInWindow.length;
+  });
+};
+
 const WeeklyRunningAnalysis = ({ activities }: WeeklyRunningAnalysisProps) => {
-  const [showTrend, setShowTrend] = useState(false);
+  const [showLinearTrend, setShowLinearTrend] = useState(false);
+  const [showMovingAverage, setShowMovingAverage] = useState(false);
   
   if (!Array.isArray(activities)) {
     return <AnalysisContainer>Venter på aktivitetsdata...</AnalysisContainer>;
@@ -170,12 +196,16 @@ const WeeklyRunningAnalysis = ({ activities }: WeeklyRunningAnalysisProps) => {
     .filter(d => d.y !== null);
 
   const { slope, intercept } = calculateLinearRegression(economyDataPoints);
+  const movingAverageValues = calculateMovingAverage(chartData, 6);
 
-  const dataWithTrend = chartData.map(d => {
-    const trendValue = slope * new Date(d.date).getTime() + intercept;
+  const dataWithTrends = chartData.map((d, index) => {
+    const x = new Date(d.date).getTime();
+    const linearTrendValue = slope * x + intercept;
+    
     return {
       ...d,
-      trend: trendValue,
+      linearTrend: linearTrendValue,
+      movingAverage: movingAverageValues[index],
     };
   });
 
@@ -191,13 +221,19 @@ const WeeklyRunningAnalysis = ({ activities }: WeeklyRunningAnalysisProps) => {
       <ChartWrapper>
         <ChartHeader>
           <ChartTitle>{chartTitle} Løpsøkonomi</ChartTitle>
-          <label>
-            <input type="checkbox" checked={showTrend} onChange={() => setShowTrend(!showTrend)} />
-            Vis trendlinje
-          </label>
+          <ToggleContainer>
+            <label>
+              <input type="checkbox" checked={showLinearTrend} onChange={() => setShowLinearTrend(!showLinearTrend)} />
+              Vis lineær trend
+            </label>
+            <label>
+              <input type="checkbox" checked={showMovingAverage} onChange={() => setShowMovingAverage(!showMovingAverage)} />
+              Vis 6 mnd glidende snitt
+            </label>
+          </ToggleContainer>
         </ChartHeader>
         <ResponsiveContainer width="100%" height="90%">
-          <LineChart data={dataWithTrend}>
+          <LineChart data={dataWithTrends}>
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="date" tickFormatter={(d) => format(new Date(d), dateFormat)} />
             <YAxis 
@@ -206,7 +242,7 @@ const WeeklyRunningAnalysis = ({ activities }: WeeklyRunningAnalysisProps) => {
             />
             <Tooltip 
               formatter={(value: number, name: string) => {
-                if (name === 'Løpsøkonomi' || name === 'Trend') {
+                if (name === 'Løpsøkonomi' || name === 'Lineær trend' || name === '6 mnd glidende snitt') {
                   return [value.toFixed(2), name];
                 }
                 return [value, name];
@@ -214,13 +250,23 @@ const WeeklyRunningAnalysis = ({ activities }: WeeklyRunningAnalysisProps) => {
             />
             <Legend />
             <Line type="monotone" dataKey="avgRunningEconomy" name="Løpsøkonomi" stroke="#8e44ad" dot={false} />
-            {showTrend && (
+            {showLinearTrend && (
               <Line 
                 type="monotone" 
-                dataKey="trend" 
-                name="Trend" 
+                dataKey="linearTrend" 
+                name="Lineær trend" 
                 stroke="#ff7300" 
                 strokeDasharray="5 5" 
+                dot={false} 
+              />
+            )}
+            {showMovingAverage && (
+              <Line 
+                type="monotone" 
+                dataKey="movingAverage" 
+                name="6 mnd glidende snitt" 
+                stroke="#27ae60" 
+                strokeDasharray="3 3" 
                 dot={false} 
               />
             )}
