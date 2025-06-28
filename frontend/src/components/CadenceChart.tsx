@@ -52,6 +52,7 @@ const Button = styled.button<{ $active: boolean }>`
 interface CadenceChartProps {
   activities: Activity[];
   title: string;
+  timeFilter?: string;
 }
 
 const CustomAxisTick = ({ x, y, payload, data }: any) => {
@@ -89,7 +90,7 @@ const calculateMovingAverage = (data: any[], period: number) => {
   return result;
 };
 
-export default function CadenceChart({ activities, title }: CadenceChartProps) {
+export default function CadenceChart({ activities, title, timeFilter }: CadenceChartProps) {
   const [showTrend, setShowTrend] = useState(true);
 
   if (activities.length === 0) {
@@ -114,10 +115,12 @@ export default function CadenceChart({ activities, title }: CadenceChartProps) {
 
   const dates = activitiesWithCadence.map(a => parseISO(a.startTimeLocal));
   const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
-  const groupByMonth = yearSpan >= 2;
+
+  const showPerActivity = timeFilter === '3m';
+  const groupByMonth = !showPerActivity && yearSpan >= 2;
 
   let chartData;
-  let groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
+  let groupingTitle = showPerActivity ? '(per økt)' : (groupByMonth ? '(per måned)' : '(per uke)');
   
   const calculateAverage = (data: number[]) => {
     if (data.length === 0) return 0;
@@ -125,7 +128,15 @@ export default function CadenceChart({ activities, title }: CadenceChartProps) {
     return sum / data.length;
   }
 
-  if (groupByMonth) {
+  if (showPerActivity) {
+    chartData = activitiesWithCadence
+      .map(activity => ({
+        date: format(new Date(activity.startTimeLocal), 'dd.MM.yy'),
+        cadence: activity.averageRunningCadenceInStepsPerMinute,
+        activityId: activity.activityId
+      }))
+      .sort((a, b) => (a.activityId && b.activityId) ? a.activityId - b.activityId : 0);
+  } else if (groupByMonth) {
     const monthlyDataMap = activitiesWithCadence.reduce((acc, activity) => {
       const date = new Date(activity.startTimeLocal);
       const year = getYear(date);
@@ -256,8 +267,8 @@ export default function CadenceChart({ activities, title }: CadenceChartProps) {
             dataKey="cadence"
             stroke="#8884d8"
             name="Kadens"
-            dot={false}
-            activeDot={{ r: 6 }}
+            dot={{ r: 4, fill: '#8884d8' }}
+            connectNulls
           />
           {showTrend && (
             <Line

@@ -121,10 +121,12 @@ export default function RunningEconomyPage() {
           <CadenceChart
             activities={runningActivities}
             title="Løpskadens"
+            timeFilter={timeFilter}
           />
           <StrideLengthChart
             activities={runningActivities}
             title="Skrittlengde"
+            timeFilter={timeFilter}
           />
           <RunningEconomyTable activities={runningActivities} />
         </>

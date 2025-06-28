@@ -83,12 +83,12 @@ const ActivityList = () => {
               {
                 key: 'distance',
                 label: 'Distanse',
-                value: `${(activity.distance || 0).toFixed(2)} km`
+                value: `${((activity.distance || 0) / 1000).toFixed(2)} km`
               },
               {
                 key: 'duration',
                 label: 'Varighet',
-                value: `${Math.round(activity.duration || 0)} min`
+                value: `${Math.round((activity.duration || 0) / 60)} min`
               },
               {
                 key: 'calories',

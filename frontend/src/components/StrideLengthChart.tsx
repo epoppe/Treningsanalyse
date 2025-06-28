@@ -52,6 +52,7 @@ const Button = styled.button<{ $active: boolean }>`
 interface StrideLengthChartProps {
   activities: Activity[];
   title: string;
+  timeFilter?: string;
 }
 
 const CustomAxisTick = ({ x, y, payload, data }: any) => {
@@ -89,7 +90,7 @@ const calculateMovingAverage = (data: any[], period: number) => {
   return result;
 };
 
-export default function StrideLengthChart({ activities, title }: StrideLengthChartProps) {
+export default function StrideLengthChart({ activities, title, timeFilter }: StrideLengthChartProps) {
   const [showTrend, setShowTrend] = useState(true);
 
   if (activities.length === 0) {
@@ -114,10 +115,12 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
 
   const dates = activitiesWithStrideLength.map(a => parseISO(a.startTimeLocal));
   const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
-  const groupByMonth = yearSpan >= 2;
+  
+  const showPerActivity = timeFilter === '3m';
+  const groupByMonth = !showPerActivity && yearSpan >= 2;
 
   let chartData;
-  let groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
+  let groupingTitle = showPerActivity ? '(per økt)' : (groupByMonth ? '(per måned)' : '(per uke)');
   
   const calculateAverage = (data: number[]) => {
     if (data.length === 0) return 0;
@@ -125,7 +128,15 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
     return sum / data.length;
   }
 
-  if (groupByMonth) {
+  if (showPerActivity) {
+    chartData = activitiesWithStrideLength
+      .map(activity => ({
+        date: format(new Date(activity.startTimeLocal), 'dd.MM.yy'),
+        strideLength: activity.avgStrideLength,
+        activityId: activity.activityId
+      }))
+      .sort((a, b) => (a.activityId && b.activityId) ? a.activityId - b.activityId : 0);
+  } else if (groupByMonth) {
     const monthlyDataMap = activitiesWithStrideLength.reduce((acc, activity) => {
       const date = new Date(activity.startTimeLocal);
       const year = getYear(date);
@@ -208,72 +219,79 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
       };
     });
   }
-  
-  const dataWithMovingAverage = calculateMovingAverage(chartData, 24);
+
+  const dataWithMovingAverage = calculateMovingAverage(chartData, 4);
 
   const yAxisDomain = () => {
-    const allValues = dataWithMovingAverage
-      .flatMap(d => [d.strideLength, d.movingAverage])
-      .filter(v => v !== null && isFinite(v));
-    
-    if (allValues.length === 0) return [0.8, 1.5]; // Sensible default for stride length in meters
-
+    const allValues = dataWithMovingAverage.map(d => d.strideLength).filter(v => v !== null) as number[];
+    if (allValues.length === 0) return [0.8, 2.2];
     const min = Math.min(...allValues);
     const max = Math.max(...allValues);
     const padding = (max - min) * 0.1;
-
     return [Math.max(0, min - padding), max + padding];
   };
 
   return (
     <ChartContainer>
-      <Title>{title} {groupingTitle}</Title>
+      <Title>{title} <span style={{fontSize: '0.8em', color: '#666'}}>{groupingTitle}</span></Title>
+      
       <ButtonContainer>
         <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
-          {showTrend ? 'Skjul trendlinje' : 'Vis trendlinje'}
+          {showTrend ? 'Skjul trend' : 'Vis trend'}
         </Button>
       </ButtonContainer>
-      <ResponsiveContainer width="100%" height="80%">
-        <LineChart data={dataWithMovingAverage}>
+
+      <ResponsiveContainer width="100%" height={300}>
+        <LineChart data={dataWithMovingAverage} margin={{ top: 5, right: 20, left: -10, bottom: 40 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
-          <YAxis
-            label={{ value: 'Skrittlengde (m)', angle: -90, position: 'insideLeft' }}
-            domain={yAxisDomain()}
-            tickFormatter={(tick) => typeof tick === 'number' ? tick.toFixed(2) : tick}
-          />
-          <Tooltip
-            contentStyle={{ backgroundColor: '#333', border: 'none' }}
-            formatter={(value: number, name: string) => {
-              const formattedValue = value.toFixed(2) + ' m';
-              if (name === 'strideLength') return [formattedValue, 'Skrittlengde'];
-              if (name === 'movingAverage') return [formattedValue, 'Trend (24p snitt)'];
-              return [formattedValue, name];
-            }}
-            labelStyle={{ color: '#fff' }}
-          />
-          <Legend />
-          <Line
-            type="monotone"
-            dataKey="strideLength"
-            name="Skrittlengde"
-            stroke="#8884d8"
-            connectNulls
-            dot={false}
-          />
-          {showTrend && (
-            <Line
-              type="monotone"
-              dataKey="movingAverage"
-              name="Trend (24p snitt)"
-              stroke="#82ca9d"
-              strokeWidth={2}
-              dot={false}
-              connectNulls
+          <XAxis 
+            dataKey="date" 
+            tick={<CustomAxisTick data={dataWithMovingAverage} />}
+            interval={0}
             />
-          )}
+          <YAxis 
+            yAxisId="left" 
+            domain={yAxisDomain()}
+            tickFormatter={(value) => value.toFixed(2)}
+            />
+          <Tooltip content={<CustomTooltip />} />
+          <Legend />
+          <Line 
+            yAxisId="left" 
+            type="monotone" 
+            dataKey="strideLength" 
+            name="Skrittlengde (m)" 
+            stroke="#8884d8" 
+            dot={{ r: 4, fill: '#8884d8' }}
+            connectNulls
+            />
+          {showTrend && <Line 
+            yAxisId="left"
+            type="monotone" 
+            dataKey="movingAverage" 
+            name="Trend (4 punkter)" 
+            stroke="#82ca9d" 
+            strokeWidth={2}
+            dot={false}
+            connectNulls
+            />}
         </LineChart>
       </ResponsiveContainer>
     </ChartContainer>
   );
-} 
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const data = payload[0].payload;
+    return (
+      <div className="custom-tooltip" style={{ backgroundColor: 'white', padding: '10px', border: '1px solid #ccc' }}>
+        <p><strong>Dato:</strong> {label}</p>
+        <p><strong>Skrittlengde:</strong> {data.strideLength ? `${data.strideLength.toFixed(2)} m` : 'N/A'}</p>
+        {data.movingAverage && <p><strong>Trend:</strong> {data.movingAverage.toFixed(2)} m</p>}
+      </div>
+    );
+  }
+
+  return null;
+};
