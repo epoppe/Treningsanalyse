@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -9,6 +9,22 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
 });
+
+async function apiCall<T>(method: string, url: string, options: any = {}): Promise<T> {
+  try {
+    const response = await api({
+      url,
+      method,
+      data: options.body,
+      params: options.params,
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`API call failed: ${method} ${url}`, error);
+    // Her kan du legge til mer robust feilhåndtering
+    throw error;
+  }
+}
 
 export interface ApiResponse<T> {
   data: T;
@@ -101,15 +117,58 @@ export const activitiesApi = {
   }
 };
 
+export const healthApi = {
+  getSleep: (date: string) => apiCall('get', `/health/sleep/${date}`),
+  getStress: (date: string) => apiCall('get', `/health/stress/${date}`),
+  getHrv: (date: string) => apiCall('get', `/health/hrv/${date}`),
+};
+
 export const sleepApi = {
-  // Hent søvndata for en spesifikk periode
-  getSleepByDateRange: async (startDate: string, endDate: string, forceRefresh: boolean = false) => {
-    const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
-    const response = await api.get<SleepResponse>(
-      `/sleep?days=${days}${forceRefresh ? '&force_refresh=true' : ''}`
-    );
-    return response.data;
-  }
+  getSleepData: (startDate: string, endDate: string) => {
+    return apiCall('get', `/sleep/?start_date=${startDate}&end_date=${endDate}`);
+  },
+};
+
+export const analysisApi = {
+  getRunningEconomy: (forceRefresh: boolean = false) => apiCall('get', `/analysis/running-economy?force_refresh=${forceRefresh}`),
+  getHrv: (startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return apiCall('get', `/analysis/hrv?${params.toString()}`);
+  },
+  getStrideLengthData: (activityId: number) => apiCall('get', `/analysis/stride-length/${activityId}`),
+};
+
+export const syncApi = {
+  // --- Aktiviteter ---
+  syncActivities: (startDate: string, endDate: string) => {
+    const body = {
+      start_date: startDate.split('T')[0],
+      end_date: endDate.split('T')[0],
+    };
+    return apiCall('post', '/sync/activities', { body });
+  },
+  syncRecentActivities: () => {
+    return apiCall('post', '/sync/activities/recent');
+  },
+  
+  // --- Helsedata ---
+  syncHealthData: (startDate: string, endDate: string) => {
+    const body = {
+      start_date: startDate.split('T')[0],
+      end_date: endDate.split('T')[0],
+    };
+    return apiCall('post', '/sync/health', { body });
+  },
+  syncHealthLast90Days: () => {
+    return apiCall('post', '/sync/health/recent');
+  },
+
+  // --- Felles ---
+  getSyncStatus: (jobId: string) => {
+    return apiCall('get', `/sync/status/${jobId}`);
+  },
 };
 
 export const errorHandler = (error: any) => {

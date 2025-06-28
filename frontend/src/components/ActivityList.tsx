@@ -54,20 +54,12 @@ interface ActivityListProps {
   activities: Activity[];
 }
 
-const ActivityList = () => {
+const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const router = useRouter();
-  const { items: activities, status } = useSelector((state: RootState) => state.activities);
 
   const handleActivityClick = (activityId: number) => {
     router.push(`/activities/${activityId}`);
   };
-
-  if (status === 'loading') return <p>Laster aktiviteter...</p>;
-  if (status === 'failed') return <p>Kunne ikke laste aktiviteter.</p>;
-
-  if (!activities) {
-    return <p>Venter på aktiviteter...</p>;
-  }
 
   return (
     <ActivityContainer>

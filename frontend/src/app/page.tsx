@@ -84,7 +84,7 @@ export default function Home() {
       <ActivityFilters onFilterChange={handleFilterChange} activityTypes={activityTypes} />
       <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />
       <RunningEconomyTable activities={filteredActivities} />
-      <ActivityList />
+      <ActivityList activities={filteredActivities} />
     </MainContainer>
   );
 }

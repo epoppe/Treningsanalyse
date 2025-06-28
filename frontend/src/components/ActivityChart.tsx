@@ -88,6 +88,13 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       return acc;
     }, {} as Record<string, any>);
 
+    // Konverter til kilometer hvis metrikken er distanse
+    if (metric === 'distance') {
+      for (const key in monthlyDataMap) {
+        monthlyDataMap[key][metric] /= 1000;
+      }
+    }
+
     // Deretter, generer en komplett liste over alle måneder i tidsrommet
     const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
 
@@ -122,6 +129,13 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       acc[weekKey][metric] += activity[metric] || 0;
       return acc;
     }, {} as Record<string, any>);
+
+    // Konverter til kilometer hvis metrikken er distanse
+    if (metric === 'distance') {
+      for (const key in weeklyDataMap) {
+        weeklyDataMap[key][metric] /= 1000;
+      }
+    }
 
     // Deretter, generer en komplett liste over alle uker i tidsrommet
     const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });

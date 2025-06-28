@@ -59,9 +59,9 @@ const FilterButton = styled.button`
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 1.5rem;
-  margin-top: 2rem;
+  margin-bottom: 2rem;
 `;
 
 const StatCard = styled.div`
@@ -97,7 +97,7 @@ const ChartsContainer = styled.div`
 const ButtonContainer = styled.div`
   display: flex;
   gap: 1rem;
-  justify-content: center;
+  margin-bottom: 1rem;
 `;
 
 const Button = styled.button`
@@ -134,7 +134,7 @@ const LoadingSpinner = styled.div`
   }
 `;
 
-export default function StatistikkPage() {
+const StatistikkPage = () => {
   const dispatch = useAppDispatch();
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   
@@ -270,32 +270,12 @@ export default function StatistikkPage() {
           </StatsGrid>
 
           <ChartsContainer>
-            <ActivityChart
-              activities={activities}
-              metric="distance"
-              title="Distanse over tid"
-            />
-
-            <ActivityChart
-              activities={activities}
-              metric="duration"
-              title="Treningstid over tid"
-            />
-
-            <ActivityChart
-              activities={activities}
-              metric="average_hr"
-              title="Gjennomsnittspuls over tid"
-            />
-
-            <ActivityChart
-              activities={activities}
-              metric="calories"
-              title="Kaloriforbruk over tid"
-            />
+            <ActivityChart activities={activities} />
           </ChartsContainer>
         </>
       )}
     </Container>
   );
-} 
+};
+
+export default StatistikkPage; 

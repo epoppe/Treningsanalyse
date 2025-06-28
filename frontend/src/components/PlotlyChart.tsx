@@ -1,55 +1,50 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import Plot from 'react-plotly.js';
+import dynamic from 'next/dynamic';
 import { Text } from '@tremor/react';
 
+const Plot = dynamic(() => import('react-plotly.js'), {
+    ssr: false,
+});
+
 interface PlotlyChartProps {
-    activityId: number;
-    chartType: 'pulse' | 'altitude' | 'pace'; // Add more types as needed
+    data: any[];
+    xKey: string;
+    yKeys: string[];
+    title: string;
+    yAxisTitle: string;
 }
 
-const PlotlyChart = ({ activityId, chartType }: PlotlyChartProps) => {
-    const [figure, setFigure] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+const PlotlyChart = ({ data, xKey, yKeys, title, yAxisTitle }: PlotlyChartProps) => {
+    if (!data || data.length === 0) {
+        return <Text>Ingen data tilgjengelig for å vise grafen.</Text>;
+    }
 
-    useEffect(() => {
-        const fetchChartData = async () => {
-            setIsLoading(true);
-            setError(null);
-            try {
-                const res = await fetch(`/api/activities/${activityId}/charts/${chartType}`);
-                if (!res.ok) {
-                    const errorText = await res.text();
-                    throw new Error(`Feil ved lasting av graf: ${errorText || res.statusText}`);
-                }
-                const data = await res.json();
-                setFigure(data);
-            } catch (err: any) {
-                // Prøver å parse feilmeldingen som JSON for å få en penere feilmelding
-                try {
-                    const errorJson = JSON.parse(err.message.substring(err.message.indexOf('{')));
-                    setError(errorJson.detail || err.message);
-                } catch {
-                    setError(err.message);
-                }
-            } finally {
-                setIsLoading(false);
-            }
-        };
+    const traces = yKeys.map(yKey => ({
+        x: data.map(item => item[xKey]),
+        y: data.map(item => item[yKey]),
+        name: yKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Prettify name
+        type: 'scatter',
+        mode: 'lines+markers',
+    }));
 
-        fetchChartData();
-    }, [activityId, chartType]);
-
-    if (isLoading) return <Text>Laster inn graf...</Text>;
-    if (error) return <Text>Feil ved lasting av graf: {error}</Text>;
-    if (!figure) return <Text>Ingen grafdata funnet.</Text>;
+    const layout = {
+        title: title,
+        xaxis: {
+            title: 'Dato',
+        },
+        yaxis: {
+            title: yAxisTitle,
+        },
+        autosize: true,
+        margin: { l: 50, r: 50, b: 50, t: 50, pad: 4 },
+    };
 
     return (
         <Plot
-            data={figure.data}
-            layout={figure.layout}
+            data={traces}
+            layout={layout}
             style={{ width: '100%', height: '100%' }}
             useResizeHandler={true}
         />

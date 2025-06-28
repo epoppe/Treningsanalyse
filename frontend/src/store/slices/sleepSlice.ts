@@ -37,7 +37,7 @@ export const fetchSleepByDateRange = createAsyncThunk(
     forceRefresh?: boolean;
   }, { rejectWithValue }) => {
     try {
-      const response = await sleepApi.getSleepByDateRange(startDate, endDate, forceRefresh);
+      const response = await sleepApi.getSleepData(startDate, endDate);
       return response.sleep || [];
     } catch (error) {
       const errorInfo = errorHandler(error);

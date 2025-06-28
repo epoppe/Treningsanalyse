@@ -26,10 +26,8 @@ class SyncRequest(BaseModel):
     start_date: date
     end_date: date
 
-async def run_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
-    """
-    Hjelpefunksjon for å kjøre synkroniseringen i bakgrunnen med sin egen DB-sesjon.
-    """
+async def run_activity_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """Kjører aktivitetssynkronisering i bakgrunnen."""
     db_session = None
     try:
         sync_jobs[job_id]["status"] = "processing"
@@ -38,7 +36,23 @@ async def run_sync(job_id: str, garmin_client: GarminClient, storage: DataStorag
         result = await sync_service.sync_activities(start_date, end_date)
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
-        logger.critical(f"En feil oppstod i bakgrunnssynken for jobb {job_id}: {e}", exc_info=True)
+        logger.critical(f"Feil i aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
+async def run_health_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """Kjører helsedatasynkronisering i bakgrunnen."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        await sync_service.sync_health_data(start_date, end_date)
+        sync_jobs[job_id].update({"status": "completed", "result": "OK", "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i helsesynk (jobb {job_id}): {e}", exc_info=True)
         sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
     finally:
         if db_session:
@@ -46,6 +60,7 @@ async def run_sync(job_id: str, garmin_client: GarminClient, storage: DataStorag
 
 @router.get("/status/{job_id}")
 async def get_sync_status(job_id: str):
+    """Henter status for en spesifikk bakgrunnsjobb."""
     job = sync_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -64,51 +79,71 @@ def trigger_db_sync(
     result = sync_service.sync_json_to_db()
     return result
 
-@router.post("/sync/activities", status_code=202)
+@router.post("/activities", status_code=202)
 async def trigger_activity_sync(
     request: SyncRequest,
     background_tasks: BackgroundTasks,
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """
-    Starter en bakgrunnsjobb for å synkronisere aktiviteter for en gitt tidsperiode.
-    """
-    logger.info(f"Mottok synkroniseringsforespørsel med datoer: start_date={request.start_date}, end_date={request.end_date}")
-    
-    # Konverter date til datetime med UTC tidssone for intern bruk
+    """Starter synkronisering av aktiviteter for en gitt periode."""
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    logger.info(f"Konverterte datoer til datetime: start_datetime={start_datetime}, end_datetime={end_datetime}")
-
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(run_activity_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
     
-    return {"message": "Synkronisering av aktiviteter er startet i bakgrunnen.", "job_id": job_id}
+    return {"message": "Synkronisering av aktiviteter startet.", "job_id": job_id}
 
-@router.post("/recent", status_code=202)
+@router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
     background_tasks: BackgroundTasks,
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """
-    Starter en bakgrunnsjobb for å synkronisere aktiviteter for de siste 30 dagene.
-    """
-    logger.info("Mottok synkroniseringsforespørsel for de siste 30 dagene.")
-    
+    """Starter synkronisering av aktiviteter for de siste 30 dagene."""
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
-    logger.info(f"Beregnet tidsperiode: start_datetime={start_datetime}, end_datetime={end_datetime}")
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_activity_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    
+    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet.", "job_id": job_id}
+
+@router.post("/health", status_code=202)
+async def trigger_health_sync(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter synkronisering av helsedata for en gitt periode."""
+    start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(run_health_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
     
-    return {"message": "Synkronisering av aktiviteter for de siste 30 dagene er startet i bakgrunnen.", "job_id": job_id}
+    return {"message": "Synkronisering av helsedata startet.", "job_id": job_id}
+
+@router.post("/health/recent", status_code=202)
+async def trigger_recent_health_sync(
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter synkronisering av helsedata for de siste 90 dagene."""
+    end_datetime = datetime.now(timezone.utc)
+    start_datetime = end_datetime - timedelta(days=90)
+    
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_health_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    
+    return {"message": "Synkronisering av siste 90 dagers helsedata startet.", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(
@@ -169,37 +204,6 @@ async def sync_historical_data(
     except Exception as e:
         logger.error(f"Uventet feil under historisk synkronisering for {start_year}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"En intern feil oppstod under historisk synkronisering: {str(e)}")
-
-@router.post("/activities", status_code=status.HTTP_202_ACCEPTED)
-async def sync_activities_endpoint(
-    sync_request: SyncRequest,
-    background_tasks: BackgroundTasks,
-    garmin_client: GarminClient = Depends(get_garmin_client),
-):
-    start_date = sync_request.start_date
-    end_date = sync_request.end_date
-    
-    logger.info(f"Mottok synkroniseringsforespørsel med datoer: start_date={start_date}, end_date={end_date}")
-
-    # Konverter til datetime-objekter med tidssone for Garmin-klienten
-    start_datetime = pytz.utc.localize(datetime.combine(start_date, datetime.min.time()))
-    end_datetime = pytz.utc.localize(datetime.combine(end_date, datetime.max.time()))
-    logger.info(f"Konverterte datoer til datetime: start_datetime={start_datetime}, end_datetime={end_datetime}")
-
-    def run_sync():
-        db_session = SessionLocal()
-        try:
-            # DataStorage-instansen trengs, men er ikke lenger primærlageret for synk mot DB.
-            # Gi den en gyldig mappe for å unngå feil ved initialisering.
-            storage = DataStorage(data_dir=settings.DATA_DIR) 
-            sync_service = SyncService(garmin_client, storage, db_session)
-            asyncio.run(sync_service.sync_activities(start_datetime, end_datetime))
-        finally:
-            db_session.close()
-
-    background_tasks.add_task(run_sync)
-    
-    return {"message": "Activity synchronization started in the background."}
 
 @router.post("/sync-json-to-db", status_code=status.HTTP_200_OK)
 def sync_json_to_db_endpoint(db: Session = Depends(get_db)):

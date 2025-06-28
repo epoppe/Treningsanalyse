@@ -62,6 +62,9 @@ export default function Navbar() {
           <NavLink href="/sovn" $active={pathname === '/sovn'}>
             Søvn
           </NavLink>
+          <NavLink href="/hrv" $active={pathname === '/hrv'}>
+            HRV
+          </NavLink>
           <NavLink href="/grafer" $active={pathname === '/grafer'}>
             Grafer
           </NavLink>

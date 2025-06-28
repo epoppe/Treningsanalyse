@@ -7,6 +7,7 @@ import json
 import fitparse
 from io import BytesIO
 from fitparse.utils import FitHeaderError
+import pandas as pd
 
 from .garmin_client import GarminClient
 from ..storage import DataStorage, DateTimeEncoder
@@ -201,8 +202,13 @@ class SyncService:
             
             activity_type_cache = {}
             added_count = 0
+            logged_one = False  # Flagg for å bare logge én gang
 
             for i, act_data in enumerate(activities_to_save):
+                if not logged_one:
+                    logger.info(f"DEBUG: Nøkler i første aktivitet: {list(act_data.keys())}")
+                    logged_one = True
+
                 activity_id = str(act_data.get('activityId'))
                 
                 if i < 5: # Logger de 5 første for feilsøking
@@ -269,3 +275,70 @@ class SyncService:
             summary["status"] = f"Feil: {e}"
         
         return summary 
+
+    def _normalize_hrv_data(self, hrv_data: dict, calendar_date: str) -> Optional[dict]:
+        """Normaliserer HRV-data til en flat struktur for lagring."""
+        if not hrv_data or 'hrv_summary' not in hrv_data:
+            return None
+        
+        summary = hrv_data['hrv_summary']
+        return {
+            "date": calendar_date,
+            "last_night_avg": summary.get('last_night_avg'),
+            "weekly_avg": summary.get('weekly_avg'),
+            "status": summary.get('status'),
+        }
+
+    async def sync_health_data(self, start_date: datetime, end_date: datetime):
+        """Synkroniserer helsedata (HRV, søvn, etc.) for en gitt periode."""
+        logger.info(f"Starter synkronisering av helsedata fra {start_date.date()} til {end_date.date()}")
+        
+        if not await self.garmin_client.initialize():
+            logger.error("Kunne ikke initialisere Garmin-klient for helsedata-synk.")
+            return
+
+        all_hrv_data = []
+        
+        # Hent eksisterende HRV-datoer for å unngå duplikater
+        try:
+            hrv_df = self.storage.get_hrv_data()
+            existing_dates = set(hrv_df.index.to_series().dt.date) if hrv_df is not None and not hrv_df.empty else set()
+            logger.info(f"Fant {len(existing_dates)} eksisterende HRV-datoer.")
+        except Exception as e:
+            logger.warning(f"Kunne ikke lese eksisterende HRV-datoer, fortsetter uten duplikatsjekk. Feil: {e}")
+            existing_dates = set()
+
+        current_date = start_date
+        while current_date <= end_date:
+            date_str = current_date.strftime("%Y-%m-%d")
+            
+            if current_date.date() in existing_dates:
+                logger.info(f"Hopper over HRV-data for {date_str} (finnes allerede).")
+                current_date += timedelta(days=1)
+                continue
+
+            try:
+                # Hent HRV-data
+                hrv_data = await self.garmin_client.get_hrv_data(current_date)
+                if hrv_data:
+                    normalized_hrv = self._normalize_hrv_data(hrv_data, date_str)
+                    if normalized_hrv:
+                        all_hrv_data.append(normalized_hrv)
+                
+                # Liten pause for å unngå rate limiting
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Feil under henting av helsedata for {date_str}: {e}")
+            
+            current_date += timedelta(days=1)
+
+        if all_hrv_data:
+            logger.info(f"Fant {len(all_hrv_data)} nye dager med HRV-data. Lagrer...")
+            self.storage.save_hrv_data(all_hrv_data)
+        else:
+            logger.info("Ingen nye HRV-data å lagre.") 
+
+    async def _download_and_store_fit_file(self, activity_id: int):
+        """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
+        # Implementer funksjonen her 
