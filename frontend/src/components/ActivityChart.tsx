@@ -78,7 +78,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       
       if (!acc[monthKey]) {
         acc[monthKey] = {
-          date: format(startOfMonth(date), 'MMM yyyy'),
+          date: format(startOfMonth(date), 'MMM yy'),
           groupKey: monthKey,
           year: year,
           [metric]: 0
@@ -97,7 +97,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
       
       return monthlyDataMap[monthKey] || {
-        date: format(monthStart, 'MMM yyyy'),
+        date: format(monthStart, 'MMM yy'),
         groupKey: monthKey,
         year: year,
         [metric]: null // Bruk null for å skape et tomt rom i grafen
@@ -113,7 +113,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       
       if (!acc[weekKey]) {
         acc[weekKey] = {
-          date: format(startOfISOWeek(date), 'dd/MM/yyyy'),
+          date: format(startOfISOWeek(date), 'dd.MM.yy'),
           groupKey: weekKey,
           year: year,
           [metric]: 0
@@ -132,7 +132,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
       const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
 
       return weeklyDataMap[weekKey] || {
-        date: format(weekStart, 'dd/MM/yyyy'),
+        date: format(weekStart, 'dd.MM.yy'),
         groupKey: weekKey,
         year: year,
         [metric]: null // Bruk null for å skape et tomt rom i grafen

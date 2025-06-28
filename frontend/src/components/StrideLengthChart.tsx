@@ -59,8 +59,8 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   if (!item || !data || data.length === 0) return null;
 
   const dateLabel = item.date;
-  // Viser ca. 6-7 ticks for å unngå at aksen blir for rotete
-  const tickInterval = Math.max(1, Math.floor(data.length / 6));
+  // Viser ca. 8-10 ticks for å unngå at aksen blir for rotete
+  const tickInterval = Math.max(1, Math.floor(data.length / 9));
 
   if (payload.index % tickInterval === 0 || payload.index === data.length - 1) {
     return (
@@ -134,7 +134,7 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
       
       if (!acc[monthKey]) {
         acc[monthKey] = {
-          date: format(startOfMonth(date), 'MMM yyyy'),
+          date: format(startOfMonth(date), 'MMM yy'),
           groupKey: monthKey,
           year: year,
           values: []
@@ -153,14 +153,14 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
       
       if (monthlyDataMap[monthKey] && monthlyDataMap[monthKey].values.length > 0) {
         return {
-          date: format(monthStart, 'MMM yyyy'),
+          date: format(monthStart, 'MMM yy'),
           groupKey: monthKey,
           year: year,
           strideLength: calculateAverage(monthlyDataMap[monthKey].values)
         };
       }
       return {
-        date: format(monthStart, 'MMM yyyy'),
+        date: format(monthStart, 'MMM yy'),
         groupKey: monthKey,
         year: year,
         strideLength: null
@@ -175,7 +175,7 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
       
       if (!acc[weekKey]) {
         acc[weekKey] = {
-          date: format(startOfISOWeek(date), 'dd/MM/yyyy'),
+          date: format(startOfISOWeek(date), 'dd.MM.yy'),
           groupKey: weekKey,
           year: year,
           values: []
@@ -194,14 +194,14 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
 
       if (weeklyDataMap[weekKey] && weeklyDataMap[weekKey].values.length > 0) {
         return {
-          date: format(weekStart, 'dd/MM/yyyy'),
+          date: format(weekStart, 'dd.MM.yy'),
           groupKey: weekKey,
           year: year,
           strideLength: calculateAverage(weeklyDataMap[weekKey].values)
         };
       }
       return {
-        date: format(weekStart, 'dd/MM/yyyy'),
+        date: format(weekStart, 'dd.MM.yy'),
         groupKey: weekKey,
         year: year,
         strideLength: null
@@ -239,7 +239,7 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" tick={<CustomAxisTick data={dataWithMovingAverage} />} />
+          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <YAxis
             label={{ value: 'Skrittlengde (m)', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}

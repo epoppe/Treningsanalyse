@@ -59,8 +59,8 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   if (!item || !data || data.length === 0) return null;
 
   const dateLabel = item.date;
-  // Viser ca. 6-7 ticks for å unngå at aksen blir for rotete
-  const tickInterval = Math.max(1, Math.floor(data.length / 6));
+  // Viser ca. 8-10 ticks for å unngå at aksen blir for rotete
+  const tickInterval = Math.max(1, Math.floor(data.length / 9));
 
   if (payload.index % tickInterval === 0 || payload.index === data.length - 1) {
     return (
@@ -144,7 +144,7 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
       if (!acc[monthKey]) {
         acc[monthKey] = {
           activities: [],
-          date: format(startOfMonth(date), 'MMM yyyy'),
+          date: format(startOfMonth(date), 'MMM yy'),
           groupKey: monthKey,
           year: year,
         };
@@ -162,7 +162,7 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
       const economy = monthlyDataMap[monthKey] ? processGroup(monthlyDataMap[monthKey].activities) : null;
       
       return {
-        date: format(monthStart, 'MMM yyyy'),
+        date: format(monthStart, 'MMM yy'),
         groupKey: monthKey,
         year: year,
         economy: economy,
@@ -179,7 +179,7 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
       if (!acc[weekKey]) {
         acc[weekKey] = {
           activities: [],
-          date: format(startOfISOWeek(date), 'dd/MM/yyyy'),
+          date: format(startOfISOWeek(date), 'dd.MM.yy'),
           groupKey: weekKey,
           year: year,
         };
@@ -197,7 +197,7 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
       const economy = weeklyDataMap[weekKey] ? processGroup(weeklyDataMap[weekKey].activities) : null;
 
       return {
-        date: format(weekStart, 'dd/MM/yyyy'),
+        date: format(weekStart, 'dd.MM.yy'),
         groupKey: weekKey,
         year: year,
         economy: economy,
@@ -235,7 +235,7 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
           <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="date" tick={<CustomAxisTick data={dataWithMovingAverage} />} />
+          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <YAxis
             label={{ value: 'Hastighet/Puls', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
