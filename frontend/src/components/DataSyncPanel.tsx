@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchActivities } from '@/store/slices/activitiesSlice';
@@ -58,6 +58,12 @@ const Button = styled.button`
   }
 `;
 
+const ButtonGroup = styled.div`
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+`;
+
 const StatusMessage = styled.p`
   margin-top: 15px;
   color: #aaa;
@@ -65,44 +71,87 @@ const StatusMessage = styled.p`
 
 const DataSyncPanel = () => {
   const dispatch = useAppDispatch();
-  const { status, error } = useAppSelector((state) => state.activities);
+  const [statusMessage, setStatusMessage] = useState<string>('');
+  const [jobId, setJobId] = useState<string | null>(null);
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  useEffect(() => {
+    if (!jobId) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const statusData = await activitiesApi.getSyncStatus(jobId);
+        setStatusMessage(`Synkroniseringsstatus: ${statusData.status}`);
+
+        if (statusData.status === 'completed' || statusData.status === 'failed') {
+          clearInterval(interval);
+          setJobId(null);
+          if (statusData.status === 'completed') {
+            setStatusMessage('Synkronisering fullført! Henter nye data...');
+            dispatch(fetchActivities());
+            setTimeout(() => setStatusMessage(''), 5000); // Fjerner melding etter 5 sek
+          } else {
+            setStatusMessage(`Feil under synkronisering: ${statusData.error}`);
+          }
+        }
+      } catch (error) {
+        clearInterval(interval);
+        setJobId(null);
+        setStatusMessage('Kunne ikke hente synkroniseringsstatus.');
+      }
+    }, 5000); // Sjekker status hvert 5. sekund
+
+    return () => clearInterval(interval);
+  }, [jobId, dispatch]);
+
   const handleSync = async () => {
     if (!startDate || !endDate) {
-      // Vi trenger ikke å dispatche en feil her, bare forhindre kjøring
       alert('Vennligst velg både start- og sluttdato.');
       return;
     }
-
     try {
-      await activitiesApi.syncActivities(startDate, endDate);
-      // Etter en vellykket synk, hent de oppdaterte aktivitetene
-      dispatch(fetchActivities());
+      setStatusMessage('Starter synkronisering...');
+      const response = await activitiesApi.syncActivities(startDate, endDate);
+      setJobId(response.job_id);
     } catch (err: any) {
-      // Selve synk-kallet håndterer ikke Redux state, 
-      // men vi kan logge feilen her for feilsøking.
       console.error('Synkroniseringsfeil:', err);
+      setStatusMessage('Kunne ikke starte synkronisering.');
+    }
+  };
+
+  const handleSync30Days = async () => {
+    try {
+      setStatusMessage('Starter synkronisering for siste 30 dager...');
+      const response = await activitiesApi.syncLast30Days();
+      setJobId(response.job_id);
+    } catch (err: any) {
+      console.error('Feil ved synkronisering av siste 30 dager:', err);
+      setStatusMessage('Kunne ikke starte synkronisering for 30 dager.');
     }
   };
   
-  const isLoading = status === 'loading';
+  const isLoading = !!jobId;
 
   return (
     <SyncPanelContainer>
       <Title>Synkroniseringspanel</Title>
       <InputGroup>
         <Label>Fra dato:</Label>
-        <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+        <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} disabled={isLoading} />
         <Label>Til dato:</Label>
-        <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+        <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} disabled={isLoading} />
       </InputGroup>
-      <Button onClick={handleSync} disabled={isLoading}>
-        {isLoading ? 'Synkroniserer...' : 'Start Garmin-synk'}
-      </Button>
-      {error && <StatusMessage style={{ color: 'red' }}>Feil: {error}</StatusMessage>}
+      <ButtonGroup>
+        <Button onClick={handleSync} disabled={isLoading || !startDate || !endDate}>
+          {isLoading ? 'Opptatt...' : 'Synk valgt periode'}
+        </Button>
+        <Button onClick={handleSync30Days} disabled={isLoading}>
+          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager'}
+        </Button>
+      </ButtonGroup>
+      {statusMessage && <StatusMessage>{statusMessage}</StatusMessage>}
     </SyncPanelContainer>
   );
 };

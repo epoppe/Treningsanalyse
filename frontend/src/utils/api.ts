@@ -86,6 +86,18 @@ export const activitiesApi = {
       end_date: formatDate(endDate)
     });
     return response.data;
+  },
+
+  // Start synkronisering av de siste 30 dagers aktiviteter
+  syncLast30Days: async () => {
+    const response = await api.post<ApiResponse<any>>('/sync/recent');
+    return response.data;
+  },
+
+  // Hent status for en synk-jobb
+  getSyncStatus: async (jobId: string) => {
+    const response = await api.get<any>(`/sync/status/${jobId}`);
+    return response.data;
   }
 };
 

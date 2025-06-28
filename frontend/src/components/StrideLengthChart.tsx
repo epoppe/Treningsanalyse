@@ -229,16 +229,13 @@ export default function StrideLengthChart({ activities, title }: StrideLengthCha
     <ChartContainer>
       <Title>{title} {groupingTitle}</Title>
       <ButtonContainer>
-        <Button $active={showTrend} onClick={() => setShowTrend(true)}>
-          Vis trendlinje
-        </Button>
-        <Button $active={!showTrend} onClick={() => setShowTrend(false)}>
-          Skjul trendlinje
+        <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+          {showTrend ? 'Skjul trendlinje' : 'Vis trendlinje'}
         </Button>
       </ButtonContainer>
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <YAxis
             label={{ value: 'Skrittlengde (m)', angle: -90, position: 'insideLeft' }}

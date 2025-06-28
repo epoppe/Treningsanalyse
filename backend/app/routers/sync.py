@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 import logging
 from sqlalchemy.orm import Session
 import pytz
 import asyncio
 from fastapi import status
+import uuid
+from typing import Dict
 
 from ..services.garmin_client import GarminClient
 from ..storage import DataStorage
@@ -18,24 +20,36 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+sync_jobs: Dict[str, Dict] = {}
+
 class SyncRequest(BaseModel):
     start_date: date
     end_date: date
 
-async def run_sync(garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+async def run_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
     """
     Hjelpefunksjon for å kjøre synkroniseringen i bakgrunnen med sin egen DB-sesjon.
     """
     db_session = None
     try:
+        sync_jobs[job_id]["status"] = "processing"
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
-        await sync_service.sync_activities(start_date, end_date)
+        result = await sync_service.sync_activities(start_date, end_date)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
-        logger.critical(f"En feil oppstod i bakgrunnssynken: {e}", exc_info=True)
+        logger.critical(f"En feil oppstod i bakgrunnssynken for jobb {job_id}: {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
     finally:
         if db_session:
             db_session.close()
+
+@router.get("/status/{job_id}")
+async def get_sync_status(job_id: str):
+    job = sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 @router.post("/sync/database", status_code=200)
 def trigger_db_sync(
@@ -68,11 +82,33 @@ async def trigger_activity_sync(
     
     logger.info(f"Konverterte datoer til datetime: start_datetime={start_datetime}, end_datetime={end_datetime}")
 
-    # Legg til synkroniseringsjobben i bakgrunnen
-    # Service blir nå opprettet inne i run_sync med egen db-sesjon
-    background_tasks.add_task(run_sync, garmin_client, storage, start_datetime, end_datetime)
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
     
-    return {"message": "Synkronisering av aktiviteter er startet i bakgrunnen."}
+    return {"message": "Synkronisering av aktiviteter er startet i bakgrunnen.", "job_id": job_id}
+
+@router.post("/recent", status_code=202)
+async def trigger_recent_activity_sync(
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """
+    Starter en bakgrunnsjobb for å synkronisere aktiviteter for de siste 30 dagene.
+    """
+    logger.info("Mottok synkroniseringsforespørsel for de siste 30 dagene.")
+    
+    end_datetime = datetime.now(timezone.utc)
+    start_datetime = end_datetime - timedelta(days=30)
+    
+    logger.info(f"Beregnet tidsperiode: start_datetime={start_datetime}, end_datetime={end_datetime}")
+
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    
+    return {"message": "Synkronisering av aktiviteter for de siste 30 dagene er startet i bakgrunnen.", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(

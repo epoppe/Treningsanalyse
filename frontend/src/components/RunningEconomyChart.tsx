@@ -52,6 +52,7 @@ const Button = styled.button<{ $active: boolean }>`
 interface RunningEconomyChartProps {
   activities: Activity[];
   title: string;
+  timeFilter: string;
 }
 
 const CustomAxisTick = ({ x, y, payload, data }: any) => {
@@ -89,8 +90,11 @@ const calculateMovingAverage = (data: any[], period: number) => {
   return result;
 };
 
-
-export default function RunningEconomyChart({ activities, title }: RunningEconomyChartProps) {
+export default function RunningEconomyChart({
+  activities,
+  title,
+  timeFilter,
+}: RunningEconomyChartProps) {
   const [showTrend, setShowTrend] = useState(true);
 
   if (activities.length === 0) {
@@ -103,8 +107,17 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
   }
 
   const runningActivities = activities
-    .filter(a => a.activityType.typeKey && a.activityType.typeKey.includes('running') && !a.activityType.typeKey.includes('treadmill'))
-    .filter(a => a.averageHR && a.averageSpeed && a.distance && a.distance > 1);
+    .filter(
+      (a) =>
+        a.activityType.typeKey &&
+        a.activityType.typeKey.includes("running") &&
+        !a.activityType.typeKey.includes("treadmill")
+    )
+    .filter((a) => a.averageHR && a.averageSpeed && a.distance && a.distance > 1)
+    .sort(
+      (a, b) =>
+        new Date(a.startTimeLocal).getTime() - new Date(b.startTimeLocal).getTime()
+    );
 
   if (runningActivities.length === 0) {
     return (
@@ -115,97 +128,124 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
     );
   }
 
-  const dates = runningActivities.map(a => parseISO(a.startTimeLocal));
-  const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
-  const groupByMonth = yearSpan >= 2;
-
   let chartData;
-  let groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
-  
+  let groupingTitle;
+
   const processGroup = (activities: Activity[]) => {
     const economyValues = activities
-      .map(a => {
+      .map((a) => {
         const speedInKmh = a.averageSpeed! * 3.6; // Konverter fra m/s til km/t
         return (speedInKmh / a.averageHR!) * 100;
       })
-      .filter(e => isFinite(e));
-      
+      .filter((e) => isFinite(e));
+
     if (economyValues.length === 0) return null;
     return economyValues.reduce((a, b) => a + b, 0) / economyValues.length;
   };
 
-  if (groupByMonth) {
-    const monthlyDataMap = runningActivities.reduce((acc, activity) => {
-      const date = new Date(activity.startTimeLocal);
-      const year = getYear(date);
-      const month = getMonth(date);
-      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      
-      if (!acc[monthKey]) {
-        acc[monthKey] = {
-          activities: [],
-          date: format(startOfMonth(date), 'MMM yy'),
+  if (timeFilter === '3m') {
+    groupingTitle = '(per aktivitet)';
+    chartData = runningActivities.map((a) => {
+      const speedInKmh = a.averageSpeed! * 3.6;
+      const economy =
+        isFinite(speedInKmh) && a.averageHR! > 0
+          ? (speedInKmh / a.averageHR!) * 100
+          : null;
+      return {
+        date: format(parseISO(a.startTimeLocal), 'dd.MM.yy'),
+        economy,
+        name: a.name,
+      };
+    });
+  } else {
+    const dates = runningActivities.map((a) => parseISO(a.startTimeLocal));
+    const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
+    const groupByMonth = yearSpan >= 2;
+    groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
+    
+    if (groupByMonth) {
+      const monthlyDataMap = runningActivities.reduce((acc, activity) => {
+        const date = new Date(activity.startTimeLocal);
+        const year = getYear(date);
+        const month = getMonth(date);
+        const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+        if (!acc[monthKey]) {
+          acc[monthKey] = {
+            activities: [],
+            date: format(startOfMonth(date), "MMM yy"),
+            groupKey: monthKey,
+            year: year,
+          };
+        }
+        acc[monthKey].activities.push(activity);
+        return acc;
+      }, {} as Record<string, any>);
+  
+      const allMonths = eachMonthOfInterval({
+        start: Math.min(...dates),
+        end: Math.max(...dates),
+      });
+  
+      chartData = allMonths.map((monthStart) => {
+        const year = getYear(monthStart);
+        const month = getMonth(monthStart);
+        const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
+        const economy = monthlyDataMap[monthKey]
+          ? processGroup(monthlyDataMap[monthKey].activities)
+          : null;
+  
+        return {
+          date: format(monthStart, "MMM yy"),
           groupKey: monthKey,
           year: year,
+          economy: economy,
         };
-      }
-      acc[monthKey].activities.push(activity);
-      return acc;
-    }, {} as Record<string, any>);
-
-    const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
-
-    chartData = allMonths.map(monthStart => {
-      const year = getYear(monthStart);
-      const month = getMonth(monthStart);
-      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      const economy = monthlyDataMap[monthKey] ? processGroup(monthlyDataMap[monthKey].activities) : null;
-      
-      return {
-        date: format(monthStart, 'MMM yy'),
-        groupKey: monthKey,
-        year: year,
-        economy: economy,
-      };
-    });
-
-  } else {
-    const weeklyDataMap = runningActivities.reduce((acc, activity) => {
-      const date = new Date(activity.startTimeLocal);
-      const week = getISOWeek(date);
-      const year = getYear(date);
-      const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
-      
-      if (!acc[weekKey]) {
-        acc[weekKey] = {
-          activities: [],
-          date: format(startOfISOWeek(date), 'dd.MM.yy'),
+      });
+    } else {
+      const weeklyDataMap = runningActivities.reduce((acc, activity) => {
+        const date = new Date(activity.startTimeLocal);
+        const week = getISOWeek(date);
+        const year = getYear(date);
+        const weekKey = `${year}-W${String(week).padStart(2, "0")}`;
+  
+        if (!acc[weekKey]) {
+          acc[weekKey] = {
+            activities: [],
+            date: format(startOfISOWeek(date), "dd.MM.yy"),
+            groupKey: weekKey,
+            year: year,
+          };
+        }
+        acc[weekKey].activities.push(activity);
+        return acc;
+      }, {} as Record<string, any>);
+  
+      const allWeeks = eachWeekOfInterval(
+        { start: Math.min(...dates), end: Math.max(...dates) },
+        { weekStartsOn: 1 }
+      );
+  
+      chartData = allWeeks.map((weekStart) => {
+        const year = getYear(weekStart);
+        const week = getISOWeek(weekStart);
+        const weekKey = `${year}-W${String(week).padStart(2, "0")}`;
+        const economy = weeklyDataMap[weekKey]
+          ? processGroup(weeklyDataMap[weekKey].activities)
+          : null;
+  
+        return {
+          date: format(weekStart, "dd.MM.yy"),
           groupKey: weekKey,
           year: year,
+          economy: economy,
         };
-      }
-      acc[weekKey].activities.push(activity);
-      return acc;
-    }, {} as Record<string, any>);
-
-    const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });
-    
-    chartData = allWeeks.map(weekStart => {
-      const year = getYear(weekStart);
-      const week = getISOWeek(weekStart);
-      const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
-      const economy = weeklyDataMap[weekKey] ? processGroup(weeklyDataMap[weekKey].activities) : null;
-
-      return {
-        date: format(weekStart, 'dd.MM.yy'),
-        groupKey: weekKey,
-        year: year,
-        economy: economy,
-      };
-    });
+      });
+    }
   }
 
-  const dataWithMovingAverage = calculateMovingAverage(chartData, 24); // 24 uker/måneder (ca 6 mnd)
+  const movingAveragePeriod = timeFilter === '3m' ? 10 : 24;
+  const dataWithMovingAverage = calculateMovingAverage(chartData, movingAveragePeriod);
 
   const yAxisDomain = () => {
     const allValues = dataWithMovingAverage
@@ -225,16 +265,13 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
     <ChartContainer>
       <Title>{title} {groupingTitle}</Title>
       <ButtonContainer>
-        <Button $active={showTrend} onClick={() => setShowTrend(true)}>
-          Vis trendlinje
-        </Button>
-        <Button $active={!showTrend} onClick={() => setShowTrend(false)}>
-          Skjul trendlinje
+        <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+          {showTrend ? 'Skjul trendlinje' : 'Vis trendlinje'}
         </Button>
       </ButtonContainer>
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <YAxis
             label={{ value: 'Hastighet/Puls', angle: -90, position: 'insideLeft' }}
@@ -244,12 +281,27 @@ export default function RunningEconomyChart({ activities, title }: RunningEconom
           <Tooltip
             contentStyle={{ backgroundColor: '#333', border: 'none' }}
             formatter={(value: number, name: string) => {
-              const formattedName = name === 'movingAverage' ? 'Gj.snitt' : 'Verdi';
+              const formattedName =
+                name === "movingAverage" ? "Gj.snitt" : "Verdi";
               return [value.toFixed(2), formattedName];
             }}
-            labelFormatter={(label) => `Dato: ${label}`}
+            labelFormatter={(label, payload) => {
+              if (
+                timeFilter === "3m" &&
+                payload &&
+                payload.length > 0 &&
+                payload[0].payload.name
+              ) {
+                return `${label}: ${payload[0].payload.name}`;
+              }
+              return `Dato: ${label}`;
+            }}
           />
-          <Legend formatter={(value) => value === 'movingAverage' ? 'Gjennomsnitt' : 'Hastighet/Puls'} />
+          <Legend
+            formatter={(value) =>
+              value === "movingAverage" ? "Gjennomsnitt" : "Hastighet/Puls"
+            }
+          />
           <Line
             type="monotone"
             dataKey="economy"

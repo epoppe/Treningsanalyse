@@ -116,6 +116,7 @@ export default function RunningEconomyPage() {
           <RunningEconomyChart
             activities={runningActivities}
             title="Løpsøkonomi"
+            timeFilter={timeFilter}
           />
           <CadenceChart
             activities={runningActivities}
