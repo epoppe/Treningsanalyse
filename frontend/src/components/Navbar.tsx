@@ -59,9 +59,7 @@ export default function Navbar() {
           <NavLink href="/ukesanalyse" $active={pathname === '/ukesanalyse'}>
             Løpsøkonomi
           </NavLink>
-          <NavLink href="/sovn" $active={pathname === '/sovn'}>
-            Søvn
-          </NavLink>
+          
           <NavLink href="/hrv" $active={pathname === '/hrv'}>
             HRV
           </NavLink>

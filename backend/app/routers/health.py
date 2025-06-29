@@ -9,21 +9,7 @@ from ..dependencies import get_garmin_client
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-@router.get("/sleep/{request_date}", response_model=Optional[Dict[str, Any]])
-async def get_sleep_data_endpoint(
-    request_date: date,
-    garmin_client: GarminClient = Depends(get_garmin_client)
-):
-    """Henter søvndata for en spesifikk dato."""
-    logger.info(f"Mottok forespørsel om søvndata for {request_date}")
-    try:
-        sleep_data = await garmin_client.get_sleep_data(request_date)
-        if sleep_data is None:
-            raise HTTPException(status_code=404, detail="Søvndata ikke funnet.")
-        return sleep_data
-    except Exception as e:
-        logger.error(f"Feil ved henting av søvndata: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Intern serverfeil ved henting av søvndata.")
+
 
 @router.get("/stress/{request_date}", response_model=Optional[Dict[str, Any]])
 async def get_stress_data_endpoint(

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Tuple, Optional
 import asyncio
 import logging
@@ -167,7 +167,7 @@ class SyncService:
         logger.info(f"Beregnet {len(chunked_periods)} perioder som skal hentes: {chunked_periods}")
         return chunked_periods
 
-    async def sync_activities(self, start_date: datetime, end_date: datetime) -> dict:
+    async def sync_activities(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False) -> dict:
         """
         Orkestrerer synkronisering av aktiviteter for en gitt tidsperiode og lagrer dem i databasen.
         """
@@ -187,6 +187,9 @@ class SyncService:
             
             # Filtrer bort duplikater basert på 'activityId'
             existing_ids = self.storage.get_existing_activity_ids(self.db)
+            
+            # Beregn grensen for "nylige" data (siste 30 dager)
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
             activities_to_save = [
                 act for act in activities_raw
@@ -215,8 +218,23 @@ class SyncService:
                     is_in_db = activity_id in existing_ids
                     logger.info(f"DEBUG: Behandler aktivitet {i+1}/{len(activities_to_save)}: ID='{activity_id}', Finnes i DB? {is_in_db}")
 
-                if not activity_id or activity_id in existing_ids:
+                if not activity_id:
                     continue
+                    
+                # Sjekk om aktiviteten er nylig og om vi skal force refresh
+                activity_start_time = datetime.fromisoformat(act_data['startTimeGMT'])
+                is_recent = activity_start_time >= recent_cutoff
+                should_skip = (activity_id in existing_ids and 
+                              not (force_refresh_recent and is_recent))
+                
+                if should_skip:
+                    continue
+                elif activity_id in existing_ids and force_refresh_recent and is_recent:
+                    logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (force_refresh_recent=True).")
+                    # Slett eksisterende aktivitet først
+                    existing_activity = self.db.query(Activity).filter_by(id=activity_id).first()
+                    if existing_activity:
+                        self.db.delete(existing_activity)
 
                 # Hent detaljerte data (FIT-fil)
                 details_json = None
@@ -282,15 +300,22 @@ class SyncService:
             return None
         
         summary = hrv_data['hrv_summary']
+        
+        # Bruk weekly_avg som fallback for baseline-verdier hvis de ikke finnes
+        weekly_avg = summary.get('weekly_avg', 0)
+        
         return {
             "date": calendar_date,
             "last_night_avg": summary.get('last_night_avg'),
-            "weekly_avg": summary.get('weekly_avg'),
+            "last_night_5_min_high": summary.get('last_night_5_min_high', 0),
+            "baseline_low_upper": summary.get('baseline_low_upper', weekly_avg * 0.8 if weekly_avg else 0),
+            "baseline_balanced_lower": summary.get('baseline_balanced_lower', weekly_avg * 0.9 if weekly_avg else 0),
+            "baseline_balanced_upper": summary.get('baseline_balanced_upper', weekly_avg * 1.1 if weekly_avg else 0),
             "status": summary.get('status'),
         }
 
-    async def sync_health_data(self, start_date: datetime, end_date: datetime):
-        """Synkroniserer helsedata (HRV, søvn, etc.) for en gitt periode."""
+    async def sync_health_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
+        """Synkroniserer helsedata (HRV, etc.) for en gitt periode."""
         logger.info(f"Starter synkronisering av helsedata fra {start_date.date()} til {end_date.date()}")
         
         if not await self.garmin_client.initialize():
@@ -299,11 +324,22 @@ class SyncService:
 
         all_hrv_data = []
         
-        # Hent eksisterende HRV-datoer for å unngå duplikater
+        # Beregn grensen for "nylige" data (siste 30 dager)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        
+        # Hent eksisterende HRV-datoer BARE for det ønskede tidsrommet
         try:
             hrv_df = self.storage.get_hrv_data()
-            existing_dates = set(hrv_df.index.to_series().dt.date) if hrv_df is not None and not hrv_df.empty else set()
-            logger.info(f"Fant {len(existing_dates)} eksisterende HRV-datoer.")
+            if hrv_df is not None and not hrv_df.empty:
+                # Filtrer eksisterende data til kun det ønskede tidsrommet
+                start_filter = pd.to_datetime(start_date.date(), utc=True)
+                end_filter = pd.to_datetime(end_date.date(), utc=True)
+                filtered_hrv_df = hrv_df[(hrv_df.index >= start_filter) & (hrv_df.index <= end_filter)]
+                existing_dates = set(filtered_hrv_df.index.to_series().dt.date)
+                logger.info(f"Fant {len(existing_dates)} eksisterende HRV-datoer innenfor det ønskede tidsrommet.")
+            else:
+                existing_dates = set()
+                logger.info("Ingen eksisterende HRV-data funnet.")
         except Exception as e:
             logger.warning(f"Kunne ikke lese eksisterende HRV-datoer, fortsetter uten duplikatsjekk. Feil: {e}")
             existing_dates = set()
@@ -312,10 +348,17 @@ class SyncService:
         while current_date <= end_date:
             date_str = current_date.strftime("%Y-%m-%d")
             
-            if current_date.date() in existing_dates:
+            # Sjekk om vi skal hoppe over duplikater
+            is_recent = current_date >= recent_cutoff
+            should_skip = (current_date.date() in existing_dates and 
+                          not (force_refresh_recent and is_recent))
+            
+            if should_skip:
                 logger.info(f"Hopper over HRV-data for {date_str} (finnes allerede).")
                 current_date += timedelta(days=1)
                 continue
+            elif current_date.date() in existing_dates and force_refresh_recent and is_recent:
+                logger.info(f"Oppdaterer eksisterende HRV-data for {date_str} (force_refresh_recent=True).")
 
             try:
                 # Hent HRV-data

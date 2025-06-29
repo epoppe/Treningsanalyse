@@ -104,6 +104,7 @@ const HrvChart: React.FC<HrvChartProps> = ({ hrvData }) => {
     xaxis: {
       title: 'Dato',
       type: 'date',
+      range: [dates[0], dates[dates.length - 1]],
     },
     yaxis: {
       title: 'ms',
@@ -125,6 +126,7 @@ const HrvChart: React.FC<HrvChartProps> = ({ hrvData }) => {
         {show7DayAvg ? 'Skjul' : 'Vis'} 7-dagers snitt
       </ToggleButton>
       <Plot
+        key={`hrv-chart-${hrvData.length}-${show7DayAvg}`}
         data={traces}
         layout={layout}
         style={{ width: '100%', height: '500px' }}

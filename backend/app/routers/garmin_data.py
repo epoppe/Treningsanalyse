@@ -77,14 +77,14 @@ async def get_all_data(
 ):
     """
     Henter alle tilgjengelige data fra Garmin Connect.
-    Inkluderer aktiviteter, søvn, puls, stress, og treningsstatus.
+    Inkluderer aktiviteter, puls, stress, og treningsstatus.
     """
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
     
     # Hent alle datatyper parallelt
     activities_task = garmin_client.get_activities(start_date, end_date)
-    sleep_task = garmin_client.get_sleep_data(start_date, end_date)
+    
     heart_rate_task = garmin_client.get_heart_rate_data(start_date, end_date)
     stress_task = garmin_client.get_stress_data(start_date, end_date)
     training_status_task = garmin_client.get_training_status(start_date, end_date)
@@ -92,7 +92,6 @@ async def get_all_data(
     # Vent på at alle oppgaver er ferdige
     results = await asyncio.gather(
         activities_task,
-        sleep_task,
         heart_rate_task,
         stress_task,
         training_status_task,
@@ -100,11 +99,10 @@ async def get_all_data(
     )
     
     # Pakk ut resultatene
-    activities_data, sleep_data, heart_rate_data, stress_data, training_status_data = results
+    activities_data, heart_rate_data, stress_data, training_status_data = results
     
     return {
         "aktiviteter": activities_data.get("activities", []) if isinstance(activities_data, dict) else [],
-        "søvn": sleep_data.get("sleep", []) if isinstance(sleep_data, dict) else [],
         "puls": heart_rate_data.get("pulsdata", []) if isinstance(heart_rate_data, dict) else [],
         "stress": stress_data.get("stress", []) if isinstance(stress_data, dict) else [],
         "treningsstatus": training_status_data.get("treningsstatus", []) if isinstance(training_status_data, dict) else [],

@@ -1,11 +1,9 @@
 import { configureStore } from '@reduxjs/toolkit';
 import activitiesReducer from './slices/activitiesSlice';
-import sleepReducer from './slices/sleepSlice';
 
 export const store = configureStore({
   reducer: {
     activities: activitiesReducer,
-    sleep: sleepReducer,
   },
 });
 

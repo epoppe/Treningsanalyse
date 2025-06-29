@@ -42,6 +42,22 @@ async def run_activity_sync(job_id: str, garmin_client: GarminClient, storage: D
         if db_session:
             db_session.close()
 
+async def run_activity_sync_with_force(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool):
+    """Kjører aktivitetssynkronisering i bakgrunnen med mulighet for force refresh av nylige data."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.sync_activities(start_date, end_date, force_refresh_recent)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 async def run_health_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
     """Kjører helsedatasynkronisering i bakgrunnen."""
     db_session = None
@@ -50,6 +66,22 @@ async def run_health_sync(job_id: str, garmin_client: GarminClient, storage: Dat
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         await sync_service.sync_health_data(start_date, end_date)
+        sync_jobs[job_id].update({"status": "completed", "result": "OK", "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i helsesynk (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
+async def run_health_sync_with_force(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool):
+    """Kjører helsedatasynkronisering i bakgrunnen med mulighet for force refresh av nylige data."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        await sync_service.sync_health_data(start_date, end_date, force_refresh_recent)
         sync_jobs[job_id].update({"status": "completed", "result": "OK", "end_time": datetime.now(timezone.utc)})
     except Exception as e:
         logger.critical(f"Feil i helsesynk (jobb {job_id}): {e}", exc_info=True)
@@ -102,15 +134,15 @@ async def trigger_recent_activity_sync(
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Starter synkronisering av aktiviteter for de siste 30 dagene."""
+    """Starter synkronisering av aktiviteter for de siste 30 dagene med force refresh."""
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_activity_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(run_activity_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
-    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet.", "job_id": job_id}
+    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh).", "job_id": job_id}
 
 @router.post("/health", status_code=202)
 async def trigger_health_sync(
@@ -135,15 +167,15 @@ async def trigger_recent_health_sync(
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Starter synkronisering av helsedata for de siste 90 dagene."""
+    """Starter synkronisering av helsedata for de siste 90 dagene med force refresh for siste 30 dager."""
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=90)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_health_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(run_health_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
-    return {"message": "Synkronisering av siste 90 dagers helsedata startet.", "job_id": job_id}
+    return {"message": "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 30 dager).", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(
@@ -151,7 +183,7 @@ async def sync_historical_data(
     garmin_client: GarminClient = Depends(get_garmin_client),
     storage: DataStorage = Depends(get_data_storage)
 ):
-    """Start synkronisering av historiske data (aktiviteter og søvn) fra et gitt år."""
+    """Start synkronisering av historiske data (aktiviteter) fra et gitt år."""
     try:
         if start_year < 2010 or start_year > datetime.now().year:
             raise HTTPException(
@@ -164,7 +196,7 @@ async def sync_historical_data(
         sync_result = await garmin_client.sync_historical_data(start_year)
 
         activities_to_save = sync_result.get("all_activities", [])
-        sleep_entries_to_save = sync_result.get("all_sleep_entries", [])
+
 
         if activities_to_save:
             logger.info(f"Lagrer {len(activities_to_save)} aktiviteter fra historisk synkronisering for {start_year}.")
@@ -172,16 +204,12 @@ async def sync_historical_data(
         else:
             logger.info(f"Ingen nye aktiviteter å lagre fra historisk synkronisering for {start_year}.")
 
-        if sleep_entries_to_save:
-            logger.info(f"Lagrer {len(sleep_entries_to_save)} søvnregistreringer fra historisk synkronisering for {start_year}.")
-            storage.save_sleep_data(sleep_entries_to_save)
-        else:
-            logger.info(f"Ingen nye søvnregistreringer å lagre fra historisk synkronisering for {start_year}.")
+
 
         response_stats = {
             "year": sync_result.get("year"),
             "total_activities_synced": sync_result.get("total_activities_synced"),
-            "total_sleep_entries_synced": sync_result.get("total_sleep_entries_synced")
+
         }
 
         logger.info(f"Historisk datasynkroniseringsjobb for år {start_year} fullført. Statistikk: {response_stats}")

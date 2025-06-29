@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchActivities } from '@/store/slices/activitiesSlice';
-import { activitiesApi } from '@/utils/api';
+import { activitiesApi, syncApi } from '@/utils/api';
 
 const SyncPanelContainer = styled.div`
   background-color: #333;
@@ -82,7 +82,7 @@ const DataSyncPanel = () => {
 
     const interval = setInterval(async () => {
       try {
-        const statusData = await activitiesApi.getSyncStatus(jobId);
+        const statusData = await syncApi.getSyncStatus(jobId);
         setStatusMessage(`Synkroniseringsstatus: ${statusData.status}`);
 
         if (statusData.status === 'completed' || statusData.status === 'failed') {
@@ -113,7 +113,7 @@ const DataSyncPanel = () => {
     }
     try {
       setStatusMessage('Starter synkronisering...');
-      const response = await activitiesApi.syncActivities(startDate, endDate);
+      const response = await syncApi.syncActivities(startDate, endDate);
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Synkroniseringsfeil:', err);
@@ -124,7 +124,7 @@ const DataSyncPanel = () => {
   const handleSync30Days = async () => {
     try {
       setStatusMessage('Starter synkronisering for siste 30 dager...');
-      const response = await activitiesApi.syncLast30Days();
+      const response = await syncApi.syncRecentActivities();
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Feil ved synkronisering av siste 30 dager:', err);
@@ -148,7 +148,7 @@ const DataSyncPanel = () => {
           {isLoading ? 'Opptatt...' : 'Synk valgt periode'}
         </Button>
         <Button onClick={handleSync30Days} disabled={isLoading}>
-          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager'}
+          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager (force refresh)'}
         </Button>
       </ButtonGroup>
       {statusMessage && <StatusMessage>{statusMessage}</StatusMessage>}

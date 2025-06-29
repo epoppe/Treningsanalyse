@@ -30,10 +30,7 @@ class HrvSummary(BaseModel):
 
 class HRVData(BaseModel):
     hrv_summary: Optional[HrvSummary] = None
-    sleep_start_timestamp_gmt: Optional[datetime] = None
-    sleep_end_timestamp_gmt: Optional[datetime] = None
-    sleep_start_timestamp_local: Optional[datetime] = None
-    sleep_end_timestamp_local: Optional[datetime] = None
+
 
 # Oppdatert User-Agent for kompatibilitet med nyere Garmin API
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
@@ -62,6 +59,7 @@ class GarminClient:
         self.password = password
         self.token_dir = Path(token_dir)
         self.client_id = str(uuid.uuid4())
+        self._initialized = False
         logger.info(f"GarminClient instance {self.client_id} __init__. Token directory: {self.token_dir}. Patches ensured.")
         
     async def initialize(self):
@@ -80,6 +78,8 @@ class GarminClient:
             try:
                 await asyncio.to_thread(lambda: garth.client.username)
                 logger.info("Sesjon bekreftet som gyldig.")
+                self._initialized = True
+                return True
             except GarthException:
                 logger.info("Eksisterende sesjon er utløpt, utfører ny pålogging...")
                 raise  # Trigger ny pålogging nedenfor
@@ -92,9 +92,12 @@ class GarminClient:
                 # Lagre sesjonsinformasjon for fremtidig bruk
                 await asyncio.to_thread(garth.save, str(self.token_dir))
                 logger.info("Vellykket ny pålogging og lagring av sesjon.")
+                self._initialized = True
+                return True
             except GarthException as login_error:
                 logger.error(f"Pålogging feilet: {login_error}")
-                raise
+                self._initialized = False
+                return False
 
     def is_authenticated(self) -> bool:
         """Sjekker om en token-fil finnes i katalogen uten å gjøre et nettverkskall."""
@@ -133,32 +136,6 @@ class GarminClient:
             logger.error(traceback.format_exc())
             return None
 
-    async def get_sleep_data(self, date: datetime) -> Optional[Dict[str, Any]]:
-        """Henter søvndata for en gitt dato ved hjelp av garth.connectapi for økt robusthet."""
-        if not self.is_authenticated():
-            logger.error("Ikke autentisert. Kan ikke hente søvndata.")
-            return None
-        try:
-            date_str = date.strftime("%Y-%m-%d")
-            logger.info(f"Henter søvndata for {date_str} med connectapi")
-            
-            # Bruker connectapi for å unngå garths interne dataklasser
-            sleep_data = await asyncio.to_thread(
-                garth.connectapi,
-                "/wellness-service/wellness/dailySleep",
-                params={"date": date_str}
-            )
-            logger.debug(f"Mottatt rå søvndata for {date_str}: {sleep_data}")
-            return sleep_data
-        except GarthHTTPError as e:
-            if e.response.status_code == 404:
-                logger.info(f"Ingen søvndata funnet for {date_str}")
-                return None
-            logger.error(f"HTTP-feil ved henting av søvndata for {date_str}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"En uventet feil oppstod under henting av søvndata for {date_str}: {e}")
-            logger.error(traceback.format_exc())
-            return None
+
 
     # ... (resten av metodene i klassen forblir de samme) ...

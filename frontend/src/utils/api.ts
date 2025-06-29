@@ -41,14 +41,7 @@ export interface ActivityResponse {
   };
 }
 
-export interface SleepResponse {
-  sleep: any[];
-  count: number;
-  period: {
-    start: string;
-    end: string;
-  };
-}
+
 
 export const activitiesApi = {
   // Hent alle aktiviteter
@@ -104,11 +97,7 @@ export const activitiesApi = {
     return response.data;
   },
 
-  // Start synkronisering av de siste 30 dagers aktiviteter
-  syncLast30Days: async () => {
-    const response = await api.post<ApiResponse<any>>('/sync/recent');
-    return response.data;
-  },
+
 
   // Hent status for en synk-jobb
   getSyncStatus: async (jobId: string) => {
@@ -118,15 +107,8 @@ export const activitiesApi = {
 };
 
 export const healthApi = {
-  getSleep: (date: string) => apiCall('get', `/health/sleep/${date}`),
   getStress: (date: string) => apiCall('get', `/health/stress/${date}`),
   getHrv: (date: string) => apiCall('get', `/health/hrv/${date}`),
-};
-
-export const sleepApi = {
-  getSleepData: (startDate: string, endDate: string) => {
-    return apiCall('get', `/sleep/?start_date=${startDate}&end_date=${endDate}`);
-  },
 };
 
 export const analysisApi = {

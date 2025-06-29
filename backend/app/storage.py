@@ -30,7 +30,7 @@ class DataStorage:
         # Definer filbaner
         self.activities_file = os.path.join(self.data_dir, "activities.parquet")
         self.activity_details_file = os.path.join(self.data_dir, "activity_details.parquet")
-        self.sleep_file = os.path.join(self.data_dir, "sleep.parquet")
+
         self.heart_rate_file = os.path.join(self.data_dir, "heart_rate.parquet")
         self.resting_heart_rate_file = os.path.join(self.data_dir, "resting_heart_rate.parquet")
         self.hrv_file = os.path.join(self.data_dir, "hrv.parquet")
@@ -47,11 +47,7 @@ class DataStorage:
             'activity_id': 'int64', 'timestamp': 'datetime64[ns]', 'latitude': 'float64', 'longitude': 'float64',
             'distance': 'float64', 'speed': 'float64', 'heart_rate': 'int64', 'cadence': 'int64', 'temperature': 'int64'
         }
-        self.sleep_columns = {
-            'date': 'datetime64[ns]', 'start_time': 'datetime64[ns]', 'end_time': 'datetime64[ns]',
-            'duration_seconds': 'int64', 'rem_seconds': 'int64', 'deep_seconds': 'int64', 'light_seconds': 'int64',
-            'awake_seconds': 'int64', 'score': 'int64'
-        }
+
         self.heart_rate_columns = {'timestamp': 'datetime64[ns]', 'heart_rate': 'int64'}
         self.resting_heart_rate_columns = {'date': 'datetime64[ns]', 'resting_hr': 'int64'}
         self.hrv_columns = {
@@ -63,7 +59,7 @@ class DataStorage:
         # Last inn data ved initialisering
         self.activities_df = self._load_or_initialize_dataframe(self.activities_file, self.activities_columns, 'activity_id')
         self.activity_details_df = self._load_or_initialize_dataframe(self.activity_details_file, self.activity_details_columns)
-        self.sleep_df = self._load_or_initialize_dataframe(self.sleep_file, self.sleep_columns, 'date')
+
         self.heart_rate_df = self._load_or_initialize_dataframe(self.heart_rate_file, self.heart_rate_columns, 'timestamp')
         self.resting_heart_rate_df = self._load_or_initialize_dataframe(self.resting_heart_rate_file, self.resting_heart_rate_columns, 'date')
         self.hrv_df = self._load_or_initialize_dataframe(self.hrv_file, self.hrv_columns, 'date')
@@ -153,8 +149,7 @@ class DataStorage:
     def get_activity_details(self, activity_id: int) -> Optional[pd.DataFrame]:
         return self.activity_details_df[self.activity_details_df['activity_id'] == activity_id]
 
-    def get_sleep_data(self) -> pd.DataFrame:
-        return self.sleep_df
+
 
     def get_hrv_data(self) -> Optional[pd.DataFrame]:
         """Henter HRV-data som en DataFrame."""
@@ -171,8 +166,7 @@ class DataStorage:
     def save_activity_details(self, details_data: List[Dict[str, Any]]):
         self._save_data_internal(details_data, 'activity_details_df', self.activity_details_file, self.activity_details_columns, 'timestamp', 'Aktivitetsdetaljer')
 
-    def save_sleep_data(self, sleep_data: List[Dict[str, Any]]):
-        self._save_data_internal(sleep_data, 'sleep_df', self.sleep_file, self.sleep_columns, 'date', 'Søvn')
+
     
     def save_heart_rate_data(self, heart_rate_data: List[Dict[str, Any]]):
         self._save_data_internal(heart_rate_data, 'heart_rate_df', self.heart_rate_file, self.heart_rate_columns, 'timestamp', 'Puls')

@@ -154,7 +154,7 @@ const HealthDataSyncPanel: React.FC<HealthDataSyncPanelProps> = ({ onSyncComplet
           {isLoading ? 'Opptatt...' : 'Synk valgt periode'}
         </Button>
         <Button onClick={handleSync90Days} disabled={isLoading}>
-          {isLoading ? 'Opptatt...' : 'Synk siste 90 dager'}
+          {isLoading ? 'Opptatt...' : 'Synk siste 90 dager (force refresh siste 30)'}
         </Button>
       </ButtonGroup>
       {statusMessage && <StatusMessage>{statusMessage}</StatusMessage>}
