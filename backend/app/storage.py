@@ -160,6 +160,17 @@ class DataStorage:
     def get_resting_heart_rate_data(self) -> pd.DataFrame:
         return self.resting_heart_rate_df
 
+    def get_existing_activity_ids(self, db: Session) -> set:
+        """Henter alle eksisterende aktivitets-ID-er fra databasen."""
+        try:
+            existing_activities = db.query(Activity.id).all()
+            existing_ids = {str(activity.id) for activity in existing_activities}
+            logger.info(f"Hentet {len(existing_ids)} eksisterende aktivitets-ID-er fra databasen")
+            return existing_ids
+        except Exception as e:
+            logger.error(f"Feil ved henting av eksisterende aktivitets-ID-er: {e}")
+            return set()
+
     def save_activities(self, activities_data: List[Dict[str, Any]]):
         self._save_data_internal(activities_data, 'activities_df', self.activities_file, self.activities_columns, 'activity_id', 'Aktiviteter')
 

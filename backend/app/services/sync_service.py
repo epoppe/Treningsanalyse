@@ -223,6 +223,9 @@ class SyncService:
                     
                 # Sjekk om aktiviteten er nylig og om vi skal force refresh
                 activity_start_time = datetime.fromisoformat(act_data['startTimeGMT'])
+                # Sørg for at begge datetimes har samme timezone-oppsett
+                if activity_start_time.tzinfo is None:
+                    activity_start_time = activity_start_time.replace(tzinfo=timezone.utc)
                 is_recent = activity_start_time >= recent_cutoff
                 should_skip = (activity_id in existing_ids and 
                               not (force_refresh_recent and is_recent))
@@ -263,11 +266,16 @@ class SyncService:
                 if not avg_speed and avg_pace and avg_pace > 0:
                     avg_speed = (1000 / (avg_pace * 60))
 
+                # Sørg for at start_time har timezone-info
+                start_time = datetime.fromisoformat(act_data['startTimeGMT'])
+                if start_time.tzinfo is None:
+                    start_time = start_time.replace(tzinfo=timezone.utc)
+                
                 new_activity = Activity(
                     id=activity_id,
                     name=act_data.get('activityName'),
                     type=activity_type_key,
-                    start_time=datetime.fromisoformat(act_data['startTimeGMT']),
+                    start_time=start_time,
                     distance=act_data.get('distance'),
                     duration=act_data.get('duration'),
                     calories=act_data.get('calories'),

@@ -108,6 +108,73 @@ class GarminClient:
             return True
         return False
 
+    async def get_activities(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Henter aktiviteter for en gitt periode."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente aktiviteter.")
+            return []
+        
+        try:
+            # Konverter datoer til strenger som Garmin API forventer
+            start_str = start_date.strftime("%Y-%m-%d")
+            end_str = end_date.strftime("%Y-%m-%d")
+            
+            logger.info(f"Henter aktiviteter fra Garmin API: {start_str} til {end_str}")
+            
+            # Hent aktiviteter fra Garmin Connect API
+            activities = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/activitylist-service/activities/search/activities?startDate={start_str}&endDate={end_str}"
+            )
+            
+            if isinstance(activities, list):
+                logger.info(f"Hentet {len(activities)} aktiviteter fra Garmin")
+                return activities
+            else:
+                logger.warning("Uventet respons fra Garmin API - ikke en liste")
+                return []
+                
+        except GarthHTTPError as e:
+            logger.error(f"HTTP-feil ved henting av aktiviteter: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Feil ved henting av aktiviteter: {e}")
+            logger.error(traceback.format_exc())
+            return []
+
+    async def get_activity_details(self, activity_id: str) -> Optional[bytes]:
+        """Henter detaljerte data (FIT-fil) for en aktivitet."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente aktivitetsdetaljer.")
+            return None
+        
+        try:
+            logger.info(f"Henter detaljer for aktivitet {activity_id}")
+            
+            # Hent FIT-fil fra Garmin Connect API
+            fit_data = await asyncio.to_thread(
+                garth.download, 
+                f"/download-service/files/activity/{activity_id}"
+            )
+            
+            if isinstance(fit_data, bytes):
+                logger.info(f"Hentet FIT-data for aktivitet {activity_id} ({len(fit_data)} bytes)")
+                return fit_data
+            else:
+                logger.warning(f"Uventet respons ved henting av FIT-data for aktivitet {activity_id}")
+                return None
+                
+        except GarthHTTPError as e:
+            if e.response.status_code == 404:
+                logger.info(f"Ingen FIT-data funnet for aktivitet {activity_id}")
+                return None
+            logger.error(f"HTTP-feil ved henting av FIT-data for aktivitet {activity_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av FIT-data for aktivitet {activity_id}: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
     async def get_hrv_data(self, date: datetime) -> Optional[Dict[str, Any]]:
         """Henter HRV-data for en spesifikk dato."""
         if not self.is_authenticated():
@@ -135,7 +202,3 @@ class GarminClient:
             logger.error(f"En uventet feil oppstod under henting av HRV-data for {date_str}: {e}")
             logger.error(traceback.format_exc())
             return None
-
-
-
-    # ... (resten av metodene i klassen forblir de samme) ...
