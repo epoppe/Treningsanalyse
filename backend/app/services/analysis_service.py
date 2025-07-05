@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import logging
 from ..storage import DataStorage
 from typing import Optional
@@ -30,10 +31,17 @@ class AnalysisService:
         
         avg_economy = activity_details['heart_rate_per_speed'].mean()
         
+        # Erstatt NaN-verdier med None for JSON-kompatibilitet
+        economy_data = activity_details[['timestamp', 'heart_rate_per_speed']].replace({np.nan: None})
+        
+        # Konverter datetime-kolonner til strenger for JSON-serialisering
+        if 'timestamp' in economy_data.columns:
+            economy_data['timestamp'] = economy_data['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
         return {
             "activity_id": activity_id,
-            "average_economy": avg_economy,
-            "economy_timeseries": activity_details[['timestamp', 'heart_rate_per_speed']].to_dict(orient='records')
+            "average_economy": avg_economy if pd.notna(avg_economy) else None,
+            "economy_timeseries": economy_data.to_dict(orient='records')
         }
 
     def get_training_load(self) -> dict:
@@ -58,11 +66,18 @@ class AnalysisService:
             return {"weekly_tss": [], "avg_weekly_tss": 0}
 
         # Konverter til liste av dictionaries for JSON-respons
-        tss_list = weekly_tss.to_dict(orient='records')
+        # Erstatt NaN-verdier med None for JSON-kompatibilitet
+        tss_clean = weekly_tss.replace({np.nan: None})
+        
+        # Konverter datetime-kolonner til strenger for JSON-serialisering
+        if 'week' in tss_clean.columns:
+            tss_clean['week'] = tss_clean['week'].dt.strftime('%Y-%m-%d')
+        
+        tss_list = tss_clean.to_dict(orient='records')
         
         return {
             "weekly_tss": tss_list,
-            "avg_weekly_tss": avg_weekly_tss
+            "avg_weekly_tss": avg_weekly_tss if pd.notna(avg_weekly_tss) else None
         }
         
     def get_hrv_over_time(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
@@ -94,7 +109,14 @@ class AnalysisService:
         hrv_df_filtered['rolling_avg_7d'] = hrv_df_filtered['last_night_avg'].rolling(window=7, min_periods=1).mean()
 
         # Konverter tilbake til en liste av dictionaries for API-et
-        hrv_data_list = hrv_df_filtered.reset_index().to_dict(orient='records')
+        # Erstatt NaN-verdier med None for JSON-kompatibilitet
+        hrv_df_clean = hrv_df_filtered.reset_index().replace({np.nan: None})
+        
+        # Konverter datetime-kolonner til strenger for JSON-serialisering
+        if 'date' in hrv_df_clean.columns:
+            hrv_df_clean['date'] = hrv_df_clean['date'].dt.strftime('%Y-%m-%d')
+        
+        hrv_data_list = hrv_df_clean.to_dict(orient='records')
         
         return {"hrv_data": hrv_data_list}
 

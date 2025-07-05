@@ -305,21 +305,33 @@ class SyncService:
     def _normalize_hrv_data(self, hrv_data: dict, calendar_date: str) -> Optional[dict]:
         """Normaliserer HRV-data til en flat struktur for lagring."""
         if not hrv_data or 'hrv_summary' not in hrv_data:
+            logger.warning(f"HRV-data mangler eller har ingen 'hrv_summary' for {calendar_date}: {hrv_data}")
             return None
         
         summary = hrv_data['hrv_summary']
         
+        # Sjekk om summary er None
+        if summary is None:
+            logger.warning(f"hrv_summary er None for {calendar_date}")
+            return None
+        
         # Bruk weekly_avg som fallback for baseline-verdier hvis de ikke finnes
-        weekly_avg = summary.get('weekly_avg', 0)
+        weekly_avg = summary.get('weekly_avg', 0) if summary else 0
+        last_night_avg = summary.get('last_night_avg') if summary else None
+        
+        # Hopp over hvis vi ikke har noen HRV-verdier
+        if not last_night_avg:
+            logger.info(f"Ingen last_night_avg verdi for {calendar_date}, hopper over")
+            return None
         
         return {
             "date": calendar_date,
-            "last_night_avg": summary.get('last_night_avg'),
-            "last_night_5_min_high": summary.get('last_night_5_min_high', 0),
-            "baseline_low_upper": summary.get('baseline_low_upper', weekly_avg * 0.8 if weekly_avg else 0),
-            "baseline_balanced_lower": summary.get('baseline_balanced_lower', weekly_avg * 0.9 if weekly_avg else 0),
-            "baseline_balanced_upper": summary.get('baseline_balanced_upper', weekly_avg * 1.1 if weekly_avg else 0),
-            "status": summary.get('status'),
+            "last_night_avg": last_night_avg,
+            "last_night_5_min_high": summary.get('last_night_5_min_high', 0) if summary else 0,
+            "baseline_low_upper": summary.get('baseline_low_upper', weekly_avg * 0.8 if weekly_avg else 0) if summary else 0,
+            "baseline_balanced_lower": summary.get('baseline_balanced_lower', weekly_avg * 0.9 if weekly_avg else 0) if summary else 0,
+            "baseline_balanced_upper": summary.get('baseline_balanced_upper', weekly_avg * 1.1 if weekly_avg else 0) if summary else 0,
+            "status": summary.get('status') if summary else None,
         }
 
     async def sync_health_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
@@ -369,8 +381,8 @@ class SyncService:
                 logger.info(f"Oppdaterer eksisterende HRV-data for {date_str} (force_refresh_recent=True).")
 
             try:
-                # Hent HRV-data
-                hrv_data = await self.garmin_client.get_hrv_data(current_date)
+                # Hent HRV-data (prøv alternative metode først)
+                hrv_data = await self.garmin_client.get_hrv_data_alternative(current_date)
                 if hrv_data:
                     normalized_hrv = self._normalize_hrv_data(hrv_data, date_str)
                     if normalized_hrv:
