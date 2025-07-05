@@ -165,7 +165,8 @@ class GarminClient:
                 return None
                 
         except GarthHTTPError as e:
-            if e.response.status_code == 404:
+            # Sjekk om det er en 404-feil (ingen data funnet)
+            if "404" in str(e) or "not found" in str(e).lower():
                 logger.info(f"Ingen FIT-data funnet for aktivitet {activity_id}")
                 return None
             logger.error(f"HTTP-feil ved henting av FIT-data for aktivitet {activity_id}: {e}")
@@ -190,7 +191,8 @@ class GarminClient:
             validated_data = HRVData.model_validate(hrv_data)
             return validated_data.model_dump()
         except GarthHTTPError as e:
-            if e.response.status_code == 404:
+            # Sjekk om det er en 404-feil (ingen data funnet)
+            if "404" in str(e) or "not found" in str(e).lower():
                 logger.info(f"Ingen HRV-data funnet for {date_str}")
                 return None
             logger.error(f"HTTP-feil ved henting av HRV-data for {date_str}: {e}")
