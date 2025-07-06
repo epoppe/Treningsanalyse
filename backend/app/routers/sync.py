@@ -175,7 +175,7 @@ async def trigger_recent_health_sync(
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
     background_tasks.add_task(run_health_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
-    return {"message": "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 30 dager).", "job_id": job_id}
+    return {"message": "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 2 dager).", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(

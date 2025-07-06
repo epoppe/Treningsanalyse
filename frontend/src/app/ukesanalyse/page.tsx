@@ -8,6 +8,7 @@ import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
 import DataSyncPanel from '../../components/DataSyncPanel';
 import RunningEconomyChart from '../../components/RunningEconomyChart';
+import VO2MaxChart from '../../components/VO2MaxChart';
 import CadenceChart from '../../components/CadenceChart';
 import StrideLengthChart from '../../components/StrideLengthChart';
 
@@ -116,6 +117,11 @@ export default function RunningEconomyPage() {
           <RunningEconomyChart
             activities={runningActivities}
             title="Løpsøkonomi"
+            timeFilter={timeFilter}
+          />
+          <VO2MaxChart
+            activities={runningActivities}
+            title="VO2Max"
             timeFilter={timeFilter}
           />
           <CadenceChart

@@ -188,8 +188,8 @@ class SyncService:
             # Filtrer bort duplikater basert på 'activityId'
             existing_ids = self.storage.get_existing_activity_ids(self.db)
             
-            # Beregn grensen for "nylige" data (siste 30 dager)
-            recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+            # Beregn grensen for "nylige" data (siste 2 dager)
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
 
             activities_to_save = [
                 act for act in activities_raw
@@ -344,8 +344,8 @@ class SyncService:
 
         all_hrv_data = []
         
-        # Beregn grensen for "nylige" data (siste 30 dager)
-        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        # Beregn grensen for "nylige" data (siste 2 dager)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
         
         # Hent eksisterende HRV-datoer BARE for det ønskede tidsrommet
         try:
