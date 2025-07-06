@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { fetchActivitiesByDateRange } from '../../store/slices/activitiesSlice';
+import { fetchActivities, Activity } from '../../store/slices/activitiesSlice';
 import styled from 'styled-components';
 import ActivityChart from '../../components/ActivityChart';
+import MonthlyComparisonChart from '../../components/MonthlyComparisonChart';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -28,18 +29,104 @@ const Subtitle = styled.p`
   font-size: 1.125rem;
 `;
 
-const DateFilterContainer = styled.div`
+const FiltersContainer = styled.div`
+  margin-bottom: 2rem;
   display: flex;
   gap: 1rem;
-  margin-bottom: 2rem;
+  flex-wrap: wrap;
   justify-content: center;
   align-items: center;
 `;
 
-const DateInput = styled.input`
+const FilterSection = styled.div`
+  background: white;
+  padding: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  min-width: 300px;
+`;
+
+const FilterTitle = styled.h3`
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+  font-size: 1rem;
+`;
+
+const CheckboxContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+`;
+
+const CheckboxLabel = styled.label`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background-color 0.2s;
+  
+  &:hover {
+    background-color: #f8f9fa;
+  }
+`;
+
+const Checkbox = styled.input`
+  cursor: pointer;
+`;
+
+const CheckboxText = styled.span`
+  font-size: 0.9rem;
+  color: #333;
+`;
+
+const SelectAllButton = styled.button`
+  padding: 0.25rem 0.5rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-right: 0.5rem;
+
+  &:hover {
+    background: #2980b9;
+  }
+`;
+
+const ClearAllButton = styled.button`
+  padding: 0.25rem 0.5rem;
+  background: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+
+  &:hover {
+    background: #c0392b;
+  }
+`;
+
+const SelectedTypesDisplay = styled.div`
+  margin-top: 0.5rem;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #666;
+  min-height: 1.5rem;
+`;
+
+const Select = styled.select`
   padding: 0.5rem;
   border: 1px solid #ddd;
   border-radius: 4px;
+  background: white;
+  min-width: 200px;
   font-size: 1rem;
 `;
 
@@ -55,11 +142,16 @@ const FilterButton = styled.button`
   &:hover {
     background: #2980b9;
   }
+
+  &:disabled {
+    background: #bdc3c7;
+    cursor: not-allowed;
+  }
 `;
 
 const StatsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 1.5rem;
   margin-bottom: 2rem;
 `;
@@ -90,33 +182,19 @@ const StatUnit = styled.span`
   font-weight: normal;
 `;
 
+const PeriodSection = styled.div`
+  margin-bottom: 2rem;
+`;
+
+const PeriodTitle = styled.h2`
+  color: #2c3e50;
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  text-align: center;
+`;
+
 const ChartsContainer = styled.div`
   margin-top: 2rem;
-`;
-
-const ButtonContainer = styled.div`
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-`;
-
-const Button = styled.button`
-  padding: 0.5rem 1rem;
-  background: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-
-  &:hover {
-    background: #2980b9;
-  }
-
-  &:disabled {
-    background: #bdc3c7;
-    cursor: not-allowed;
-  }
 `;
 
 const LoadingSpinner = styled.div`
@@ -137,33 +215,157 @@ const LoadingSpinner = styled.div`
 const StatistikkPage = () => {
   const dispatch = useAppDispatch();
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
-  
-  // Sett standard datoperiode til siste 30 dager
-  const [startDate, setStartDate] = useState(() => {
+  const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
+  const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
+  const [allFilteredActivities, setAllFilteredActivities] = useState<Activity[]>([]);
+
+  // Hent unike aktivitetstyper
+  const activityTypes = useMemo(() => {
+    const types = activities.map(a => a.activityType?.typeKey).filter(Boolean);
+    return Array.from(new Set(types as string[]));
+  }, [activities]);
+
+  // Beregn datoer for trailing 12 måneder
+  const trailing12MonthsDate = useMemo(() => {
     const date = new Date();
-    date.setDate(date.getDate() - 30);
-    return date.toISOString().split('T')[0];
-  });
+    date.setMonth(date.getMonth() - 12);
+    return date;
+  }, []);
+
+  // Beregn datoer for trailing 24 måneder (for å sammenligne med året før)
+  const trailing24MonthsDate = useMemo(() => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 24);
+    return date;
+  }, []);
+
+  // Filtrer aktiviteter basert på valgte typer og siste 12 måneder
+  useEffect(() => {
+    let tempActivities = activities.filter(activity => {
+      const activityDate = new Date(activity.startTimeLocal);
+      return activityDate >= trailing12MonthsDate;
+    });
+
+    if (selectedActivityTypes.length > 0) {
+      tempActivities = tempActivities.filter(a => 
+        selectedActivityTypes.includes(a.activityType?.typeKey || '')
+      );
+    }
+
+    setFilteredActivities(tempActivities);
+  }, [activities, selectedActivityTypes, trailing12MonthsDate]);
+
+  // Filtrer alle aktiviteter basert på valgte typer (for grafene - alle år)
+  useEffect(() => {
+    let tempActivities = activities;
+
+    if (selectedActivityTypes.length > 0) {
+      tempActivities = tempActivities.filter(a => 
+        selectedActivityTypes.includes(a.activityType?.typeKey || '')
+      );
+    }
+
+    setAllFilteredActivities(tempActivities);
+  }, [activities, selectedActivityTypes]);
+
+  // Initialiser med alle aktivitetstyper valgt kun første gang
+  const [hasInitialized, setHasInitialized] = useState(false);
   
-  const [endDate, setEndDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  useEffect(() => {
+    if (activityTypes.length > 0 && selectedActivityTypes.length === 0 && !hasInitialized) {
+      setSelectedActivityTypes(activityTypes);
+      setHasInitialized(true);
+    }
+  }, [activityTypes, selectedActivityTypes.length, hasInitialized]);
 
   useEffect(() => {
     if (status === 'idle') {
-      dispatch(fetchActivitiesByDateRange({ startDate, endDate }));
+      dispatch(fetchActivities());
     }
-  }, [status, dispatch, startDate, endDate]);
+  }, [status, dispatch]);
 
-  const handleFilterClick = () => {
-    dispatch(fetchActivitiesByDateRange({ startDate, endDate }));
+  const handleActivityTypeChange = (type: string, checked: boolean) => {
+    if (checked) {
+      setSelectedActivityTypes(prev => [...prev, type]);
+    } else {
+      setSelectedActivityTypes(prev => prev.filter(t => t !== type));
+    }
+  };
+
+  const handleSelectAll = () => {
+    setSelectedActivityTypes(activityTypes);
+  };
+
+  const handleClearAll = () => {
+    setSelectedActivityTypes([]);
   };
 
   const handleForceRefresh = () => {
-    dispatch(fetchActivitiesByDateRange({ startDate, endDate, forceRefresh: true }));
+    dispatch(fetchActivities());
   };
 
   const isLoading = status === 'loading';
+
+  // Beregn månedlig statistikk for trailing 12 måneder og sammenlign med året før
+  const getMonthlyStats = () => {
+    const monthlyData: { [key: string]: { distance: number; time: number; count: number } } = {};
+    const monthlyDataLastYear: { [key: string]: { distance: number; time: number; count: number } } = {};
+    
+    // Opprett strukturen for siste 12 måneder
+    for (let i = 11; i >= 0; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlyData[monthKey] = { distance: 0, time: 0, count: 0 };
+    }
+
+    // Opprett strukturen for samme måneder året før
+    for (let i = 23; i >= 12; i--) {
+      const date = new Date();
+      date.setMonth(date.getMonth() - i);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      monthlyDataLastYear[monthKey] = { distance: 0, time: 0, count: 0 };
+    }
+
+    // Hent alle aktiviteter for de siste 24 månedene for sammenligning
+    const allActivitiesFor24Months = activities.filter(activity => {
+      const activityDate = new Date(activity.startTimeLocal);
+      return activityDate >= trailing24MonthsDate && 
+             (selectedActivityTypes.length === 0 || selectedActivityTypes.includes(activity.activityType?.typeKey || ''));
+    });
+
+    allActivitiesFor24Months.forEach(activity => {
+      const activityDate = new Date(activity.startTimeLocal);
+      const monthKey = `${activityDate.getFullYear()}-${String(activityDate.getMonth() + 1).padStart(2, '0')}`;
+      
+      if (monthlyData[monthKey]) {
+        monthlyData[monthKey].distance += (activity.distance || 0) / 1000;
+        monthlyData[monthKey].time += (activity.duration || 0) / 60;
+        monthlyData[monthKey].count += 1;
+      } else if (monthlyDataLastYear[monthKey]) {
+        monthlyDataLastYear[monthKey].distance += (activity.distance || 0) / 1000;
+        monthlyDataLastYear[monthKey].time += (activity.duration || 0) / 60;
+        monthlyDataLastYear[monthKey].count += 1;
+      }
+    });
+
+    return { current: monthlyData, lastYear: monthlyDataLastYear };
+  };
+
+  const monthlyStats = getMonthlyStats();
+  
+  // Hjelpefunksjon for å beregne endring i prosent
+  const calculatePercentChange = (current: number, previous: number) => {
+    if (previous === 0) return current > 0 ? 100 : 0;
+    return ((current - previous) / previous) * 100;
+  };
+
+  // Hjelpefunksjon for å finne tilsvarende måned året før
+  const getLastYearMonth = (currentMonthKey: string) => {
+    const [year, month] = currentMonthKey.split('-');
+    const lastYearKey = `${parseInt(year) - 1}-${month}`;
+    return monthlyStats.lastYear[lastYearKey] || { distance: 0, time: 0, count: 0 };
+  };
 
   if (error) {
     return (
@@ -178,37 +380,49 @@ const StatistikkPage = () => {
   return (
     <Container>
       <Header>
-        <Title>Treningsstatistikk</Title>
+        <Title>Treningsstatistikk - Siste 12 måneder</Title>
         <Subtitle>Oversikt over dine treningsprestasjoner</Subtitle>
       </Header>
 
-      <DateFilterContainer>
-        <DateInput
-          type="date"
-          value={startDate}
-          onChange={(e) => setStartDate(e.target.value)}
+      <FiltersContainer>
+        <FilterSection>
+          <FilterTitle>Velg aktivitetstyper</FilterTitle>
+          <div style={{ marginBottom: '0.5rem' }}>
+            <SelectAllButton onClick={handleSelectAll} disabled={isLoading}>
+              Velg alle
+            </SelectAllButton>
+            <ClearAllButton onClick={handleClearAll} disabled={isLoading}>
+              Fjern alle
+            </ClearAllButton>
+          </div>
+          <CheckboxContainer>
+            {activityTypes.map((type) => (
+              <CheckboxLabel key={type}>
+                <Checkbox
+                  type="checkbox"
+                  checked={selectedActivityTypes.includes(type)}
+                  onChange={(e) => handleActivityTypeChange(type, e.target.checked)}
+                  disabled={isLoading}
+                />
+                <CheckboxText>{type}</CheckboxText>
+              </CheckboxLabel>
+            ))}
+          </CheckboxContainer>
+          <SelectedTypesDisplay>
+            {selectedActivityTypes.length > 0 
+              ? `Valgte typer: ${selectedActivityTypes.join(', ')}`
+              : 'Ingen aktivitetstyper valgt'}
+          </SelectedTypesDisplay>
+        </FilterSection>
+        
+        <FilterButton 
+          onClick={handleForceRefresh} 
           disabled={isLoading}
-        />
-        <span>til</span>
-        <DateInput
-          type="date"
-          value={endDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          disabled={isLoading}
-        />
-        <ButtonContainer>
-          <Button onClick={handleFilterClick} disabled={isLoading}>
-            {isLoading ? <LoadingSpinner /> : 'Oppdater periode'}
-          </Button>
-          <Button 
-            onClick={handleForceRefresh} 
-            disabled={isLoading}
-            style={{ background: '#e74c3c' }}
-          >
-            {isLoading ? <LoadingSpinner /> : 'Oppdater fra Garmin'}
-          </Button>
-        </ButtonContainer>
-      </DateFilterContainer>
+          style={{ background: '#e74c3c', alignSelf: 'flex-start' }}
+        >
+          {isLoading ? <LoadingSpinner /> : 'Oppdater fra Garmin'}
+        </FilterButton>
+      </FiltersContainer>
 
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: '2rem' }}>
@@ -217,60 +431,98 @@ const StatistikkPage = () => {
         </div>
       ) : (
         <>
-          <StatsGrid>
-            <StatCard>
-              <StatTitle>Total distanse</StatTitle>
-              <StatValue>
-                {activities.reduce((sum, act) => sum + (act.distance || 0), 0).toFixed(1)} <StatUnit>km</StatUnit>
-              </StatValue>
-            </StatCard>
+          <PeriodSection>
+            <PeriodTitle>
+              Totalt siste 12 måneder
+              {selectedActivityTypes.length > 0 && selectedActivityTypes.length < activityTypes.length && (
+                <span style={{ fontSize: '1rem', color: '#666', fontWeight: 'normal' }}>
+                  {' '}({selectedActivityTypes.length} av {activityTypes.length} aktivitetstyper)
+                </span>
+              )}
+            </PeriodTitle>
+            <StatsGrid>
+              <StatCard>
+                <StatTitle>Total distanse</StatTitle>
+                <StatValue>
+                  {(filteredActivities.reduce((sum, act) => sum + (act.distance || 0), 0) / 1000).toFixed(1)} <StatUnit>km</StatUnit>
+                </StatValue>
+              </StatCard>
 
-            <StatCard>
-              <StatTitle>Total treningstid</StatTitle>
-              <StatValue>
-                {Math.round(activities.reduce((sum, act) => sum + (act.duration || 0), 0))} <StatUnit>min</StatUnit>
-              </StatValue>
-            </StatCard>
+              <StatCard>
+                <StatTitle>Total treningstid</StatTitle>
+                <StatValue>
+                  {Math.round(filteredActivities.reduce((sum, act) => sum + (act.duration || 0), 0) / 3600)} <StatUnit>timer</StatUnit>
+                </StatValue>
+              </StatCard>
 
-            <StatCard>
-              <StatTitle>Totalt kaloriforbruk</StatTitle>
-              <StatValue>
-                {Math.round(activities.reduce((sum, act) => sum + (act.calories || 0), 0))} <StatUnit>kcal</StatUnit>
-              </StatValue>
-            </StatCard>
+              <StatCard>
+                <StatTitle>Antall aktiviteter</StatTitle>
+                <StatValue>
+                  {filteredActivities.length} <StatUnit>økter</StatUnit>
+                </StatValue>
+              </StatCard>
 
-            <StatCard>
-              <StatTitle>Gjennomsnittlig puls</StatTitle>
-              <StatValue>
-                {Math.round(
-                  activities.reduce((sum, act) => sum + (act.average_hr || 0), 0) / 
-                  activities.filter(act => act.average_hr).length || 0
-                )} <StatUnit>bpm</StatUnit>
-              </StatValue>
-            </StatCard>
+              <StatCard>
+                <StatTitle>Gjennomsnitt per måned</StatTitle>
+                <StatValue>
+                  {(filteredActivities.length / 12).toFixed(1)} <StatUnit>økter/måned</StatUnit>
+                </StatValue>
+              </StatCard>
+            </StatsGrid>
+          </PeriodSection>
 
-            <StatCard>
-              <StatTitle>Antall aktiviteter</StatTitle>
-              <StatValue>
-                {activities.length} <StatUnit>økter</StatUnit>
-              </StatValue>
-            </StatCard>
-
-            <StatCard>
-              <StatTitle>Mest populære aktivitet</StatTitle>
-              <StatValue style={{ fontSize: '1.5rem' }}>
-                {Object.entries(
-                  activities.reduce((acc, act) => {
-                    acc[act.type] = (acc[act.type] || 0) + 1;
-                    return acc;
-                  }, {} as Record<string, number>)
-                ).sort(([,a], [,b]) => b - a)[0]?.[0] || 'Ingen aktiviteter'}
-              </StatValue>
-            </StatCard>
-          </StatsGrid>
+          <PeriodSection>
+            <PeriodTitle>Månedlig fordeling</PeriodTitle>
+            <StatsGrid>
+              {Object.entries(monthlyStats.current).map(([month, stats]) => {
+                const lastYearStats = getLastYearMonth(month);
+                const distanceChange = calculatePercentChange(stats.distance, lastYearStats.distance);
+                const timeChange = calculatePercentChange(stats.time, lastYearStats.time);
+                const countChange = calculatePercentChange(stats.count, lastYearStats.count);
+                
+                return (
+                  <StatCard key={month}>
+                    <StatTitle>{month}</StatTitle>
+                    <StatValue style={{ fontSize: '1.2rem' }}>
+                      {stats.distance.toFixed(1)} <StatUnit>km</StatUnit>
+                    </StatValue>
+                    <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                      <div>{Math.round(stats.time / 60)} timer</div>
+                      <div>{stats.count} aktiviteter</div>
+                    </div>
+                    
+                    {/* Sammenligning med året før */}
+                    <div style={{ fontSize: '0.8rem', marginTop: '0.5rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
+                      <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#2c3e50' }}>
+                        Vs. {parseInt(month.split('-')[0]) - 1}:
+                      </div>
+                      <div style={{ color: distanceChange >= 0 ? '#27ae60' : '#e74c3c' }}>
+                        {distanceChange >= 0 ? '+' : ''}{distanceChange.toFixed(0)}% km
+                      </div>
+                      <div style={{ color: timeChange >= 0 ? '#27ae60' : '#e74c3c' }}>
+                        {timeChange >= 0 ? '+' : ''}{timeChange.toFixed(0)}% tid
+                      </div>
+                      <div style={{ color: countChange >= 0 ? '#27ae60' : '#e74c3c' }}>
+                        {countChange >= 0 ? '+' : ''}{countChange.toFixed(0)}% økter
+                      </div>
+                    </div>
+                  </StatCard>
+                );
+              })}
+            </StatsGrid>
+          </PeriodSection>
 
           <ChartsContainer>
-            <ActivityChart activities={activities} />
+            <MonthlyComparisonChart 
+              activities={allFilteredActivities} 
+              metric="distance"
+              title="Månedlig distanse - Siste 4 år"
+            />
+            <MonthlyComparisonChart 
+              activities={allFilteredActivities} 
+              metric="time"
+              title="Månedlig treningstid - Siste 4 år"
+            />
           </ChartsContainer>
         </>
       )}
