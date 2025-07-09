@@ -25,15 +25,29 @@ const ActivityDetails = styled.div`
   font-size: 0.9rem;
 `;
 
-const ActivityStat = styled.div`
+const ActivityStat = styled.div<{ statKey?: string; value?: number | null }>`
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 0.5rem;
-  background-color: #f8f9fa;
   border-radius: 4px;
   min-height: 60px;
   justify-content: center;
+  background-color: ${({ statKey, value }) => {
+    if (value === null || value === undefined) return '#f8f9fa'; // default gray
+
+    if (statKey === 'decoupling' || statKey === 'negative_split') {
+      return value > 0 ? '#fee2e2' : '#dcfce7'; // red-100 for positive, green-100 for negative
+    }
+
+    if (statKey === 'hrv') {
+      if (value < 35) return '#fee2e2'; // red-100
+      if (value <= 37) return '#fef9c3'; // yellow-100
+      return '#dcfce7'; // green-100
+    }
+    
+    return '#f8f9fa'; // default gray
+  }};
 `;
 
 const StatLabel = styled.span`
@@ -416,74 +430,85 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
   return (
     <ActivityContainer>
-      {activities.map((activity) => (
-        <ActivityCard 
-          key={activity.activityId} 
-          className="hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => handleActivityClick(parseInt(activity.activityId, 10))}
-        >
-          <ActivityTitle>{activity.activityName}</ActivityTitle>
-          <ActivityDetails>
-            {[
-              {
-                key: 'date',
-                label: 'Dato',
-                value: formatDate(activity.startTimeLocal)
-              },
-              {
-                key: 'distance',
-                label: 'Distanse',
-                value: `${((activity.distance || 0) / 1000).toFixed(2)} km`
-              },
-              {
-                key: 'duration',
-                label: 'Varighet',
-                value: `${Math.round((activity.duration || 0) / 60)} min`
-              },
-              {
-                key: 'pace',
-                label: 'Pace',
-                value: formatPace(calculatePace(activity.distance, activity.duration))
-              },
-              ...(activity.averageHR > 0 ? [{
-                key: 'average_hr',
-                label: 'Snitt puls',
-                value: `${Math.round(activity.averageHR)} bpm`
-              }] : []),
-              {
-                key: 'vo2_max',
-                label: 'VO2 Max',
-                value: formatVO2Max(activity.vO2MaxValue, activity.activityType)
-              },
-              {
-                key: 'running_economy',
-                label: 'Løpsøkonomi',
-                value: formatRunningEconomy(calculateRunningEconomy(activity.averageSpeed, activity.averageHR, activity.activityType), activity.activityType)
-              },
-              {
-                key: 'negative_split',
-                label: 'Negativ Split',
-                value: isLoadingNegativeSplit ? 'Laster...' : formatNegativeSplit(negativeSplitData[activity.activityId])
-              },
-              {
-                key: 'decoupling',
-                label: 'Decoupling',
-                value: isLoadingDecoupling ? 'Laster...' : formatDecoupling(decouplingData[activity.activityId])
-              },
-              {
-                key: 'hrv',
-                label: 'HRV',
-                value: isLoadingHrv ? 'Laster...' : formatHrv(getHrvForDate(activity.startTimeLocal))
-              }
-            ].map(stat => (
-              <ActivityStat key={stat.key}>
-                <StatLabel>{stat.label}</StatLabel>
-                <StatValue>{stat.value}</StatValue>
-              </ActivityStat>
-            ))}
-          </ActivityDetails>
-        </ActivityCard>
-      ))}
+      {activities.map((activity) => {
+        const hrvValue = getHrvForDate(activity.startTimeLocal);
+
+        return (
+          <ActivityCard 
+            key={activity.activityId} 
+            className="hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => handleActivityClick(parseInt(activity.activityId, 10))}
+          >
+            <ActivityTitle>{activity.activityName}</ActivityTitle>
+            <ActivityDetails>
+              {[
+                {
+                  key: 'date',
+                  label: 'Dato',
+                  value: formatDate(activity.startTimeLocal)
+                },
+                {
+                  key: 'distance',
+                  label: 'Distanse',
+                  value: `${((activity.distance || 0) / 1000).toFixed(2)} km`
+                },
+                {
+                  key: 'duration',
+                  label: 'Varighet',
+                  value: `${Math.round((activity.duration || 0) / 60)} min`
+                },
+                {
+                  key: 'pace',
+                  label: 'Pace',
+                  value: formatPace(calculatePace(activity.distance, activity.duration))
+                },
+                ...(activity.averageHR > 0 ? [{
+                  key: 'average_hr',
+                  label: 'Snitt puls',
+                  value: `${Math.round(activity.averageHR)} bpm`
+                }] : []),
+                {
+                  key: 'vo2_max',
+                  label: 'VO2 Max',
+                  value: formatVO2Max(activity.vO2MaxValue, activity.activityType)
+                },
+                {
+                  key: 'running_economy',
+                  label: 'Løpsøkonomi',
+                  value: formatRunningEconomy(calculateRunningEconomy(activity.averageSpeed, activity.averageHR, activity.activityType), activity.activityType)
+                },
+                {
+                  key: 'negative_split',
+                  label: 'Negativ Split',
+                  value: isLoadingNegativeSplit ? 'Laster...' : formatNegativeSplit(negativeSplitData[activity.activityId]),
+                  rawValue: negativeSplitData[activity.activityId]
+                },
+                {
+                  key: 'decoupling',
+                  label: 'Decoupling',
+                  value: isLoadingDecoupling ? 'Laster...' : formatDecoupling(decouplingData[activity.activityId]),
+                  rawValue: decouplingData[activity.activityId]
+                },
+                {
+                  key: 'hrv',
+                  label: 'HRV',
+                  value: isLoadingHrv ? 'Laster...' : formatHrv(hrvValue),
+                  rawValue: hrvValue
+                }
+              ].map(stat => (
+                <ActivityStat 
+                  key={stat.key} 
+                  statKey={stat.key} 
+                  value={(stat as any).rawValue}
+                >
+                  <StatLabel>{stat.label}</StatLabel>
+                  <StatValue>{stat.value}</StatValue>
+                </ActivityStat>
+              ))}
+            </ActivityDetails>
+          </ActivityCard>
+        );
+      })}
     </ActivityContainer>
   );
 };

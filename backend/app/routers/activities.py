@@ -125,6 +125,7 @@ async def read_activity_details(
             raise HTTPException(status_code=500, detail="Klarte ikke å hente data etter lagring.")
 
     except Exception as e:
+        logger.error(f"Feil under henting av aktivitetsdetaljer for {activity_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
 
 @router.get("/activities/{activity_id}/charts/{chart_type}")
