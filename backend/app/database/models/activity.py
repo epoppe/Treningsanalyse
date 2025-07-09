@@ -19,6 +19,10 @@ class Activity(Base):
     average_running_cadence = Column(Float)
     details = Column(JSON, nullable=True)
     
+    # Cache for beregnede verdier
+    negative_split_percent = Column(Float, nullable=True)
+    running_economy = Column(Float, nullable=True)
+    
     activity_type_id = Column(Integer, ForeignKey('activity_types.id'))
     activity_type = relationship("ActivityType")
 

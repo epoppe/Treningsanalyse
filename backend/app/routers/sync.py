@@ -122,6 +122,22 @@ async def run_fit_data_download(job_id: str, garmin_client: GarminClient, storag
         if db_session:
             db_session.close()
 
+async def run_fit_data_download_period(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """Kjører FIT-data nedlasting for en periode i bakgrunnen."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.download_fit_data_for_period(start_date, end_date)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i FIT-data nedlasting for periode (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 @router.get("/status/{job_id}")
 async def get_sync_status(job_id: str):
     """Henter status for en spesifikk bakgrunnsjobb."""
@@ -222,6 +238,23 @@ async def trigger_fit_data_download(
     background_tasks.add_task(run_fit_data_download, job_id, garmin_client, storage, None, limit)
     
     return {"message": f"FIT-data nedlasting startet for opptil {limit} aktiviteter.", "job_id": job_id}
+
+@router.post("/fit-data/download/period", status_code=202)
+async def trigger_fit_data_download_period_endpoint(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter nedlasting av FIT-data for en spesifikk periode."""
+    start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
+
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_fit_data_download_period, job_id, garmin_client, storage, start_datetime, end_datetime)
+    
+    return {"message": f"FIT-data nedlasting for periode {request.start_date} til {request.end_date} startet.", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(

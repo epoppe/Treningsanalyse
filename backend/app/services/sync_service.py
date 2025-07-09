@@ -678,4 +678,69 @@ class SyncService:
             
         except Exception as e:
             logger.error(f"Feil under FIT-data nedlasting: {e}")
+            return {"status": "Feil", "message": str(e)}
+
+    async def download_fit_data_for_period(self, start_date: datetime, end_date: datetime):
+        """Laster ned FIT-data for aktiviteter i en spesifikk periode."""
+        if not await self.garmin_client.initialize():
+            logger.error("Kunne ikke initialisere Garmin-klient for FIT-nedlasting.")
+            return {"status": "Feil", "message": "Kunne ikke initialisere Garmin-klient"}
+
+        try:
+            import pandas as pd
+            
+            # Finn eksisterende FIT-data
+            try:
+                existing_parquet_df = pd.read_parquet('data/activity_details.parquet')
+                existing_fit_activity_ids = set(existing_parquet_df['activity_id'].unique())
+            except:
+                existing_fit_activity_ids = set()
+            
+            # Hent aktiviteter i perioden fra database
+            from sqlalchemy import and_
+            activities_in_period = self.db.query(Activity.id, Activity.start_time, Activity.name).filter(
+                and_(
+                    Activity.start_time >= start_date,
+                    Activity.start_time <= end_date
+                )
+            ).order_by(Activity.start_time.desc()).all()
+            
+            logger.info(f"Fant {len(activities_in_period)} aktiviteter i perioden {start_date.date()} til {end_date.date()}")
+            
+            # Finn aktiviteter som mangler FIT-data
+            missing_fit_activities = []
+            for activity in activities_in_period:
+                if activity.id not in existing_fit_activity_ids:
+                    missing_fit_activities.append(activity)
+            
+            logger.info(f"Av disse mangler {len(missing_fit_activities)} aktiviteter FIT-data")
+            
+            if not missing_fit_activities:
+                return {"status": "Fullført", "message": "Alle aktiviteter i perioden har allerede FIT-data"}
+            
+            success_count = 0
+            total_count = len(missing_fit_activities)
+            
+            for i, activity in enumerate(missing_fit_activities):
+                logger.info(f"Prosesserer aktivitet {activity.id} ({i+1}/{total_count}) - {activity.start_time.strftime('%Y-%m-%d')} - {activity.name}")
+                
+                if await self._download_and_store_fit_file(activity.id):
+                    success_count += 1
+                
+                # Liten pause for å unngå rate limiting
+                await asyncio.sleep(1)
+            
+            message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter i perioden {start_date.date()} til {end_date.date()}"
+            logger.info(message)
+            
+            return {
+                "status": "Fullført", 
+                "message": message,
+                "success_count": success_count,
+                "total_count": total_count,
+                "period": f"{start_date.date()} til {end_date.date()}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Feil under FIT-data nedlasting for periode: {e}")
             return {"status": "Feil", "message": str(e)} 

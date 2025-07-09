@@ -123,36 +123,13 @@ const SelectedTypesDisplay = styled.div`
   min-height: 1.5rem;
 `;
 
-const DateFiltersSection = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  min-width: 300px;
-`;
 
-const DateInputsContainer = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-`;
-
-const DateInput = styled.input`
-  padding: 0.5rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background: white;
-  flex: 1;
-  min-width: 120px;
-`;
 
 export default function Home() {
   const dispatch = useAppDispatch();
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
-  const [startDate, setStartDate] = useState<string>('');
-  const [endDate, setEndDate] = useState<string>('');
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
@@ -225,24 +202,8 @@ export default function Home() {
       );
     }
 
-    // Filtrer på startdato (kun hvis vi har aktiviteter å filtrere)
-    if (startDate && tempActivities.length > 0) {
-      tempActivities = tempActivities.filter(activity => 
-        new Date(activity.startTimeLocal) >= new Date(startDate)
-      );
-    }
-
-    // Filtrer på sluttdato (kun hvis vi har aktiviteter å filtrere)
-    if (endDate && tempActivities.length > 0) {
-      const endDateTime = new Date(endDate);
-      endDateTime.setDate(endDateTime.getDate() + 1);
-      tempActivities = tempActivities.filter(activity => 
-        new Date(activity.startTimeLocal) < endDateTime
-      );
-    }
-
     setFilteredActivities(tempActivities);
-  }, [activities, selectedActivityTypes, startDate, endDate]);
+  }, [activities, selectedActivityTypes]);
 
   const handleActivityTypeChange = (typeKey: string, checked: boolean) => {
     if (checked) {
@@ -304,24 +265,6 @@ export default function Home() {
             }
           </SelectedTypesDisplay>
         </FilterSection>
-
-        <DateFiltersSection>
-          <FilterTitle>Datofilter</FilterTitle>
-          <DateInputsContainer>
-            <DateInput
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              placeholder="Fra dato"
-            />
-            <DateInput
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              placeholder="Til dato"
-            />
-          </DateInputsContainer>
-        </DateFiltersSection>
       </FiltersContainer>
 
       <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />

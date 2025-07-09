@@ -150,21 +150,25 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
       const negativeSplitResults: {[activityId: string]: number} = {};
       
       try {
-        // Hent negativ split-data for løpeaktiviteter fra 2023 og nyere som er minst 2km
-        // Systemet vil automatisk lagre FIT-data for nye aktiviteter fremover
+        // Hent negativ split-data for løpeaktiviteter fra 2022 og nyere som er minst 2km
         const runningActivities = activities.filter(activity => {
           const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
                            activity.activityType?.typeKey?.toLowerCase().includes('løp');
           const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
           const activityDate = new Date(activity.startTimeLocal);
-          const isRecent = activityDate.getFullYear() >= 2023; // Kun aktiviteter fra 2023 og nyere
+          const isRecent = activityDate.getFullYear() >= 2022; // Aktiviteter fra 2022 og nyere
           return isRunning && hasMinDistance && isRecent;
         });
 
-        console.log(`Henter negativ split for ${runningActivities.length} løpeaktiviteter fra 2023 og nyere`);
+        // Sorter etter dato (nyeste først) slik at vi prioriterer nye aktiviteter
+        const sortedRunningActivities = runningActivities.sort((a, b) => {
+          return new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime();
+        });
 
-        // Begrens til maksimalt 50 forespørsler for å unngå overbelastning
-        const activitiesToCheck = runningActivities.slice(0, 50);
+        console.log(`Henter negativ split for ${sortedRunningActivities.length} løpeaktiviteter fra 2022 og nyere`);
+
+        // Hent negative split for alle kvalifiserte aktiviteter (ingen begrensning)
+        const activitiesToCheck = sortedRunningActivities;
         
         const promises = activitiesToCheck.map(async (activity) => {
           try {

@@ -295,55 +295,97 @@ def get_activity_chart(
 @router.get("/{activity_id}/negative-split")
 def get_activity_negative_split(
     activity_id: int, 
-    storage: DataStorage = Depends(get_data_storage)
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
 ):
     """
-    Beregner negativ split for en aktivitet basert på lagrede FIT-data fra parquet-filen.
+    Beregner negativ split for en aktivitet. Prøver først cache, deretter detaljerte FIT-data.
     Negativ split = (gjennomsnittlig pace første halvdel - gjennomsnittlig pace andre halvdel) / gjennomsnittlig pace første halvdel * 100
     Positiv verdi = negativ split (raskere andre halvdel)
     Negativ verdi = positiv split (saktere andre halvdel)
     """
-    details_df = storage.get_activity_details(activity_id)
-    if details_df is None or details_df.empty:
-        raise HTTPException(status_code=404, detail="Activity details not found")
-
-    # Filtrer ut rader med gyldig speed og timestamp data
-    valid_data = details_df.dropna(subset=['speed', 'timestamp'])
     
-    if len(valid_data) < 10:  # Trenger minimum 10 datapunkter for å beregne negativ split
-        raise HTTPException(status_code=404, detail="Insufficient data points for negative split calculation")
+    # Sjekk først cache i databasen
+    activity = db.query(Activity).filter(Activity.id == str(activity_id)).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    
+    # Hvis negativ split allerede er beregnet og lagret, returner cache
+    if activity.negative_split_percent is not None:
+        logger.info(f"Returnerer cached negative split for aktivitet {activity_id}")
         
-    # Sorter etter timestamp
-    valid_data = valid_data.sort_values('timestamp')
+        # Beregn pace-verdier for responsformat (estimert fra speed hvis tilgjengelig)
+        first_half_pace = None
+        second_half_pace = None
+        data_points = 0
+        
+        if activity.average_speed and activity.average_speed > 0:
+            avg_pace = 1000 / (activity.average_speed * 60)  # Konverter speed til pace
+            # Estimer halvdels-pacer basert på negative split
+            negative_split_decimal = activity.negative_split_percent / 100
+            first_half_pace = avg_pace / (1 - negative_split_decimal/2)
+            second_half_pace = avg_pace / (1 + negative_split_decimal/2)
+            
+        return {
+            "activity_id": activity_id,
+            "negative_split_percent": round(activity.negative_split_percent, 2),
+            "first_half_pace": round(first_half_pace, 2) if first_half_pace else None,
+            "second_half_pace": round(second_half_pace, 2) if second_half_pace else None,
+            "data_points": data_points,
+            "first_half_points": data_points // 2,
+            "second_half_points": data_points // 2,
+            "calculation_method": "cached"
+        }
     
-    # Del i to halvdeler
-    midpoint = len(valid_data) // 2
-    first_half = valid_data.iloc[:midpoint]
-    second_half = valid_data.iloc[midpoint:]
+    # Beregn negativ split fra FIT-data
+    details_df = storage.get_activity_details(activity_id)
     
-    # Beregn gjennomsnittlig speed for hver halvdel (ignorer 0-verdier)
-    first_half_speed = first_half[first_half['speed'] > 0]['speed'].mean()
-    second_half_speed = second_half[second_half['speed'] > 0]['speed'].mean()
+    if details_df is not None and not details_df.empty:
+        # Filtrer ut rader med gyldig speed og timestamp data
+        valid_data = details_df.dropna(subset=['speed', 'timestamp'])
+        
+        if len(valid_data) >= 10:  # Trenger minimum 10 datapunkter
+            # Sorter etter timestamp
+            valid_data = valid_data.sort_values('timestamp')
+            
+            # Del i to halvdeler
+            midpoint = len(valid_data) // 2
+            first_half = valid_data.iloc[:midpoint]
+            second_half = valid_data.iloc[midpoint:]
+            
+            # Beregn gjennomsnittlig speed for hver halvdel (ignorer 0-verdier)
+            first_half_speed = first_half[first_half['speed'] > 0]['speed'].mean()
+            second_half_speed = second_half[second_half['speed'] > 0]['speed'].mean()
+            
+            if not pd.isna(first_half_speed) and not pd.isna(second_half_speed) and first_half_speed > 0:
+                # Konverter speed (antatt m/s) til pace (min/km)
+                # pace = 1000 / (speed * 60) for å få min/km
+                first_half_pace = 1000 / (first_half_speed * 60)
+                second_half_pace = 1000 / (second_half_speed * 60)
+                
+                # Beregn negativ split som prosentvis forbedring
+                negative_split_percent = ((first_half_pace - second_half_pace) / first_half_pace) * 100
+                
+                # Lagre beregnet negative split i databasen for fremtidig bruk
+                try:
+                    activity.negative_split_percent = negative_split_percent
+                    db.commit()
+                    logger.info(f"Lagret negative split {negative_split_percent:.2f}% for aktivitet {activity_id}")
+                except Exception as e:
+                    db.rollback()
+                    logger.warning(f"Kunne ikke lagre negative split for aktivitet {activity_id}: {e}")
+                
+                return {
+                    "activity_id": activity_id,
+                    "negative_split_percent": round(negative_split_percent, 2),
+                    "first_half_pace": round(first_half_pace, 2),
+                    "second_half_pace": round(second_half_pace, 2),
+                    "data_points": len(valid_data),
+                    "first_half_points": len(first_half),
+                    "second_half_points": len(second_half),
+                    "calculation_method": "detailed_fit_data"
+                }
     
-    if pd.isna(first_half_speed) or pd.isna(second_half_speed) or first_half_speed == 0:
-        raise HTTPException(status_code=404, detail="Invalid speed data for negative split calculation")
-    
-    # Konverter speed (antatt m/s) til pace (min/km)
-    # pace = 1000 / (speed * 60) for å få min/km
-    first_half_pace = 1000 / (first_half_speed * 60)
-    second_half_pace = 1000 / (second_half_speed * 60)
-    
-    # Beregn negativ split som prosentvis forbedring (invertert fra opprinnelig decoupling)
-    # Positiv verdi = negativ split (raskere andre halvdel)
-    # Negativ verdi = positiv split (saktere andre halvdel)
-    negative_split_percent = ((first_half_pace - second_half_pace) / first_half_pace) * 100
-    
-    return {
-        "activity_id": activity_id,
-        "negative_split_percent": round(negative_split_percent, 2),
-        "first_half_pace": round(first_half_pace, 2),
-        "second_half_pace": round(second_half_pace, 2),
-        "data_points": len(valid_data),
-        "first_half_points": len(first_half),
-        "second_half_points": len(second_half)
-    }
+    # Ingen FIT-data tilgjengelig - returnerer feil
+    logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - negative split ikke tilgjengelig")
+    raise HTTPException(status_code=404, detail="No detailed FIT data available for negative split calculation")
