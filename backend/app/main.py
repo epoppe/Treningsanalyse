@@ -76,7 +76,7 @@ app.add_middleware(
 )
 
 # Inkluder alle routere med korrekt prefix
-app.include_router(activities.router, prefix="/api/activities", tags=["Aktiviteter"])
+app.include_router(activities.router, prefix="/api", tags=["Aktiviteter"])
 app.include_router(garmin_data.router, prefix="/api", tags=["Garmin Data"])
 app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
 

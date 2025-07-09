@@ -36,7 +36,7 @@ class ActivityResponse(BaseModel):
     activityType: Optional[ActivityTypeResponse]
     avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
 
-@router.get("", response_model=List[ActivityResponse])
+@router.get("/activities", response_model=List[ActivityResponse])
 def get_activities(db: Session = Depends(get_db)):
     """
     Retrieve all activities from the database, and format them for the API response.
@@ -92,7 +92,7 @@ def get_activities(db: Session = Depends(get_db)):
         traceback.print_exc() # This will print the error to the backend console
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
-@router.get("/{activity_id}/details", response_model=List[Dict[str, Any]])
+@router.get("/activities/{activity_id}/details", response_model=List[Dict[str, Any]])
 async def read_activity_details(
     activity_id: int,
     storage: DataStorage = Depends(get_data_storage),
@@ -127,7 +127,7 @@ async def read_activity_details(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
 
-@router.get("/{activity_id}/charts/{chart_type}")
+@router.get("/activities/{activity_id}/charts/{chart_type}")
 def get_activity_chart(
     activity_id: int, 
     chart_type: str, 
@@ -292,7 +292,7 @@ def get_activity_chart(
     chart_json = pio.to_json(fig)
     return Response(content=chart_json, media_type="application/json")
 
-@router.get("/{activity_id}/negative-split")
+@router.get("/activities/{activity_id}/negative-split")
 def get_activity_negative_split(
     activity_id: int, 
     storage: DataStorage = Depends(get_data_storage),
@@ -300,9 +300,9 @@ def get_activity_negative_split(
 ):
     """
     Beregner negativ split for en aktivitet. Prøver først cache, deretter detaljerte FIT-data.
-    Negativ split = (gjennomsnittlig pace første halvdel - gjennomsnittlig pace andre halvdel) / gjennomsnittlig pace første halvdel * 100
-    Positiv verdi = negativ split (raskere andre halvdel)
-    Negativ verdi = positiv split (saktere andre halvdel)
+    Negativ split = -((gjennomsnittlig pace første halvdel - gjennomsnittlig pace andre halvdel) / gjennomsnittlig pace første halvdel * 100)
+    Negativ verdi = negativ split (raskere andre halvdel)
+    Positiv verdi = positiv split (saktere andre halvdel)
     """
     
     # Sjekk først cache i databasen
@@ -363,8 +363,8 @@ def get_activity_negative_split(
                 first_half_pace = 1000 / (first_half_speed * 60)
                 second_half_pace = 1000 / (second_half_speed * 60)
                 
-                # Beregn negativ split som prosentvis forbedring
-                negative_split_percent = ((first_half_pace - second_half_pace) / first_half_pace) * 100
+                # Beregn negativ split som prosentvis forbedring (omvendt fortegn)
+                negative_split_percent = -((first_half_pace - second_half_pace) / first_half_pace) * 100
                 
                 # Lagre beregnet negative split i databasen for fremtidig bruk
                 try:
@@ -390,7 +390,7 @@ def get_activity_negative_split(
     logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - negative split ikke tilgjengelig")
     raise HTTPException(status_code=404, detail="No detailed FIT data available for negative split calculation")
 
-@router.get("/{activity_id}/decoupling")
+@router.get("/activities/{activity_id}/decoupling")
 def get_activity_decoupling(
     activity_id: int, 
     storage: DataStorage = Depends(get_data_storage),
