@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, Title, Text } from '@tremor/react';
 import dynamic from 'next/dynamic';
+import ActivityAnalytics from '@/components/ActivityAnalytics';
 
 const PlotlyChart = dynamic(() => import('@/components/PlotlyChart'), {
     ssr: false,
@@ -54,6 +55,10 @@ const ActivityDetailPage = () => {
     return (
         <main className="p-4 md:p-10 mx-auto max-w-7xl">
             <Title>Aktivitetsdetaljer</Title>
+
+            <div className="mt-6">
+                <ActivityAnalytics activityId={id} />
+            </div>
 
             <Card className="mt-6">
                 <div className="h-96">

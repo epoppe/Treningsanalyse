@@ -389,3 +389,107 @@ def get_activity_negative_split(
     # Ingen FIT-data tilgjengelig - returnerer feil
     logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - negative split ikke tilgjengelig")
     raise HTTPException(status_code=404, detail="No detailed FIT data available for negative split calculation")
+
+@router.get("/{activity_id}/decoupling")
+def get_activity_decoupling(
+    activity_id: int, 
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """
+    Beregner cardiac-aerobic decoupling for en aktivitet. Prøver først cache, deretter detaljerte FIT-data.
+    Decoupling (%) = ((HR:PACE ratio (del 2) / HR:PACE ratio (del 1)) - 1) × 100
+    Positiv verdi = decoupling (hjerteraten øker mer enn hastigheten - tretthet)
+    Negativ verdi = negative decoupling (hjerteraten øker mindre enn hastigheten - forbedring)
+    """
+    
+    try:
+        # Sjekk først cache i databasen
+        activity = db.query(Activity).filter(Activity.id == str(activity_id)).first()
+        if not activity:
+            raise HTTPException(status_code=404, detail="Activity not found")
+        
+        # Hvis decoupling allerede er beregnet og lagret, returner cache
+        if activity.decoupling_percent is not None:
+            logger.info(f"Returnerer cached decoupling for aktivitet {activity_id}")
+            
+            return {
+                "activity_id": activity_id,
+                "decoupling_percent": round(activity.decoupling_percent, 2),
+                "calculation_method": "cached"
+            }
+        
+        # Beregn decoupling fra FIT-data
+        details_df = storage.get_activity_details(activity_id)
+        
+        if details_df is not None and len(details_df) > 0:
+            # Filtrer ut rader med gyldig heart_rate, speed og timestamp data
+            valid_data = details_df.dropna(subset=['heart_rate', 'speed', 'timestamp'])
+            
+            # Fjern rader med 0-verdier eller ugyldig data
+            valid_data = valid_data[(valid_data['heart_rate'] > 0) & (valid_data['speed'] > 0)]
+            
+            if len(valid_data) >= 20:  # Trenger minimum 20 datapunkter for pålitelig decoupling
+                # Sorter etter timestamp
+                valid_data = valid_data.sort_values('timestamp')
+                
+                # Del i to halvdeler
+                midpoint = len(valid_data) // 2
+                first_half = valid_data.iloc[:midpoint]
+                second_half = valid_data.iloc[midpoint:]
+                
+                # Beregn gjennomsnittlig HR og speed for hver halvdel
+                first_half_hr = first_half['heart_rate'].mean()
+                first_half_speed = first_half['speed'].mean()
+                second_half_hr = second_half['heart_rate'].mean()
+                second_half_speed = second_half['speed'].mean()
+                
+                if (not pd.isna(first_half_hr) and not pd.isna(first_half_speed) and 
+                    not pd.isna(second_half_hr) and not pd.isna(second_half_speed) and
+                    first_half_speed > 0 and second_half_speed > 0):
+                    
+                    # Beregn HR:PACE ratio for hver halvdel
+                    # HR:PACE = HR / speed (høyere verdi = mindre effektiv)
+                    first_half_ratio = first_half_hr / first_half_speed
+                    second_half_ratio = second_half_hr / second_half_speed
+                    
+                    # Beregn decoupling prosentvis
+                    decoupling_percent = ((second_half_ratio / first_half_ratio) - 1) * 100
+                    
+                    # Lagre beregnet decoupling i databasen for fremtidig bruk
+                    try:
+                        activity.decoupling_percent = decoupling_percent
+                        db.commit()
+                        logger.info(f"Lagret decoupling {decoupling_percent:.2f}% for aktivitet {activity_id}")
+                    except Exception as e:
+                        db.rollback()
+                        logger.warning(f"Kunne ikke lagre decoupling for aktivitet {activity_id}: {e}")
+                    
+                    return {
+                        "activity_id": activity_id,
+                        "decoupling_percent": round(decoupling_percent, 2),
+                        "first_half_hr": round(first_half_hr, 1),
+                        "first_half_speed": round(first_half_speed, 2),
+                        "second_half_hr": round(second_half_hr, 1),
+                        "second_half_speed": round(second_half_speed, 2),
+                        "first_half_ratio": round(first_half_ratio, 2),
+                        "second_half_ratio": round(second_half_ratio, 2),
+                        "data_points": len(valid_data),
+                        "first_half_points": len(first_half),
+                        "second_half_points": len(second_half),
+                        "calculation_method": "detailed_fit_data"
+                    }
+        
+        # Ingen FIT-data tilgjengelig - returnerer feil
+        logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - decoupling ikke tilgjengelig")
+        raise HTTPException(status_code=404, detail="No detailed FIT data available for decoupling calculation")
+    
+    except HTTPException:
+        # Re-raise HTTP exceptions som forventet
+        raise
+    except Exception as e:
+        # Catch all other exceptions og log dem
+        logger.error(f"Uventet feil i decoupling beregning for aktivitet {activity_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")

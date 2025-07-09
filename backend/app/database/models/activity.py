@@ -22,6 +22,7 @@ class Activity(Base):
     # Cache for beregnede verdier
     negative_split_percent = Column(Float, nullable=True)
     running_economy = Column(Float, nullable=True)
+    decoupling_percent = Column(Float, nullable=True)
     
     activity_type_id = Column(Integer, ForeignKey('activity_types.id'))
     activity_type = relationship("ActivityType")

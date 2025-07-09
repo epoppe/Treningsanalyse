@@ -81,6 +81,8 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
   const [negativeSplitData, setNegativeSplitData] = useState<{[activityId: string]: number}>({});
   const [isLoadingNegativeSplit, setIsLoadingNegativeSplit] = useState(false);
+  const [decouplingData, setDecouplingData] = useState<{[activityId: string]: number}>({});
+  const [isLoadingDecoupling, setIsLoadingDecoupling] = useState(false);
 
   useEffect(() => {
     const fetchHrvData = async () => {
@@ -150,13 +152,13 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
       const negativeSplitResults: {[activityId: string]: number} = {};
       
       try {
-        // Hent negativ split-data for løpeaktiviteter fra 2022 og nyere som er minst 2km
+        // Hent negativ split-data for løpeaktiviteter fra 2018 og nyere som er minst 2km
         const runningActivities = activities.filter(activity => {
           const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
                            activity.activityType?.typeKey?.toLowerCase().includes('løp');
           const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
           const activityDate = new Date(activity.startTimeLocal);
-          const isRecent = activityDate.getFullYear() >= 2022; // Aktiviteter fra 2022 og nyere
+          const isRecent = activityDate.getFullYear() >= 2018; // Aktiviteter fra 2018 og nyere
           return isRunning && hasMinDistance && isRecent;
         });
 
@@ -165,7 +167,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
           return new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime();
         });
 
-        console.log(`Henter negativ split for ${sortedRunningActivities.length} løpeaktiviteter fra 2022 og nyere`);
+        console.log(`Henter negativ split for ${sortedRunningActivities.length} løpeaktiviteter fra 2018 og nyere`);
 
         // Hent negative split for alle kvalifiserte aktiviteter (ingen begrensning)
         const activitiesToCheck = sortedRunningActivities;
@@ -204,6 +206,75 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     };
 
     fetchNegativeSplitData();
+  }, [activities]);
+
+  useEffect(() => {
+    const fetchDecouplingData = async () => {
+      if (activities.length === 0) {
+        console.log('Ingen aktiviteter å hente decoupling for - avbryter decoupling-henting');
+        setDecouplingData({});
+        setIsLoadingDecoupling(false);
+        return;
+      }
+      
+      setIsLoadingDecoupling(true);
+      const decouplingResults: {[activityId: string]: number} = {};
+      
+      try {
+        // Hent decoupling-data for løpeaktiviteter fra 2018 og nyere som er minst 2km
+        const runningActivities = activities.filter(activity => {
+          const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
+                           activity.activityType?.typeKey?.toLowerCase().includes('løp');
+          const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
+          const activityDate = new Date(activity.startTimeLocal);
+          const isRecent = activityDate.getFullYear() >= 2018; // Aktiviteter fra 2018 og nyere
+          return isRunning && hasMinDistance && isRecent;
+        });
+
+        // Sorter etter dato (nyeste først) slik at vi prioriterer nye aktiviteter
+        const sortedRunningActivities = runningActivities.sort((a, b) => {
+          return new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime();
+        });
+
+        console.log(`Henter decoupling for ${sortedRunningActivities.length} løpeaktiviteter fra 2018 og nyere`);
+
+        // Hent decoupling for alle kvalifiserte aktiviteter (ingen begrensning)
+        const activitiesToCheck = sortedRunningActivities;
+        
+        const promises = activitiesToCheck.map(async (activity) => {
+          try {
+            const response = await fetch(`http://localhost:8000/api/activities/${activity.activityId}/decoupling`);
+            if (response.ok) {
+              const data = await response.json();
+              return { id: activity.activityId, decoupling: data.decoupling_percent };
+            }
+            // 404 er forventet for aktiviteter uten FIT-data, så vi logger ikke dette som feil
+            return null;
+          } catch (error) {
+            // Kun log uventede feil
+            console.warn(`Uventet feil ved henting av decoupling for ${activity.activityId}:`, error);
+            return null;
+          }
+        });
+
+        const results = await Promise.all(promises);
+        
+        results.forEach(result => {
+          if (result && result.decoupling !== null) {
+            decouplingResults[result.id] = result.decoupling;
+          }
+        });
+
+        console.log(`Hentet decoupling-data for ${Object.keys(decouplingResults).length} aktiviteter`);
+        setDecouplingData(decouplingResults);
+      } catch (error) {
+        console.error('Feil ved henting av decoupling-data:', error);
+      } finally {
+        setIsLoadingDecoupling(false);
+      }
+    };
+
+    fetchDecouplingData();
   }, [activities]);
 
   const handleActivityClick = (activityId: number) => {
@@ -325,6 +396,13 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     return `${sign}${negativeSplitPercent.toFixed(1)}%`;
   };
 
+  const formatDecoupling = (decouplingPercent?: number) => {
+    if (decouplingPercent === undefined || decouplingPercent === null) return 'N/A';
+    
+    const sign = decouplingPercent >= 0 ? '+' : '';
+    return `${sign}${decouplingPercent.toFixed(1)}%`;
+  };
+
   if (activities.length === 0) {
     return (
       <ActivityContainer>
@@ -386,6 +464,11 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                 key: 'negative_split',
                 label: 'Negativ Split',
                 value: isLoadingNegativeSplit ? 'Laster...' : formatNegativeSplit(negativeSplitData[activity.activityId])
+              },
+              {
+                key: 'decoupling',
+                label: 'Decoupling',
+                value: isLoadingDecoupling ? 'Laster...' : formatDecoupling(decouplingData[activity.activityId])
               },
               {
                 key: 'hrv',
