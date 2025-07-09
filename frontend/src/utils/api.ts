@@ -46,8 +46,15 @@ export interface ActivityResponse {
 export const activitiesApi = {
   // Hent alle aktiviteter
   getActivities: async (forceRefresh: boolean = false) => {
-    const response = await api.get<Activity[]>(`/activities${forceRefresh ? '?force_refresh=true' : ''}`);
-    return response.data;
+    console.log('[API] Sender GET request til /activities...');
+    try {
+      const response = await api.get<Activity[]>(`/activities${forceRefresh ? '?force_refresh=true' : ''}`);
+      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
+      return response.data;
+    } catch (error) {
+      console.error('[API] Feil ved GET /activities:', error);
+      throw error;
+    }
   },
 
   // Hent aktiviteter for en spesifikk periode

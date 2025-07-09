@@ -109,7 +109,7 @@ export default function VO2MaxChart({
   const runningActivities = activities
     .filter(
       (a) =>
-        a.activityType.typeKey &&
+        a.activityType?.typeKey &&
         a.activityType.typeKey.includes("running") &&
         !a.activityType.typeKey.includes("treadmill")
     )

@@ -11,6 +11,9 @@ from ..dependencies import get_data_storage, get_garmin_client
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,8 +42,10 @@ def get_activities(db: Session = Depends(get_db)):
     Retrieve all activities from the database, and format them for the API response.
     """
     try:
+        logger.info("Henter aktiviteter fra databasen...")
         # Eager load the related activity_type to avoid N+1 query problem
         activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).all()
+        logger.info(f"Hentet {len(activities)} aktiviteter fra databasen")
         
         response_data = []
         for act in activities:
@@ -80,6 +85,7 @@ def get_activities(db: Session = Depends(get_db)):
                 "avgStrideLength": avg_stride_length
             })
 
+        logger.info(f"Returnerer {len(response_data)} aktiviteter til frontend")
         return response_data
     except Exception as e:
         import traceback
@@ -285,3 +291,59 @@ def get_activity_chart(
     # Konverter figuren til en JSON-streng med Plotlys egen metode
     chart_json = pio.to_json(fig)
     return Response(content=chart_json, media_type="application/json")
+
+@router.get("/{activity_id}/negative-split")
+def get_activity_negative_split(
+    activity_id: int, 
+    storage: DataStorage = Depends(get_data_storage)
+):
+    """
+    Beregner negativ split for en aktivitet basert på lagrede FIT-data fra parquet-filen.
+    Negativ split = (gjennomsnittlig pace første halvdel - gjennomsnittlig pace andre halvdel) / gjennomsnittlig pace første halvdel * 100
+    Positiv verdi = negativ split (raskere andre halvdel)
+    Negativ verdi = positiv split (saktere andre halvdel)
+    """
+    details_df = storage.get_activity_details(activity_id)
+    if details_df is None or details_df.empty:
+        raise HTTPException(status_code=404, detail="Activity details not found")
+
+    # Filtrer ut rader med gyldig speed og timestamp data
+    valid_data = details_df.dropna(subset=['speed', 'timestamp'])
+    
+    if len(valid_data) < 10:  # Trenger minimum 10 datapunkter for å beregne negativ split
+        raise HTTPException(status_code=404, detail="Insufficient data points for negative split calculation")
+        
+    # Sorter etter timestamp
+    valid_data = valid_data.sort_values('timestamp')
+    
+    # Del i to halvdeler
+    midpoint = len(valid_data) // 2
+    first_half = valid_data.iloc[:midpoint]
+    second_half = valid_data.iloc[midpoint:]
+    
+    # Beregn gjennomsnittlig speed for hver halvdel (ignorer 0-verdier)
+    first_half_speed = first_half[first_half['speed'] > 0]['speed'].mean()
+    second_half_speed = second_half[second_half['speed'] > 0]['speed'].mean()
+    
+    if pd.isna(first_half_speed) or pd.isna(second_half_speed) or first_half_speed == 0:
+        raise HTTPException(status_code=404, detail="Invalid speed data for negative split calculation")
+    
+    # Konverter speed (antatt m/s) til pace (min/km)
+    # pace = 1000 / (speed * 60) for å få min/km
+    first_half_pace = 1000 / (first_half_speed * 60)
+    second_half_pace = 1000 / (second_half_speed * 60)
+    
+    # Beregn negativ split som prosentvis forbedring (invertert fra opprinnelig decoupling)
+    # Positiv verdi = negativ split (raskere andre halvdel)
+    # Negativ verdi = positiv split (saktere andre halvdel)
+    negative_split_percent = ((first_half_pace - second_half_pace) / first_half_pace) * 100
+    
+    return {
+        "activity_id": activity_id,
+        "negative_split_percent": round(negative_split_percent, 2),
+        "first_half_pace": round(first_half_pace, 2),
+        "second_half_pace": round(second_half_pace, 2),
+        "data_points": len(valid_data),
+        "first_half_points": len(first_half),
+        "second_half_points": len(second_half)
+    }

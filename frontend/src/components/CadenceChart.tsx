@@ -254,7 +254,13 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
             tickFormatter={(tick) => Math.round(tick)}
           />
           <Tooltip
-            contentStyle={{ backgroundColor: '#333', border: 'none' }}
+            contentStyle={{ 
+              backgroundColor: 'white', 
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+              color: '#333'
+            }}
             formatter={(value: number, name: string) => {
               const formattedName = name === 'movingAverage' ? 'Gj.snitt' : 'Verdi';
               return [value.toFixed(1), formattedName];

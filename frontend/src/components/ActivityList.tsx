@@ -1,11 +1,12 @@
 'use client';
 
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { useRouter } from 'next/navigation';
-import { analysisApi } from '@/utils/api';
+import { analysisApi } from '../utils/api';
 import { useEffect, useState } from 'react';
-import { HrvData } from '@/types/hrv';
+import { HrvData } from '../types/hrv';
+
 
 const ActivityContainer = styled.div`
   padding: 1rem;
@@ -78,43 +79,115 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const router = useRouter();
   const [hrvData, setHrvData] = useState<HrvData[]>([]);
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
+  const [negativeSplitData, setNegativeSplitData] = useState<{[activityId: string]: number}>({});
+  const [isLoadingNegativeSplit, setIsLoadingNegativeSplit] = useState(false);
 
   useEffect(() => {
     const fetchHrvData = async () => {
       if (activities.length === 0) return;
       
+      // Filtrer aktiviteter fra 2023 og nyere for HRV-data
+      const recentActivities = activities.filter(activity => {
+        const activityDate = new Date(activity.startTimeLocal);
+        return activityDate.getFullYear() >= 2023;
+      });
+
+      if (recentActivities.length === 0) {
+        console.log('Ingen aktiviteter fra 2023 eller nyere funnet for HRV-data');
+        return;
+      }
+      
       setIsLoadingHrv(true);
       try {
-        // Hent HRV-data for perioden som dekker alle aktiviteter
-        const dates = activities.map(a => new Date(a.startTimeLocal));
+        // Hent HRV-data for perioden som dekker aktiviteter fra 2023 og nyere
+        const dates = recentActivities.map(a => new Date(a.startTimeLocal));
         const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
         const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
+        
+        // Legg til buffer på begge sider
+        minDate.setDate(minDate.getDate() - 1);
+        maxDate.setDate(maxDate.getDate() + 1);
         
         const startDate = minDate.toISOString().split('T')[0];
         const endDate = maxDate.toISOString().split('T')[0];
         
-        const result = await analysisApi.getHrv(startDate, endDate);
+        const response = await fetch(`http://localhost:8000/api/analysis/hrv?start_date=${startDate}&end_date=${endDate}`);
+        const result = await response.json();
         
-        // Sørg for at result er et array - HRV API returnerer { hrv_data: [] }
         if (result && result.hrv_data && Array.isArray(result.hrv_data)) {
           console.log('HRV data hentet:', result.hrv_data.length, 'datapunkter');
           setHrvData(result.hrv_data);
-        } else if (Array.isArray(result)) {
-          // Fallback for hvis API returnerer direkte array
-          setHrvData(result);
         } else {
-          console.log('HRV API returnerte ikke forventet struktur:', result);
-          setHrvData([]);
+          console.log('Ingen HRV data funnet for perioden');
         }
       } catch (error) {
-        console.error('Kunne ikke hente HRV-data:', error);
-        setHrvData([]);
+        console.error('Feil ved henting av HRV data:', error);
       } finally {
         setIsLoadingHrv(false);
       }
     };
 
     fetchHrvData();
+  }, [activities]);
+
+  useEffect(() => {
+    const fetchNegativeSplitData = async () => {
+      if (activities.length === 0) return;
+      
+      setIsLoadingNegativeSplit(true);
+      const negativeSplitResults: {[activityId: string]: number} = {};
+      
+      try {
+        // Hent negativ split-data for løpeaktiviteter fra 2023 og nyere som er minst 2km
+        // Systemet vil automatisk lagre FIT-data for nye aktiviteter fremover
+        const runningActivities = activities.filter(activity => {
+          const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
+                           activity.activityType?.typeKey?.toLowerCase().includes('løp');
+          const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
+          const activityDate = new Date(activity.startTimeLocal);
+          const isRecent = activityDate.getFullYear() >= 2023; // Kun aktiviteter fra 2023 og nyere
+          return isRunning && hasMinDistance && isRecent;
+        });
+
+        console.log(`Henter negativ split for ${runningActivities.length} løpeaktiviteter fra 2023 og nyere`);
+
+        // Begrens til maksimalt 50 forespørsler for å unngå overbelastning
+        const activitiesToCheck = runningActivities.slice(0, 50);
+        
+        const promises = activitiesToCheck.map(async (activity) => {
+          try {
+            const response = await fetch(`http://localhost:8000/api/activities/${activity.activityId}/negative-split`);
+            if (response.ok) {
+              const data = await response.json();
+              return { id: activity.activityId, negativeSplit: data.negative_split_percent };
+            }
+            // 404 er forventet for aktiviteter uten FIT-data, så vi logger ikke dette som feil
+            return null;
+          } catch (error) {
+            // Kun log uventede feil
+            console.warn(`Uventet feil ved henting av negativ split for ${activity.activityId}:`, error);
+            return null;
+          }
+        });
+
+        const results = await Promise.all(promises);
+        
+        results.forEach(result => {
+          if (result && result.negativeSplit !== null) {
+            negativeSplitResults[result.id] = result.negativeSplit;
+          }
+        });
+
+        console.log(`Hentet negativ split-data for ${Object.keys(negativeSplitResults).length} aktiviteter`);
+        setNegativeSplitData(negativeSplitResults);
+      } catch (error) {
+        console.error('Feil ved henting av negativ split-data:', error);
+      } finally {
+        setIsLoadingNegativeSplit(false);
+      }
+    };
+
+    fetchNegativeSplitData();
   }, [activities]);
 
   const handleActivityClick = (activityId: number) => {
@@ -192,6 +265,31 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     return `${Math.round(hrv)}`;
   };
 
+  const calculatePace = (distance?: number, duration?: number) => {
+    if (!distance || !duration || distance <= 0 || duration <= 0) return null;
+    
+    const distanceKm = distance / 1000; // Konverter fra meter til km
+    const durationMin = duration / 60; // Konverter fra sekunder til minutter
+    
+    return durationMin / distanceKm; // min/km
+  };
+
+  const formatPace = (pace?: number) => {
+    if (!pace) return 'N/A';
+    
+    const minutes = Math.floor(pace);
+    const seconds = Math.round((pace - minutes) * 60);
+    
+    return `${minutes}:${seconds.toString().padStart(2, '0')} min/km`;
+  };
+
+  const formatNegativeSplit = (negativeSplitPercent?: number) => {
+    if (negativeSplitPercent === undefined || negativeSplitPercent === null) return 'N/A';
+    
+    const sign = negativeSplitPercent >= 0 ? '+' : '';
+    return `${sign}${negativeSplitPercent.toFixed(1)}%`;
+  };
+
   return (
     <ActivityContainer>
       {activities.map((activity) => (
@@ -218,6 +316,11 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                 label: 'Varighet',
                 value: `${Math.round((activity.duration || 0) / 60)} min`
               },
+              {
+                key: 'pace',
+                label: 'Pace',
+                value: formatPace(calculatePace(activity.distance, activity.duration))
+              },
               ...(activity.averageHR > 0 ? [{
                 key: 'average_hr',
                 label: 'Snitt puls',
@@ -232,6 +335,11 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                 key: 'running_economy',
                 label: 'Løpsøkonomi',
                 value: formatRunningEconomy(calculateRunningEconomy(activity.averageSpeed, activity.averageHR, activity.activityType), activity.activityType)
+              },
+              {
+                key: 'negative_split',
+                label: 'Negativ Split',
+                value: isLoadingNegativeSplit ? 'Laster...' : formatNegativeSplit(negativeSplitData[activity.activityId])
               },
               {
                 key: 'hrv',

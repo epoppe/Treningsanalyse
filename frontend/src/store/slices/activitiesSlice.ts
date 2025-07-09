@@ -24,10 +24,13 @@ export const fetchActivities = createAsyncThunk<Activity[], void, { rejectValue:
   'activities/fetchActivities',
   async (_, { rejectWithValue }) => {
     try {
+      console.log('[fetchActivities] Starter API-kall...');
       const response = await activitiesApi.getActivities();
+      console.log('[fetchActivities] Hentet response:', response?.length || 0, 'aktiviteter');
       // Backend sender nå en flat liste, så vi returnerer den direkte.
       return response;
     } catch (error) {
+      console.error('[fetchActivities] Feil ved henting av aktiviteter:', error);
       const errorInfo = errorHandler(error);
       return rejectWithValue(errorInfo.error);
     }

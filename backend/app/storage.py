@@ -45,7 +45,7 @@ class DataStorage:
         }
         self.activity_details_columns = {
             'activity_id': 'int64', 'timestamp': 'datetime64[ns]', 'latitude': 'float64', 'longitude': 'float64',
-            'distance': 'float64', 'speed': 'float64', 'heart_rate': 'int64', 'cadence': 'int64', 'temperature': 'int64'
+            'distance': 'float64', 'speed': 'float64', 'heart_rate': 'int64', 'cadence': 'int64', 'temperature': 'int64', 'altitude': 'float64'
         }
 
         self.heart_rate_columns = {'timestamp': 'datetime64[ns]', 'heart_rate': 'int64'}
@@ -146,8 +146,25 @@ class DataStorage:
     def get_all_activities(self) -> pd.DataFrame:
         return self.activities_df
     
+    def reload_activity_details(self):
+        """Laster aktivitetsdetaljene på nytt fra parquet-filen."""
+        self.activity_details_df = self._load_or_initialize_dataframe(
+            self.activity_details_file, 
+            self.activity_details_columns
+        )
+        logger.info(f"Lastet aktivitetsdetaljer på nytt: {len(self.activity_details_df)} rader")
+
     def get_activity_details(self, activity_id: int) -> Optional[pd.DataFrame]:
-        return self.activity_details_df[self.activity_details_df['activity_id'] == activity_id]
+        # Last data på nytt for å sikre at vi har de nyeste dataene
+        self.reload_activity_details()
+        
+        activity_data = self.activity_details_df[self.activity_details_df['activity_id'] == activity_id]
+        if activity_data.empty:
+            return None
+        
+        # Reset index for å få timestamp som kolonne
+        activity_data = activity_data.reset_index()
+        return activity_data
 
 
 
@@ -175,7 +192,50 @@ class DataStorage:
         self._save_data_internal(activities_data, 'activities_df', self.activities_file, self.activities_columns, 'activity_id', 'Aktiviteter')
 
     def save_activity_details(self, details_data: List[Dict[str, Any]]):
-        self._save_data_internal(details_data, 'activity_details_df', self.activity_details_file, self.activity_details_columns, 'timestamp', 'Aktivitetsdetaljer')
+        """Lagrer aktivitetsdetaljer med spesiell duplikatsjekk basert på activity_id og timestamp."""
+        if not details_data:
+            return
+        
+        new_df = pd.DataFrame(details_data)
+        for col, dtype in self.activity_details_columns.items():
+            if col in new_df.columns:
+                new_df[col] = self._convert_to_type(new_df[col], dtype, col)
+
+        current_df = self.activity_details_df
+        
+        if not current_df.empty:
+            # For activity_details bruker vi kombinasjon av activity_id og timestamp for duplikatsjekk
+            if current_df.index.name == 'timestamp':
+                current_df_reset = current_df.reset_index()
+            else:
+                current_df_reset = current_df.copy()
+            
+            # Opprett kombinert nøkkel for duplikatsjekk
+            if 'activity_id' in current_df_reset.columns and 'timestamp' in current_df_reset.columns and 'activity_id' in new_df.columns and 'timestamp' in new_df.columns:
+                existing_keys = set(zip(current_df_reset['activity_id'], current_df_reset['timestamp']))
+                new_keys = list(zip(new_df['activity_id'], new_df['timestamp']))
+                
+                # Behold kun nye kombinasjoner av (activity_id, timestamp)
+                mask = [key not in existing_keys for key in new_keys]
+                new_df = new_df[mask]
+            else:
+                # Fallback til timestamp-only hvis kolonner mangler
+                new_df = new_df[~new_df['timestamp'].isin(current_df_reset['timestamp'])]
+
+        if new_df.empty:
+            logger.info("Ingen nye data å legge til for Aktivitetsdetaljer.")
+            return
+
+        # Kombiner data
+        if not current_df.empty and current_df.index.name == 'timestamp':
+            current_df = current_df.reset_index()
+        
+        combined_df = pd.concat([current_df, new_df], ignore_index=True)
+        combined_df.set_index('timestamp', inplace=True)
+        combined_df.sort_index(inplace=True)
+
+        self.activity_details_df = combined_df
+        self._save_dataframe(combined_df, self.activity_details_file, 'Aktivitetsdetaljer')
 
 
     

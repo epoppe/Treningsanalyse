@@ -109,7 +109,7 @@ export default function RunningEconomyChart({
   const runningActivities = activities
     .filter(
       (a) =>
-        a.activityType.typeKey &&
+        a.activityType?.typeKey &&
         a.activityType.typeKey.includes("running") &&
         !a.activityType.typeKey.includes("treadmill")
     )
@@ -279,7 +279,13 @@ export default function RunningEconomyChart({
             tickFormatter={(tick) => tick.toFixed(2)}
           />
           <Tooltip
-            contentStyle={{ backgroundColor: '#333', border: 'none' }}
+            contentStyle={{ 
+              backgroundColor: 'white', 
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+              color: '#333'
+            }}
             formatter={(value: number, name: string) => {
               const formattedName =
                 name === "movingAverage" ? "Gj.snitt" : "Verdi";

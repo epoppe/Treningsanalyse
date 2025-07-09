@@ -3,8 +3,8 @@
 export interface Activity {
   activityId: string;
   activityName?: string;
-  activityType: {
-    typeKey: string;
+  activityType?: {
+    typeKey?: string;
     parentTypeKey?: string;
   };
   averageHR?: number;

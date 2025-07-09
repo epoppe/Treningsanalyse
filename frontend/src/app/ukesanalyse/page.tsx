@@ -81,7 +81,7 @@ export default function RunningEconomyPage() {
         startDate.setFullYear(now.getFullYear() - 1);
     }
     
-    return activities.filter(a => new Date(a.startTimeLocal) >= startDate && a.activityType.typeKey.includes('running'));
+    return activities.filter(a => new Date(a.startTimeLocal) >= startDate && a.activityType?.typeKey?.includes('running'));
   }, [activities, timeFilter]);
 
   if (status === 'loading') {
@@ -93,7 +93,7 @@ export default function RunningEconomyPage() {
   }
 
   const runningActivities = filteredActivities.filter(
-    a => a.activityType.typeKey && a.activityType.typeKey.includes('running') && !a.activityType.typeKey.includes('treadmill')
+          a => a.activityType?.typeKey && a.activityType.typeKey.includes('running') && !a.activityType.typeKey.includes('treadmill')
   );
 
   return (

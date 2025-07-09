@@ -26,27 +26,85 @@ class SyncService:
         self.storage = storage
         self.db = db_session
 
+    def _extract_numeric_value(self, value) -> Optional[float]:
+        """Ekstraherer numerisk verdi fra FIT-data som kan inneholde enheter."""
+        if value is None:
+            return None
+        
+        if isinstance(value, (int, float)):
+            return float(value)
+        
+        if isinstance(value, str):
+            # Prøv å ekstrahere tall fra streng som kan inneholde enheter (f.eks. "5.2 m/s")
+            import re
+            match = re.search(r'[-+]?(?:\d*\.\d+|\d+)', value)
+            if match:
+                try:
+                    return float(match.group())
+                except ValueError:
+                    pass
+        
+        return None
+
     def _parse_fit_data(self, fit_data: bytes) -> Optional[dict]:
-        """Parser FIT-data og konverterer det til en JSON-serialiserbar ordbok."""
+        """Parser FIT-data fra bytes til strukturert JSON."""
+        if not fit_data:
+            return None
+        
         try:
-            fitfile = fitparse.FitFile(BytesIO(fit_data))
+            import zipfile
+            import io
+            from fitparse import FitFile
+            
+            # Sjekk om dataene er en ZIP-fil
+            if fit_data.startswith(b'PK'):
+                logger.info("FIT-data er en ZIP-fil, ekstrakterer FIT-fil...")
+                try:
+                    with zipfile.ZipFile(io.BytesIO(fit_data), 'r') as zip_file:
+                        # Finn FIT-filen i ZIP-arkivet
+                        fit_files = [name for name in zip_file.namelist() if name.endswith('.fit')]
+                        if not fit_files:
+                            logger.warning("Ingen FIT-fil funnet i ZIP-arkivet")
+                            return None
+                        
+                        # Bruk den første FIT-filen
+                        fit_filename = fit_files[0]
+                        logger.info(f"Ekstrakterer FIT-fil: {fit_filename}")
+                        fit_data = zip_file.read(fit_filename)
+                        
+                except zipfile.BadZipFile:
+                    logger.warning("Kunne ikke åpne som ZIP-fil, prøver som rå FIT-data")
+                except Exception as e:
+                    logger.error(f"Feil ved ekstraksjon av ZIP-fil: {e}")
+                    return None
+            
+            # Parser FIT-data
+            fitfile = FitFile(io.BytesIO(fit_data))
+            
             records = []
-            for record in fitfile.get_messages('record'):
-                record_data = {}
-                for data in record:
-                    if data.value is not None and not isinstance(data.value, str):
-                        # Konverterer enheter til strenger for å unngå serialiseringsfeil
-                        value = f"{data.value} {data.units}" if data.units else data.value
-                        record_data[data.name] = value
-                if record_data:
-                    records.append(record_data)
+            for record in fitfile.get_messages("record"):
+                parsed_record = {}
+                for field in record.fields:
+                    value = field.value
+                    # Håndter semicircles (lat/lon)
+                    if field.name in ['position_lat', 'position_long'] and value is not None:
+                        # Konverter fra semicircles til desimalgrader
+                        value = value * (180 / (2**31))
+                    # Konverter datetime til ISO-string for JSON-serialisering
+                    elif hasattr(value, 'isoformat'):
+                        value = value.isoformat()
+                    parsed_record[field.name] = value
+                
+                records.append(parsed_record)
+            
+            logger.info(f"Parsed {len(records)} FIT-records")
             return {"records": records}
-        except FitHeaderError:
-            # Dette er en forventet feil for aktiviteter uten gyldig datafil.
-            logger.warning(f"Kunne ikke parse filen da den mangler gyldig FIT-header. Dette skjer ofte med manuelle aktiviteter. Innhold (start): {fit_data[:100]}")
+            
+        except ImportError:
+            logger.error("fitparse-biblioteket er ikke installert. Kan ikke parse FIT-data.")
             return None
         except Exception as e:
-            logger.error(f"En uventet feil oppstod under parsing av FIT-fil: {e}", exc_info=True)
+            logger.warning(f"Kunne ikke parse FIT-data: {e}")
             return None
 
     def sync_json_to_db(self) -> dict:
@@ -167,6 +225,49 @@ class SyncService:
         logger.info(f"Beregnet {len(chunked_periods)} perioder som skal hentes: {chunked_periods}")
         return chunked_periods
 
+    async def sync_activities_with_fit_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100) -> dict:
+        """
+        Synkroniserer aktiviteter og laster automatisk ned FIT-data for aktiviteter som mangler det.
+        
+        Args:
+            start_date: Startdato for synkronisering
+            end_date: Sluttdato for synkronisering  
+            force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
+            fit_data_limit: Maksimalt antall aktiviteter å laste ned FIT-data for
+        """
+        logger.info(f"Starter utvidet aktivitetssynkronisering med automatisk FIT-data nedlasting")
+        
+        # Først, gjør vanlig aktivitetssynkronisering
+        sync_result = await self.sync_activities(start_date, end_date, force_refresh_recent)
+        
+        # Så, last ned FIT-data for aktiviteter som mangler det
+        fit_result = {"status": "Ikke kjørt", "success_count": 0, "total_count": 0}
+        
+        try:
+            logger.info(f"Starter automatisk FIT-data nedlasting for aktiviteter som mangler data...")
+            fit_result = await self.download_fit_data_for_activities(limit=fit_data_limit)
+            logger.info(f"FIT-data nedlasting ferdig: {fit_result.get('message', 'Ukjent status')}")
+        except Exception as e:
+            logger.error(f"Feil under automatisk FIT-data nedlasting: {e}")
+            fit_result = {"status": "Feil", "message": str(e), "success_count": 0, "total_count": 0}
+        
+        # Kombiner resultater
+        combined_result = {
+            "sync_result": sync_result,
+            "fit_data_result": fit_result,
+            "status": "Fullført med FIT-data",
+            "summary": {
+                "activities_synced": sync_result.get("total_fetched", 0),
+                "fit_data_downloaded": fit_result.get("success_count", 0),
+                "fit_data_attempted": fit_result.get("total_count", 0),
+                "sync_status": sync_result.get("status", "Ukjent"),
+                "fit_status": fit_result.get("status", "Ukjent")
+            }
+        }
+        
+        logger.info(f"Utvidet synkronisering fullført: {combined_result['summary']}")
+        return combined_result
+
     async def sync_activities(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False) -> dict:
         """
         Orkestrerer synkronisering av aktiviteter for en gitt tidsperiode og lagrer dem i databasen.
@@ -244,6 +345,49 @@ class SyncService:
                 fit_data = await self.garmin_client.get_activity_details(activity_id)
                 if fit_data:
                     details_json = self._parse_fit_data(fit_data)
+                    
+                    # Lagre FIT-data også i parquet-format for decoupling-beregninger
+                    if details_json and 'records' in details_json:
+                        logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
+                        parquet_records = []
+                        for record in details_json['records']:
+                            # Konverter timestamp til UTC hvis det eksisterer
+                            timestamp = record.get('timestamp')
+                            if timestamp:
+                                if isinstance(timestamp, str):
+                                    timestamp = pd.to_datetime(timestamp, utc=True)
+                                elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                                    timestamp = pd.to_datetime(timestamp, utc=True)
+                                elif not hasattr(timestamp, 'tzinfo'):
+                                    timestamp = pd.to_datetime(timestamp, utc=True)
+                            
+                            parquet_record = {
+                                'activity_id': int(activity_id),
+                                'timestamp': timestamp,
+                                'latitude': self._extract_numeric_value(record.get('position_lat')),
+                                'longitude': self._extract_numeric_value(record.get('position_long')),
+                                'distance': self._extract_numeric_value(record.get('distance')),
+                                'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
+                                'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
+                                'cadence': self._extract_numeric_value(record.get('cadence')),
+                                'temperature': self._extract_numeric_value(record.get('temperature')),
+                                'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
+                            }
+                            
+                            # Kun legg til record hvis den har nødvendige data
+                            if parquet_record['timestamp'] is not None:
+                                parquet_records.append(parquet_record)
+                        
+                        if parquet_records:
+                            try:
+                                self.storage.save_activity_details(parquet_records)
+                                logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
+                            except Exception as e:
+                                logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
+                        else:
+                            logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
+                    else:
+                        logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
 
                 # Håndter ActivityType
                 activity_type_key = act_data.get('activityType', {}).get('typeKey')
@@ -404,4 +548,134 @@ class SyncService:
 
     async def _download_and_store_fit_file(self, activity_id: int):
         """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
-        # Implementer funksjonen her 
+        try:
+            logger.info(f"Laster ned FIT-data for aktivitet {activity_id}...")
+            
+            # Hent FIT-data fra Garmin
+            fit_data = await self.garmin_client.get_activity_details(activity_id)
+            if not fit_data:
+                logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
+                return False
+                
+            # Parse FIT-data
+            details_json = self._parse_fit_data(fit_data)
+            if not details_json or 'records' not in details_json:
+                logger.warning(f"Kunne ikke parse FIT-data for aktivitet {activity_id}")
+                return False
+                
+            # Lagre til parquet-format
+            parquet_records = []
+            for record in details_json['records']:
+                # Konverter timestamp til UTC hvis det eksisterer
+                timestamp = record.get('timestamp')
+                if timestamp:
+                    if isinstance(timestamp, str):
+                        timestamp = pd.to_datetime(timestamp, utc=True)
+                    elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                        timestamp = pd.to_datetime(timestamp, utc=True)
+                    elif not hasattr(timestamp, 'tzinfo'):
+                        timestamp = pd.to_datetime(timestamp, utc=True)
+                
+                parquet_record = {
+                    'activity_id': int(activity_id),
+                    'timestamp': timestamp,
+                    'latitude': self._extract_numeric_value(record.get('position_lat')),
+                    'longitude': self._extract_numeric_value(record.get('position_long')),
+                    'distance': self._extract_numeric_value(record.get('distance')),
+                    'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
+                    'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
+                    'cadence': self._extract_numeric_value(record.get('cadence')),
+                    'temperature': self._extract_numeric_value(record.get('temperature')),
+                    'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
+                }
+                
+                # Kun legg til record hvis den har nødvendige data
+                if parquet_record['timestamp'] is not None:
+                    parquet_records.append(parquet_record)
+            
+            if parquet_records:
+                self.storage.save_activity_details(parquet_records)
+                logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
+                
+                # Oppdater også database med details_json
+                activity = self.db.query(Activity).filter_by(id=activity_id).first()
+                if activity:
+                    activity.details = details_json
+                    self.db.commit()
+                    logger.info(f"Oppdaterte database med FIT-data for aktivitet {activity_id}")
+                
+                return True
+            else:
+                logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Feil ved nedlasting av FIT-data for aktivitet {activity_id}: {e}")
+            return False
+
+    async def download_fit_data_for_activities(self, activity_ids: list = None, limit: int = None):
+        """Laster ned FIT-data for spesifikke aktiviteter eller alle aktiviteter uten FIT-data."""
+        if not await self.garmin_client.initialize():
+            logger.error("Kunne ikke initialisere Garmin-klient for FIT-nedlasting.")
+            return {"status": "Feil", "message": "Kunne ikke initialisere Garmin-klient"}
+
+        try:
+            if activity_ids is None:
+                # Finn aktiviteter som ikke har FIT-data i parquet-filen ELLER i database
+                try:
+                    import pandas as pd
+                    existing_parquet_df = pd.read_parquet('data/activity_details.parquet')
+                    existing_fit_activity_ids = set(existing_parquet_df['activity_id'].unique())
+                except:
+                    existing_fit_activity_ids = set()
+                
+                # Hent alle aktiviteter fra database og sjekk details-felt
+                query = self.db.query(Activity.id, Activity.details).order_by(Activity.id.desc())
+                if limit:
+                    query = query.limit(limit * 3)  # Hent flere siden mange kan mangle FIT-data
+                
+                all_activities = query.all()
+                
+                # Finn aktiviteter som mangler FIT-data (enten i parquet eller details)
+                activity_ids = []
+                for activity in all_activities:
+                    activity_id = activity.id
+                    has_parquet_data = activity_id in existing_fit_activity_ids
+                    has_db_details = activity.details is not None and activity.details != {} and 'records' in str(activity.details)
+                    
+                    if not (has_parquet_data and has_db_details):
+                        activity_ids.append(activity_id)
+                        if limit and len(activity_ids) >= limit:
+                            break
+                
+                logger.info(f"Fant {len(activity_ids)} aktiviteter som mangler FIT-data (av totalt {len(all_activities)} sjekket)")
+                logger.info(f"Første 10 aktiviteter som mangler data: {activity_ids[:10]}")
+            
+            if not activity_ids:
+                return {"status": "Fullført", "message": "Ingen aktiviteter mangler FIT-data"}
+            
+            success_count = 0
+            total_count = len(activity_ids)
+            
+            for i, activity_id in enumerate(activity_ids):
+                logger.info(f"Prosesserer aktivitet {activity_id} ({i+1}/{total_count})")
+                
+                if await self._download_and_store_fit_file(activity_id):
+                    success_count += 1
+                
+                # Liten pause for å unngå rate limiting
+                await asyncio.sleep(0.5)
+            
+            message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
+            logger.info(message)
+            
+            return {
+                "status": "Fullført",
+                "message": message,
+                "success_count": success_count,
+                "total_count": total_count
+            }
+            
+        except Exception as e:
+            logger.error(f"Feil under FIT-data nedlasting: {e}")
+            return {"status": "Feil", "message": str(e)} 

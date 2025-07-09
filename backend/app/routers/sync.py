@@ -26,6 +26,22 @@ class SyncRequest(BaseModel):
     start_date: date
     end_date: date
 
+async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100):
+    """Kjører aktivitetssynkronisering i bakgrunnen med automatisk FIT-data nedlasting."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.sync_activities_with_fit_data(start_date, end_date, force_refresh_recent, fit_data_limit)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i utvidet aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 async def run_activity_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
     """Kjører aktivitetssynkronisering i bakgrunnen."""
     db_session = None
@@ -90,6 +106,22 @@ async def run_health_sync_with_force(job_id: str, garmin_client: GarminClient, s
         if db_session:
             db_session.close()
 
+async def run_fit_data_download(job_id: str, garmin_client: GarminClient, storage: DataStorage, activity_ids: list = None, limit: int = None):
+    """Kjører FIT-data nedlasting i bakgrunnen."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.download_fit_data_for_activities(activity_ids, limit)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i FIT-data nedlasting (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 @router.get("/status/{job_id}")
 async def get_sync_status(job_id: str):
     """Henter status for en spesifikk bakgrunnsjobb."""
@@ -118,15 +150,15 @@ async def trigger_activity_sync(
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Starter synkronisering av aktiviteter for en gitt periode."""
+    """Starter synkronisering av aktiviteter for en gitt periode med automatisk FIT-data nedlasting."""
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_activity_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, False, 100)
     
-    return {"message": "Synkronisering av aktiviteter startet.", "job_id": job_id}
+    return {"message": "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting).", "job_id": job_id}
 
 @router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
@@ -134,15 +166,15 @@ async def trigger_recent_activity_sync(
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Starter synkronisering av aktiviteter for de siste 30 dagene med force refresh."""
+    """Starter synkronisering av aktiviteter for de siste 30 dagene med force refresh og automatisk FIT-data nedlasting."""
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_activity_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
+    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, True, 150)
     
-    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh).", "job_id": job_id}
+    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh og automatisk FIT-data nedlasting).", "job_id": job_id}
 
 @router.post("/health", status_code=202)
 async def trigger_health_sync(
@@ -176,6 +208,20 @@ async def trigger_recent_health_sync(
     background_tasks.add_task(run_health_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
     return {"message": "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 2 dager).", "job_id": job_id}
+
+@router.post("/fit-data/download", status_code=202)
+async def trigger_fit_data_download(
+    background_tasks: BackgroundTasks,
+    limit: int = 50,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter nedlasting av FIT-data for aktiviteter som mangler detaljerte data."""
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_fit_data_download, job_id, garmin_client, storage, None, limit)
+    
+    return {"message": f"FIT-data nedlasting startet for opptil {limit} aktiviteter.", "job_id": job_id}
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(
