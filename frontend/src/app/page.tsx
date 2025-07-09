@@ -153,6 +153,7 @@ export default function Home() {
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
+  const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
@@ -204,32 +205,35 @@ export default function Home() {
   }, [status, dispatch]);
 
   useEffect(() => {
-    // Sett alle aktivitetstyper som valgt når aktiviteter lastes første gang
-    if (activities.length > 0 && selectedActivityTypes.length === 0) {
+    // Sett alle aktivitetstyper som valgt kun første gang når aktiviteter lastes
+    if (activities.length > 0 && !hasInitializedTypes && activityTypes.length > 0) {
       const allTypes = activityTypes.map(([typeKey]) => typeKey);
       setSelectedActivityTypes(allTypes);
+      setHasInitializedTypes(true);
     }
-  }, [activities, selectedActivityTypes.length, activityTypes]);
+  }, [activities, activityTypes, hasInitializedTypes]);
 
   useEffect(() => {
     let tempActivities = [...activities];
 
-    // Filtrer på aktivitetstyper
-    if (selectedActivityTypes.length > 0) {
+    // Filtrer på aktivitetstyper - hvis ingen er valgt, vis ingen aktiviteter
+    if (selectedActivityTypes.length === 0) {
+      tempActivities = [];
+    } else {
       tempActivities = tempActivities.filter(activity => 
         selectedActivityTypes.includes(activity.activityType?.typeKey || '')
       );
     }
 
-    // Filtrer på startdato
-    if (startDate) {
+    // Filtrer på startdato (kun hvis vi har aktiviteter å filtrere)
+    if (startDate && tempActivities.length > 0) {
       tempActivities = tempActivities.filter(activity => 
         new Date(activity.startTimeLocal) >= new Date(startDate)
       );
     }
 
-    // Filtrer på sluttdato
-    if (endDate) {
+    // Filtrer på sluttdato (kun hvis vi har aktiviteter å filtrere)
+    if (endDate && tempActivities.length > 0) {
       const endDateTime = new Date(endDate);
       endDateTime.setDate(endDateTime.getDate() + 1);
       tempActivities = tempActivities.filter(activity => 
@@ -254,6 +258,7 @@ export default function Home() {
   };
 
   const handleClearAll = () => {
+    console.log('Fjerner alle aktivitetstyper');
     setSelectedActivityTypes([]);
   };
 

@@ -84,7 +84,12 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
   useEffect(() => {
     const fetchHrvData = async () => {
-      if (activities.length === 0) return;
+      if (activities.length === 0) {
+        console.log('Ingen aktiviteter å hente HRV for - avbryter HRV-henting');
+        setHrvData([]);
+        setIsLoadingHrv(false);
+        return;
+      }
       
       // Filtrer aktiviteter fra 2023 og nyere for HRV-data
       const recentActivities = activities.filter(activity => {
@@ -94,6 +99,8 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
       if (recentActivities.length === 0) {
         console.log('Ingen aktiviteter fra 2023 eller nyere funnet for HRV-data');
+        setHrvData([]);
+        setIsLoadingHrv(false);
         return;
       }
       
@@ -132,7 +139,12 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
   useEffect(() => {
     const fetchNegativeSplitData = async () => {
-      if (activities.length === 0) return;
+      if (activities.length === 0) {
+        console.log('Ingen aktiviteter å hente negative split for - avbryter negative split-henting');
+        setNegativeSplitData({});
+        setIsLoadingNegativeSplit(false);
+        return;
+      }
       
       setIsLoadingNegativeSplit(true);
       const negativeSplitResults: {[activityId: string]: number} = {};
@@ -248,13 +260,32 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
       return null;
     }
     
-    const date = new Date(activityDate).toISOString().split('T')[0];
-    const hrv = hrvData.find(h => h.date === date);
+    // Prøv først aktivitetsdato direkte (YYYY-MM-DD format)
+    const activityDateOnly = activityDate.split('T')[0];
+    let hrv = hrvData.find(h => h.date === activityDateOnly);
+    let matchedDate = activityDateOnly;
     
-    // Debug logging for første aktivitet
-    if (hrvData.length > 0 && !hrv) {
-      console.log('Søker HRV for dato:', date);
-      console.log('Tilgjengelige HRV-datoer:', hrvData.slice(0, 5).map(h => h.date));
+    // Hvis ikke funnet, prøv dagen før (HRV måles om natten)
+    if (!hrv) {
+      const dayBefore = new Date(activityDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      const dayBeforeStr = dayBefore.toISOString().split('T')[0];
+      hrv = hrvData.find(h => h.date === dayBeforeStr);
+      if (hrv) matchedDate = dayBeforeStr;
+    }
+    
+    // Hvis fortsatt ikke funnet, prøv dagen etter
+    if (!hrv) {
+      const dayAfter = new Date(activityDate);
+      dayAfter.setDate(dayAfter.getDate() + 1);
+      const dayAfterStr = dayAfter.toISOString().split('T')[0];
+      hrv = hrvData.find(h => h.date === dayAfterStr);
+      if (hrv) matchedDate = dayAfterStr;
+    }
+    
+    // Debug logging kun hvis HRV ikke finnes (for fremtidige problemer)
+    if (!hrv && process.env.NODE_ENV === 'development') {
+      console.log(`HRV ikke funnet for aktivitet ${activityDateOnly}. Søkte: ${activityDateOnly}, ${matchedDate}`);
     }
     
     return hrv ? hrv.last_night_avg : null;
@@ -289,6 +320,17 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     const sign = negativeSplitPercent >= 0 ? '+' : '';
     return `${sign}${negativeSplitPercent.toFixed(1)}%`;
   };
+
+  if (activities.length === 0) {
+    return (
+      <ActivityContainer>
+        <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+          <h3>Ingen aktiviteter å vise</h3>
+          <p>Velg aktivitetstyper fra filteret ovenfor for å se aktiviteter.</p>
+        </div>
+      </ActivityContainer>
+    );
+  }
 
   return (
     <ActivityContainer>
