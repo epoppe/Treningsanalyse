@@ -111,7 +111,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
           return;
         }
         try {
-          const data = await api.getHrvByActivity(activity.activityId);
+          const data = await api.getHrvByActivity(parseInt(activity.activityId));
           // Backend returnerer et objekt med last_night_avg property, ikke hrv
           console.log(`[HRV] Data for activity ${activity.activityId}:`, data);
           hrvResults[activity.activityId] = data?.last_night_avg ?? null;

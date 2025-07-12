@@ -46,6 +46,10 @@ export interface ActivityResponse {
   };
 }
 
+export interface HrvByActivityResponse {
+  last_night_avg: number | null;
+}
+
 
 
 export const activitiesApi = {
@@ -156,21 +160,15 @@ const healthApi = {
   getHrv: (date: string) => apiCall('get', `/health/hrv/${date}`),
 };
 
-const analysisApi = {
+export const analysisApi = {
   getRunningEconomy: (forceRefresh: boolean = false) => apiCall('get', `/analysis/running-economy?force_refresh=${forceRefresh}`),
-  getHrv: (startDate?: string, endDate?: string) => {
-    const params = new URLSearchParams();
-    if (startDate) params.append('start_date', startDate);
-    if (endDate) params.append('end_date', endDate);
-    return apiCall('get', `/analysis/hrv?${params.toString()}`);
-  },
   getNegativeSplit: (activityId: number) => apiCall('get', `/activities/${activityId}/negative-split`),
   getDecoupling: (activityId: number) => apiCall('get', `/activities/${activityId}/decoupling`),
-  getHrvByActivity: (activityId: number) => apiCall('get', `/analysis/hrv/by-activity/${activityId}`),
+  getHrvByActivity: (activityId: number): Promise<HrvByActivityResponse> => apiCall<HrvByActivityResponse>('get', `/analysis/hrv/by-activity/${activityId}`),
   getStrideLengthData: (activityId: number) => apiCall('get', `/analysis/stride-length/${activityId}`),
 };
 
-const syncApi = {
+export const syncApi = {
   // --- Aktiviteter ---
   syncActivities: (startDate: string, endDate: string) => {
     const body = {
@@ -219,7 +217,7 @@ export const api = {
   ...healthApi,
   ...analysisApi,
   ...syncApi,
-};
+} as typeof activitiesApi & typeof healthApi & typeof analysisApi & typeof syncApi;
 
 export const errorHandler = (error: any) => {
   if (error.response) {

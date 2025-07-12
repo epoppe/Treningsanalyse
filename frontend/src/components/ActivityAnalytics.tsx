@@ -26,12 +26,7 @@ interface DecouplingData {
   calculation_method: string;
 }
 
-interface HrvDataForActivity {
-  date: string;
-  last_night_avg: number;
-  status: string;
-  rolling_avg_7d: number;
-}
+
 
 interface ActivityAnalyticsProps {
   activityId: number;
@@ -40,7 +35,6 @@ interface ActivityAnalyticsProps {
 const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
   const [negativeSplit, setNegativeSplit] = useState<NegativeSplitData | null>(null);
   const [decoupling, setDecoupling] = useState<DecouplingData | null>(null);
-  const [hrv, setHrv] = useState<HrvDataForActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,14 +57,6 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           setDecoupling(decouplingData);
         } catch (err) {
           console.log('Decoupling ikke tilgjengelig for denne aktiviteten');
-        }
-
-        // Hent HRV-data for aktivitetsdagen
-        try {
-          const hrvData = await analysisApi.getHrvByActivity(activityId);
-          setHrv(hrvData);
-        } catch (err) {
-          console.log('HRV-data ikke tilgjengelig for denne aktivitetsdagen');
         }
 
       } catch (err) {
@@ -223,44 +209,6 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
         </Card>
       )}
 
-      {hrv && (
-        <Card>
-          <Flex justifyContent="between" alignItems="center">
-            <Title>HRV-status (dagen)</Title>
-            <Badge color={
-              hrv.status === 'BALANCED' ? 'green' :
-              hrv.status === 'UNBALANCED' ? 'red' :
-              hrv.status === 'LOW' ? 'yellow' : 'gray'
-            }>
-              {hrv.status}
-            </Badge>
-          </Flex>
-          
-          <Metric className="mt-4">
-            {hrv.last_night_avg.toFixed(0)} ms
-          </Metric>
-
-          <div className="mt-4 space-y-2">
-            <div className="flex justify-between">
-              <Text>Dato:</Text>
-              <Text>{new Date(hrv.date).toLocaleDateString()}</Text>
-            </div>
-            <div className="flex justify-between">
-              <Text>7-dagers snitt:</Text>
-              <Text>{hrv.rolling_avg_7d.toFixed(0)} ms</Text>
-            </div>
-          </div>
-
-           <div className="mt-4">
-            <Text className="text-sm text-gray-600">
-              { hrv.status === 'BALANCED' ? 'Kroppen er restituert og klar for belastning.' :
-                hrv.status === 'UNBALANCED' ? 'HRV er unormalt lav. Vurder en roligere økt.' :
-                'HRV er annerledes enn din baseline.'
-              }
-            </Text>
-          </div>
-        </Card>
-      )}
     </div>
   );
 };
