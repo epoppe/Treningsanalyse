@@ -64,13 +64,13 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
     });
   }
 
-  // Filtrer aktiviteter til siste 4 år
-  const fourYearsAgo = new Date();
-  fourYearsAgo.setFullYear(currentYear - 4);
+  // Filtrer aktiviteter til siste 4 år - bruk den eldste året i years array
+  const earliestYear = Math.min(...years);
+  const earliestDate = new Date(earliestYear, 0, 1); // 1. januar av det eldste året
 
   const relevantActivities = activities.filter(activity => {
     const activityDate = new Date(activity.startTimeLocal);
-    return activityDate >= fourYearsAgo;
+    return activityDate >= earliestDate;
   });
 
   // Grupper aktiviteter per måned og år
@@ -91,6 +91,9 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
       monthlyData[monthKey][year] += value;
     }
   });
+
+  // Debug logging - kun grunnleggende info
+  console.log(`[MonthlyComparisonChart] ${title}: ${activities.length} aktiviteter, ${relevantActivities.length} relevante aktiviteter (${earliestDate.getFullYear()}-${new Date().getFullYear()})`);
 
   // Konverter til format som Recharts kan bruke
   const chartData = monthNames.map(month => {

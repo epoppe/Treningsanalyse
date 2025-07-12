@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { fetchActivities, Activity } from '../../store/slices/activitiesSlice';
+import { fetchAllActivities, Activity } from '../../store/slices/activitiesSlice';
 import styled from 'styled-components';
 import ActivityChart from '../../components/ActivityChart';
 import MonthlyComparisonChart from '../../components/MonthlyComparisonChart';
+import SummaryTables from '../../components/SummaryTables';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -218,6 +219,7 @@ const StatistikkPage = () => {
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [allFilteredActivities, setAllFilteredActivities] = useState<Activity[]>([]);
+  const [allActivitiesForCharts, setAllActivitiesForCharts] = useState<Activity[]>([]);
 
   // Hent unike aktivitetstyper
   const activityTypes = useMemo(() => {
@@ -239,6 +241,18 @@ const StatistikkPage = () => {
     return date;
   }, []);
 
+  // Beregn datoer for trailing 48 måneder (4 år for grafene)
+  const trailing48MonthsDate = useMemo(() => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - 48);
+    return date;
+  }, []);
+
+  // Beregn startdato for 2022 (for grafene)
+  const startOf2022Date = useMemo(() => {
+    return new Date('2022-01-01');
+  }, []);
+
   // Filtrer aktiviteter basert på valgte typer og siste 12 måneder
   useEffect(() => {
     let tempActivities = activities.filter(activity => {
@@ -255,9 +269,12 @@ const StatistikkPage = () => {
     setFilteredActivities(tempActivities);
   }, [activities, selectedActivityTypes, trailing12MonthsDate]);
 
-  // Filtrer alle aktiviteter basert på valgte typer (for grafene - alle år)
+  // Filtrer aktiviteter basert på valgte typer for 2022-2024 (for grafene)
   useEffect(() => {
-    let tempActivities = activities;
+    let tempActivities = activities.filter(activity => {
+      const activityDate = new Date(activity.startTimeLocal);
+      return activityDate >= startOf2022Date;
+    });
 
     if (selectedActivityTypes.length > 0) {
       tempActivities = tempActivities.filter(a => 
@@ -266,7 +283,17 @@ const StatistikkPage = () => {
     }
 
     setAllFilteredActivities(tempActivities);
-  }, [activities, selectedActivityTypes]);
+  }, [activities, selectedActivityTypes, startOf2022Date]);
+
+  // Alle aktiviteter for siste 4 år (for grafene - ufiltrert)
+  useEffect(() => {
+    const tempActivities = activities.filter(activity => {
+      const activityDate = new Date(activity.startTimeLocal);
+      return activityDate >= trailing48MonthsDate;
+    });
+
+    setAllActivitiesForCharts(tempActivities);
+  }, [activities, trailing48MonthsDate]);
 
   // Initialiser med alle aktivitetstyper valgt kun første gang
   const [hasInitialized, setHasInitialized] = useState(false);
@@ -280,7 +307,7 @@ const StatistikkPage = () => {
 
   useEffect(() => {
     if (status === 'idle') {
-      dispatch(fetchActivities());
+      dispatch(fetchAllActivities({ count: 1000 })); // Hent alle aktiviteter
     }
   }, [status, dispatch]);
 
@@ -301,7 +328,7 @@ const StatistikkPage = () => {
   };
 
   const handleForceRefresh = () => {
-    dispatch(fetchActivities());
+    dispatch(fetchAllActivities({ count: 1000 })); // Hent alle aktiviteter
   };
 
   const isLoading = status === 'loading';
@@ -512,16 +539,18 @@ const StatistikkPage = () => {
             </StatsGrid>
           </PeriodSection>
 
+          <SummaryTables selectedActivityTypes={selectedActivityTypes} />
+
           <ChartsContainer>
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="distance"
-              title="Månedlig distanse - Siste 4 år"
+              title="Månedlig distanse - 2022-2024 (valgte aktivitetstyper)"
             />
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="time"
-              title="Månedlig treningstid - Siste 4 år"
+              title="Månedlig treningstid - 2022-2024 (valgte aktivitetstyper)"
             />
           </ChartsContainer>
         </>

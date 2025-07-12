@@ -33,3 +33,8 @@ async def get_data_storage(request: Request) -> DataStorage:
         # Storage bør alltid være tilgjengelig etter oppstart.
         raise HTTPException(status_code=500, detail="Lagringstjenesten er ikke tilgjengelig.")
     return request.app.state.data_storage 
+
+def get_analysis_service(storage: DataStorage = Depends(get_data_storage)) -> "AnalysisService":
+    """Dependency for å hente en instans av AnalysisService."""
+    from .services.analysis_service import AnalysisService
+    return AnalysisService(storage) 

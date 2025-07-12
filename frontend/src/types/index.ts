@@ -17,5 +17,7 @@ export interface Activity {
   duration?: number;
   startTimeLocal: string;
   vO2MaxValue?: number;
+  negativeSplitPercent?: number;
+  decouplingPercent?: number;
   details?: { [key: string]: any };
 } 

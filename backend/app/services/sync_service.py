@@ -480,7 +480,14 @@ class SyncService:
 
     async def sync_health_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
         """Synkroniserer helsedata (HRV, etc.) for en gitt periode."""
-        logger.info(f"Starter synkronisering av helsedata fra {start_date.date()} til {end_date.date()}")
+        # HRV-data er kun tilgjengelig fra 2023 og fremover
+        hrv_start_date = max(start_date, datetime(2023, 1, 1, tzinfo=timezone.utc))
+        
+        if hrv_start_date > end_date:
+            logger.info(f"HRV-synkronisering hoppes over - perioden {start_date.date()} til {end_date.date()} er før 2023")
+            return
+        
+        logger.info(f"Starter synkronisering av helsedata fra {hrv_start_date.date()} til {end_date.date()} (HRV-data kun tilgjengelig fra 2023)")
         
         if not await self.garmin_client.initialize():
             logger.error("Kunne ikke initialisere Garmin-klient for helsedata-synk.")
@@ -508,7 +515,7 @@ class SyncService:
             logger.warning(f"Kunne ikke lese eksisterende HRV-datoer, fortsetter uten duplikatsjekk. Feil: {e}")
             existing_dates = set()
 
-        current_date = start_date
+        current_date = hrv_start_date
         while current_date <= end_date:
             date_str = current_date.strftime("%Y-%m-%d")
             

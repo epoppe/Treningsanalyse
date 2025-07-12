@@ -3,7 +3,7 @@
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { useRouter } from 'next/navigation';
-import { analysisApi } from '../utils/api';
+import { api, errorHandler } from '../utils/api';
 import { useEffect, useState } from 'react';
 import { HrvData } from '../types/hrv';
 
@@ -25,7 +25,7 @@ const ActivityDetails = styled.div`
   font-size: 0.9rem;
 `;
 
-const ActivityStat = styled.div<{ statKey?: string; value?: number | null }>`
+const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -33,16 +33,16 @@ const ActivityStat = styled.div<{ statKey?: string; value?: number | null }>`
   border-radius: 4px;
   min-height: 60px;
   justify-content: center;
-  background-color: ${({ statKey, value }) => {
-    if (value === null || value === undefined) return '#f8f9fa'; // default gray
+  background-color: ${({ $statKey, $value }) => {
+    if ($value === null || $value === undefined) return '#f8f9fa'; // default gray
 
-    if (statKey === 'decoupling' || statKey === 'negative_split') {
-      return value > 0 ? '#fee2e2' : '#dcfce7'; // red-100 for positive, green-100 for negative
+    if ($statKey === 'decoupling' || $statKey === 'negative_split') {
+      return $value > 0 ? '#fee2e2' : '#dcfce7'; // red-100 for positive, green-100 for negative
     }
 
-    if (statKey === 'hrv') {
-      if (value < 35) return '#fee2e2'; // red-100
-      if (value <= 37) return '#fef9c3'; // yellow-100
+    if ($statKey === 'hrv') {
+      if ($value < 35) return '#fee2e2'; // red-100
+      if ($value <= 37) return '#fef9c3'; // yellow-100
       return '#dcfce7'; // green-100
     }
     
@@ -91,205 +91,51 @@ interface ActivityListProps {
 
 const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const router = useRouter();
-  const [hrvData, setHrvData] = useState<HrvData[]>([]);
+  const [hrvData, setHrvData] = useState<{[activityId: string]: number | null}>({});
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
-  const [negativeSplitData, setNegativeSplitData] = useState<{[activityId: string]: number}>({});
-  const [isLoadingNegativeSplit, setIsLoadingNegativeSplit] = useState(false);
-  const [decouplingData, setDecouplingData] = useState<{[activityId: string]: number}>({});
-  const [isLoadingDecoupling, setIsLoadingDecoupling] = useState(false);
 
   useEffect(() => {
-    const fetchHrvData = async () => {
+    const fetchHrvDataForActivities = async () => {
       if (activities.length === 0) {
-        console.log('Ingen aktiviteter å hente HRV for - avbryter HRV-henting');
-        setHrvData([]);
-        setIsLoadingHrv(false);
+        setHrvData({});
         return;
       }
+      setIsLoadingHrv(true);
+
+      const hrvResults: {[activityId: string]: number | null} = {};
       
-      // Filtrer aktiviteter fra 2023 og nyere for HRV-data
-      const recentActivities = activities.filter(activity => {
+      const promises = activities.map(async (activity) => {
         const activityDate = new Date(activity.startTimeLocal);
-        return activityDate.getFullYear() >= 2023;
+        if (activityDate.getFullYear() < 2023) {
+          hrvResults[activity.activityId] = null;
+          return;
+        }
+        try {
+          const data = await api.getHrvByActivity(activity.activityId);
+          // Backend returnerer et objekt med last_night_avg property, ikke hrv
+          console.log(`[HRV] Data for activity ${activity.activityId}:`, data);
+          hrvResults[activity.activityId] = data?.last_night_avg ?? null;
+        } catch (error: any) {
+          // 404-feil er forventet for datoer uten HRV-data
+          if (error?.response?.status === 404) {
+            hrvResults[activity.activityId] = null;
+          } else {
+            // Log bare uventede feil
+            console.error(`Uventet feil ved henting av HRV for aktivitet ${activity.activityId}:`, error);
+            hrvResults[activity.activityId] = null;
+          }
+        }
       });
 
-      if (recentActivities.length === 0) {
-        console.log('Ingen aktiviteter fra 2023 eller nyere funnet for HRV-data');
-        setHrvData([]);
-        setIsLoadingHrv(false);
-        return;
-      }
-      
-      setIsLoadingHrv(true);
-      try {
-        // Hent HRV-data for perioden som dekker aktiviteter fra 2023 og nyere
-        const dates = recentActivities.map(a => new Date(a.startTimeLocal));
-        const minDate = new Date(Math.min(...dates.map(d => d.getTime())));
-        const maxDate = new Date(Math.max(...dates.map(d => d.getTime())));
-        
-        // Legg til buffer på begge sider
-        minDate.setDate(minDate.getDate() - 1);
-        maxDate.setDate(maxDate.getDate() + 1);
-        
-        const startDate = minDate.toISOString().split('T')[0];
-        const endDate = maxDate.toISOString().split('T')[0];
-        
-        const response = await fetch(`http://localhost:8000/api/analysis/hrv?start_date=${startDate}&end_date=${endDate}`);
-        const result = await response.json();
-        
-        if (result && result.hrv_data && Array.isArray(result.hrv_data)) {
-          console.log('HRV data hentet:', result.hrv_data.length, 'datapunkter');
-          setHrvData(result.hrv_data);
-        } else {
-          console.log('Ingen HRV data funnet for perioden');
-        }
-      } catch (error) {
-        console.error('Feil ved henting av HRV data:', error);
-      } finally {
-        setIsLoadingHrv(false);
-      }
+      await Promise.all(promises);
+
+      setHrvData(hrvResults);
+      setIsLoadingHrv(false);
     };
 
-    fetchHrvData();
+    fetchHrvDataForActivities();
   }, [activities]);
 
-  useEffect(() => {
-    const fetchNegativeSplitData = async () => {
-      if (activities.length === 0) {
-        console.log('Ingen aktiviteter å hente negative split for - avbryter negative split-henting');
-        setNegativeSplitData({});
-        setIsLoadingNegativeSplit(false);
-        return;
-      }
-      
-      setIsLoadingNegativeSplit(true);
-      const negativeSplitResults: {[activityId: string]: number} = {};
-      
-      try {
-        // Hent negativ split-data for løpeaktiviteter fra 2018 og nyere som er minst 2km
-        const runningActivities = activities.filter(activity => {
-          const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
-                           activity.activityType?.typeKey?.toLowerCase().includes('løp');
-          const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
-          const activityDate = new Date(activity.startTimeLocal);
-          const isRecent = activityDate.getFullYear() >= 2018; // Aktiviteter fra 2018 og nyere
-          return isRunning && hasMinDistance && isRecent;
-        });
-
-        // Sorter etter dato (nyeste først) slik at vi prioriterer nye aktiviteter
-        const sortedRunningActivities = runningActivities.sort((a, b) => {
-          return new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime();
-        });
-
-        console.log(`Henter negativ split for ${sortedRunningActivities.length} løpeaktiviteter fra 2018 og nyere`);
-
-        // Hent negative split for alle kvalifiserte aktiviteter (ingen begrensning)
-        const activitiesToCheck = sortedRunningActivities;
-        
-        const promises = activitiesToCheck.map(async (activity) => {
-          try {
-            const response = await fetch(`http://localhost:8000/api/activities/${activity.activityId}/negative-split`);
-            if (response.ok) {
-              const data = await response.json();
-              return { id: activity.activityId, negativeSplit: data.negative_split_percent };
-            }
-            // 404 er forventet for aktiviteter uten FIT-data, så vi logger ikke dette som feil
-            return null;
-          } catch (error) {
-            // Kun log uventede feil
-            console.warn(`Uventet feil ved henting av negativ split for ${activity.activityId}:`, error);
-            return null;
-          }
-        });
-
-        const results = await Promise.all(promises);
-        
-        results.forEach(result => {
-          if (result && result.negativeSplit !== null) {
-            negativeSplitResults[result.id] = result.negativeSplit;
-          }
-        });
-
-        console.log(`Hentet negativ split-data for ${Object.keys(negativeSplitResults).length} aktiviteter`);
-        setNegativeSplitData(negativeSplitResults);
-      } catch (error) {
-        console.error('Feil ved henting av negativ split-data:', error);
-      } finally {
-        setIsLoadingNegativeSplit(false);
-      }
-    };
-
-    fetchNegativeSplitData();
-  }, [activities]);
-
-  useEffect(() => {
-    const fetchDecouplingData = async () => {
-      if (activities.length === 0) {
-        console.log('Ingen aktiviteter å hente decoupling for - avbryter decoupling-henting');
-        setDecouplingData({});
-        setIsLoadingDecoupling(false);
-        return;
-      }
-      
-      setIsLoadingDecoupling(true);
-      const decouplingResults: {[activityId: string]: number} = {};
-      
-      try {
-        // Hent decoupling-data for løpeaktiviteter fra 2018 og nyere som er minst 2km
-        const runningActivities = activities.filter(activity => {
-          const isRunning = activity.activityType?.typeKey?.toLowerCase().includes('running') || 
-                           activity.activityType?.typeKey?.toLowerCase().includes('løp');
-          const hasMinDistance = (activity.distance || 0) >= 2000; // Minst 2km
-          const activityDate = new Date(activity.startTimeLocal);
-          const isRecent = activityDate.getFullYear() >= 2018; // Aktiviteter fra 2018 og nyere
-          return isRunning && hasMinDistance && isRecent;
-        });
-
-        // Sorter etter dato (nyeste først) slik at vi prioriterer nye aktiviteter
-        const sortedRunningActivities = runningActivities.sort((a, b) => {
-          return new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime();
-        });
-
-        console.log(`Henter decoupling for ${sortedRunningActivities.length} løpeaktiviteter fra 2018 og nyere`);
-
-        // Hent decoupling for alle kvalifiserte aktiviteter (ingen begrensning)
-        const activitiesToCheck = sortedRunningActivities;
-        
-        const promises = activitiesToCheck.map(async (activity) => {
-          try {
-            const response = await fetch(`http://localhost:8000/api/activities/${activity.activityId}/decoupling`);
-            if (response.ok) {
-              const data = await response.json();
-              return { id: activity.activityId, decoupling: data.decoupling_percent };
-            }
-            // 404 er forventet for aktiviteter uten FIT-data, så vi logger ikke dette som feil
-            return null;
-          } catch (error) {
-            // Kun log uventede feil
-            console.warn(`Uventet feil ved henting av decoupling for ${activity.activityId}:`, error);
-            return null;
-          }
-        });
-
-        const results = await Promise.all(promises);
-        
-        results.forEach(result => {
-          if (result && result.decoupling !== null) {
-            decouplingResults[result.id] = result.decoupling;
-          }
-        });
-
-        console.log(`Hentet decoupling-data for ${Object.keys(decouplingResults).length} aktiviteter`);
-        setDecouplingData(decouplingResults);
-      } catch (error) {
-        console.error('Feil ved henting av decoupling-data:', error);
-      } finally {
-        setIsLoadingDecoupling(false);
-      }
-    };
-
-    fetchDecouplingData();
-  }, [activities]);
 
   const handleActivityClick = (activityId: number) => {
     router.push(`/activities/${activityId}`);
@@ -344,42 +190,6 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     return Math.round(vo2Max).toString();
   };
 
-  const getHrvForDate = (activityDate: string) => {
-    if (!Array.isArray(hrvData) || hrvData.length === 0) {
-      return null;
-    }
-    
-    // Prøv først aktivitetsdato direkte (YYYY-MM-DD format)
-    const activityDateOnly = activityDate.split('T')[0];
-    let hrv = hrvData.find(h => h.date === activityDateOnly);
-    let matchedDate = activityDateOnly;
-    
-    // Hvis ikke funnet, prøv dagen før (HRV måles om natten)
-    if (!hrv) {
-      const dayBefore = new Date(activityDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      const dayBeforeStr = dayBefore.toISOString().split('T')[0];
-      hrv = hrvData.find(h => h.date === dayBeforeStr);
-      if (hrv) matchedDate = dayBeforeStr;
-    }
-    
-    // Hvis fortsatt ikke funnet, prøv dagen etter
-    if (!hrv) {
-      const dayAfter = new Date(activityDate);
-      dayAfter.setDate(dayAfter.getDate() + 1);
-      const dayAfterStr = dayAfter.toISOString().split('T')[0];
-      hrv = hrvData.find(h => h.date === dayAfterStr);
-      if (hrv) matchedDate = dayAfterStr;
-    }
-    
-    // Debug logging kun hvis HRV ikke finnes (for fremtidige problemer)
-    if (!hrv && process.env.NODE_ENV === 'development') {
-      console.log(`HRV ikke funnet for aktivitet ${activityDateOnly}. Søkte: ${activityDateOnly}, ${matchedDate}`);
-    }
-    
-    return hrv ? hrv.last_night_avg : null;
-  };
-
   const formatHrv = (hrv?: number) => {
     if (!hrv) return 'N/A';
     return `${Math.round(hrv)}`;
@@ -431,7 +241,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   return (
     <ActivityContainer>
       {activities.map((activity) => {
-        const hrvValue = getHrvForDate(activity.startTimeLocal);
+        const hrvValue = hrvData[activity.activityId];
 
         return (
           <ActivityCard 
@@ -480,14 +290,14 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                 {
                   key: 'negative_split',
                   label: 'Negativ Split',
-                  value: isLoadingNegativeSplit ? 'Laster...' : formatNegativeSplit(negativeSplitData[activity.activityId]),
-                  rawValue: negativeSplitData[activity.activityId]
+                  value: formatNegativeSplit(activity.negativeSplitPercent),
+                  rawValue: activity.negativeSplitPercent
                 },
                 {
                   key: 'decoupling',
                   label: 'Decoupling',
-                  value: isLoadingDecoupling ? 'Laster...' : formatDecoupling(decouplingData[activity.activityId]),
-                  rawValue: decouplingData[activity.activityId]
+                  value: formatDecoupling(activity.decouplingPercent),
+                  rawValue: activity.decouplingPercent
                 },
                 {
                   key: 'hrv',
@@ -498,8 +308,8 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
               ].map(stat => (
                 <ActivityStat 
                   key={stat.key} 
-                  statKey={stat.key} 
-                  value={(stat as any).rawValue}
+                  $statKey={stat.key}
+                  $value={stat.rawValue as number | undefined}
                 >
                   <StatLabel>{stat.label}</StatLabel>
                   <StatValue>{stat.value}</StatValue>

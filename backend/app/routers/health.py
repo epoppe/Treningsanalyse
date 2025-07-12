@@ -32,8 +32,16 @@ async def get_hrv_data_endpoint(
     request_date: date,
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Henter HRV-data for en spesifikk dato."""
+    """Henter HRV-data for en spesifikk dato. HRV-data er kun tilgjengelig fra 2023 og fremover."""
     logger.info(f"Mottok forespørsel om HRV-data for {request_date}")
+    
+    # HRV-data er kun tilgjengelig fra 2023 og fremover
+    if request_date.year < 2023:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"HRV-data er ikke tilgjengelig for {request_date}. HRV-data er kun tilgjengelig fra 2023 og fremover."
+        )
+    
     try:
         hrv_data = await garmin_client.get_hrv_data(request_date)
         if hrv_data is None:

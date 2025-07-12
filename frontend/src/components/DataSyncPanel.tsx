@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchActivities } from '@/store/slices/activitiesSlice';
-import { activitiesApi, syncApi } from '@/utils/api';
+import { api } from '@/utils/api';
 
 const SyncPanelContainer = styled.div`
   background-color: #333;
@@ -82,7 +82,7 @@ const DataSyncPanel = () => {
 
     const interval = setInterval(async () => {
       try {
-        const statusData = await syncApi.getSyncStatus(jobId);
+        const statusData = await api.getSyncStatus(jobId);
         setStatusMessage(`Synkroniseringsstatus: ${statusData.status}`);
 
         if (statusData.status === 'completed' || statusData.status === 'failed') {
@@ -113,7 +113,7 @@ const DataSyncPanel = () => {
     }
     try {
       setStatusMessage('Starter synkronisering...');
-      const response = await syncApi.syncActivities(startDate, endDate);
+      const response = await api.syncActivities(startDate, endDate);
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Synkroniseringsfeil:', err);
@@ -124,7 +124,7 @@ const DataSyncPanel = () => {
   const handleSync30Days = async () => {
     try {
       setStatusMessage('Starter synkronisering for siste 30 dager...');
-      const response = await syncApi.syncRecentActivities();
+      const response = await api.syncRecentActivities();
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Feil ved synkronisering av siste 30 dager:', err);

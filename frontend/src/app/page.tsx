@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchActivities, Activity } from '../store/slices/activitiesSlice';
+import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActivities, setLoadedCount, Activity } from '../store/slices/activitiesSlice';
+import { selectAllActivities, selectActivitiesStatus, selectActivitiesError, selectActivitiesTotalCount, selectActivitiesLoadedCount } from '../store/slices/activitiesSlice';
 import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
 import DataSyncPanel from '../components/DataSyncPanel';
@@ -113,6 +114,64 @@ const ClearAllButton = styled.button`
   }
 `;
 
+const RefreshButton = styled.button`
+  padding: 0.5rem 1rem;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+
+  &:hover {
+    background: #219a52;
+  }
+
+  &:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+  }
+`;
+
+const LoadMoreButton = styled.button`
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  margin: 1rem 0;
+
+  &:hover {
+    background: #2980b9;
+  }
+
+  &:disabled {
+    background: #95a5a6;
+    cursor: not-allowed;
+  }
+`;
+
+const ActivityStatus = styled.div`
+  text-align: center;
+  margin: 1rem 0;
+  padding: 0.5rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #666;
+`;
+
+const ButtonContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  margin: 1rem 0;
+  flex-wrap: wrap;
+`;
+
 const SelectedTypesDisplay = styled.div`
   margin-top: 0.5rem;
   padding: 0.5rem;
@@ -127,10 +186,16 @@ const SelectedTypesDisplay = styled.div`
 
 export default function Home() {
   const dispatch = useAppDispatch();
-  const { items: activities, status, error } = useAppSelector((state) => state.activities);
+  const activities = useAppSelector(selectAllActivities);
+  const status = useAppSelector(selectActivitiesStatus);
+  const error = useAppSelector(selectActivitiesError);
+  const totalCount = useAppSelector(selectActivitiesTotalCount);
+  const loadedCount = useAppSelector(selectActivitiesLoadedCount);
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
+  const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
+  const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
@@ -176,19 +241,42 @@ export default function Home() {
   }, [activities]);
 
   useEffect(() => {
-    if (status === 'idle') {
-      dispatch(fetchActivities());
+    if (status === 'idle' && !hasRestoredFromStorage) {
+      // Gjenopprett loadedCount fra localStorage
+      const savedLoadedCount = localStorage.getItem('activitiesLoadedCount');
+      const savedCount = savedLoadedCount ? parseInt(savedLoadedCount, 10) : 100;
+      
+      console.log('[Home] Gjenoppretter fra localStorage:', { savedCount });
+      
+      if (savedCount > 100) {
+        // Hvis vi hadde lastet flere aktiviteter, hent dem alle på nytt
+        dispatch(fetchAllActivities({ forceRefresh: false, count: savedCount }));
+        dispatch(setLoadedCount(savedCount));
+      } else {
+        // Standard: hent 100 aktiviteter
+        dispatch(fetchActivities());
+      }
+      
+      dispatch(fetchActivityCount());
+      setHasRestoredFromStorage(true);
     }
-  }, [status, dispatch]);
+  }, [dispatch, status, hasRestoredFromStorage]);
+
+  useEffect(() => {
+    // Sjekk om vi skal vise "Last flere" knappen
+    if (totalCount !== null && loadedCount > 0) {
+      setShowLoadMoreButton(loadedCount < totalCount);
+    }
+  }, [loadedCount, totalCount]);
 
   useEffect(() => {
     // Sett alle aktivitetstyper som valgt kun første gang når aktiviteter lastes
-    if (activities.length > 0 && !hasInitializedTypes && activityTypes.length > 0) {
+    if (loadedCount > 0 && !hasInitializedTypes && activityTypes.length > 0) {
       const allTypes = activityTypes.map(([typeKey]) => typeKey);
       setSelectedActivityTypes(allTypes);
       setHasInitializedTypes(true);
     }
-  }, [activities, activityTypes, hasInitializedTypes]);
+  }, [loadedCount, activityTypes, hasInitializedTypes]);
 
   useEffect(() => {
     let tempActivities = [...activities];
@@ -203,7 +291,15 @@ export default function Home() {
     }
 
     setFilteredActivities(tempActivities);
-  }, [activities, selectedActivityTypes]);
+  }, [activities, selectedActivityTypes, loadedCount]);
+
+  useEffect(() => {
+    // Lagre loadedCount i localStorage når den endres
+    if (loadedCount > 0) {
+      localStorage.setItem('activitiesLoadedCount', loadedCount.toString());
+      console.log('[Home] Lagret loadedCount i localStorage:', loadedCount);
+    }
+  }, [loadedCount]);
 
   const handleActivityTypeChange = (typeKey: string, checked: boolean) => {
     if (checked) {
@@ -223,6 +319,23 @@ export default function Home() {
     setSelectedActivityTypes([]);
   };
 
+  const handleRefreshActivities = () => {
+    // Reset localStorage når vi refresher aktiviteter
+    localStorage.removeItem('activitiesLoadedCount');
+    dispatch(fetchActivities({ forceRefresh: true }));
+  };
+
+  const handleLoadMoreActivities = () => {
+    const offset = loadedCount;
+    dispatch(fetchMoreActivities({ forceRefresh: false, limit: 500, offset }));
+  };
+
+  const handleLoadAllActivities = () => {
+    if (totalCount) {
+      dispatch(fetchAllActivities({ forceRefresh: false, count: totalCount }));
+    }
+  };
+
   if (status === 'loading') {
     return <div>Laster aktiviteter...</div>;
   }
@@ -235,6 +348,43 @@ export default function Home() {
     <MainContainer>
       <Title>Treningsdagbok</Title>
       <DataSyncPanel />
+      
+      <ButtonContainer>
+        <RefreshButton 
+          onClick={handleRefreshActivities}
+          disabled={status === 'loading'}
+        >
+          {status === 'loading' ? 'Laster...' : 'Last inn nye aktiviteter (150 nyeste)'}
+        </RefreshButton>
+        
+        {showLoadMoreButton && (
+          <>
+            <LoadMoreButton 
+              onClick={handleLoadMoreActivities}
+              disabled={status === 'loading'}
+            >
+              {status === 'loading' ? 'Laster...' : 'Last flere aktiviteter (500 til)'}
+            </LoadMoreButton>
+            
+            {totalCount && loadedCount < totalCount && (
+              <LoadMoreButton 
+                onClick={handleLoadAllActivities}
+                disabled={status === 'loading'}
+              >
+                {status === 'loading' ? 'Laster...' : `Last alle aktiviteter (${totalCount} totalt)`}
+              </LoadMoreButton>
+            )}
+          </>
+        )}
+      </ButtonContainer>
+
+      {totalCount !== null && (
+        <ActivityStatus>
+          Viser {loadedCount} av {totalCount} aktiviteter
+          {loadedCount > 100 && ` (gjenopprettet fra tidligere sesjon)`}
+          {showLoadMoreButton && ` - Klikk "Last flere aktiviteter" for å se ${Math.min(500, totalCount - loadedCount)} til`}
+        </ActivityStatus>
+      )}
       
       <FiltersContainer>
         <FilterSection>

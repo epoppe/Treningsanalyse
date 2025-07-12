@@ -35,16 +35,18 @@ class ActivityResponse(BaseModel):
     vO2MaxValue: Optional[float]
     activityType: Optional[ActivityTypeResponse]
     avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
+    negativeSplitPercent: Optional[float] = Field(None, description="Negative split percentage")
+    decouplingPercent: Optional[float] = Field(None, description="Decoupling percentage")
 
 @router.get("/activities", response_model=List[ActivityResponse])
-def get_activities(db: Session = Depends(get_db)):
+def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
     """
-    Retrieve all activities from the database, and format them for the API response.
+    Retrieve activities from the database with pagination, and format them for the API response.
     """
     try:
-        logger.info("Henter aktiviteter fra databasen...")
+        logger.info(f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset})...")
         # Eager load the related activity_type to avoid N+1 query problem
-        activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).all()
+        activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).limit(limit).offset(offset).all()
         logger.info(f"Hentet {len(activities)} aktiviteter fra databasen")
         
         response_data = []
@@ -70,26 +72,43 @@ def get_activities(db: Session = Depends(get_db)):
 
             # Manually construct the dictionary for the response, ensuring correct field names
             response_data.append({
-                "activityId": act.id,
-                "activityName": act.name,
+                "activityId": act.activity_id,
+                "activityName": act.activity_name,
                 "startTimeLocal": act.start_time,
                 "distance": act.distance,
                 "duration": act.duration,
                 "calories": act.calories,
-                "averageHR": act.average_hr,
+                "averageHR": act.average_heart_rate,
                 "averageSpeed": act.average_speed,
                 "averagePace": act.average_pace,
                 "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                 "vO2MaxValue": act.vo2_max,
                 "activityType": act_type_data,
-                "avgStrideLength": avg_stride_length
+                "avgStrideLength": avg_stride_length,
+                "negativeSplitPercent": act.negative_split_percent,
+                "decouplingPercent": act.decoupling_percent
             })
-
+            
         logger.info(f"Returnerer {len(response_data)} aktiviteter til frontend")
         return response_data
     except Exception as e:
         import traceback
         traceback.print_exc() # This will print the error to the backend console
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
+
+@router.get("/activities/count")
+def get_activity_count(db: Session = Depends(get_db)):
+    """
+    Retrieve the total count of activities in the database.
+    """
+    try:
+        logger.info("Henter totalt antall aktiviteter fra databasen...")
+        count = db.query(Activity).count()
+        logger.info(f"Totalt antall aktiviteter: {count}")
+        return {"count": count}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 @router.get("/activities/{activity_id}/details", response_model=List[Dict[str, Any]])
@@ -300,96 +319,22 @@ def get_activity_negative_split(
     db: Session = Depends(get_db)
 ):
     """
-    Beregner negativ split for en aktivitet. Prøver først cache, deretter detaljerte FIT-data.
-    Negativ split = -((gjennomsnittlig pace første halvdel - gjennomsnittlig pace andre halvdel) / gjennomsnittlig pace første halvdel * 100)
-    Negativ verdi = negativ split (raskere andre halvdel)
-    Positiv verdi = positiv split (saktere andre halvdel)
+    Beregner negativ split for en aktivitet basert på FIT-data.
     """
-    
-    # Sjekk først cache i databasen
-    activity = db.query(Activity).filter(Activity.id == str(activity_id)).first()
-    if not activity:
-        raise HTTPException(status_code=404, detail="Activity not found")
-    
-    # Hvis negativ split allerede er beregnet og lagret, returner cache
-    if activity.negative_split_percent is not None:
-        logger.info(f"Returnerer cached negative split for aktivitet {activity_id}")
+    try:
+        from ..services.analysis_service import AnalysisService
         
-        # Beregn pace-verdier for responsformat (estimert fra speed hvis tilgjengelig)
-        first_half_pace = None
-        second_half_pace = None
-        data_points = 0
+        analysis_service = AnalysisService(storage)
+        result = analysis_service.calculate_negative_split(activity_id, db)
         
-        if activity.average_speed and activity.average_speed > 0:
-            avg_pace = 1000 / (activity.average_speed * 60)  # Konverter speed til pace
-            # Estimer halvdels-pacer basert på negative split
-            negative_split_decimal = activity.negative_split_percent / 100
-            first_half_pace = avg_pace / (1 - negative_split_decimal/2)
-            second_half_pace = avg_pace / (1 + negative_split_decimal/2)
-            
-        return {
-            "activity_id": activity_id,
-            "negative_split_percent": round(activity.negative_split_percent, 2),
-            "first_half_pace": round(first_half_pace, 2) if first_half_pace else None,
-            "second_half_pace": round(second_half_pace, 2) if second_half_pace else None,
-            "data_points": data_points,
-            "first_half_points": data_points // 2,
-            "second_half_points": data_points // 2,
-            "calculation_method": "cached"
-        }
-    
-    # Beregn negativ split fra FIT-data
-    details_df = storage.get_activity_details(activity_id)
-    
-    if details_df is not None and not details_df.empty:
-        # Filtrer ut rader med gyldig speed og timestamp data
-        valid_data = details_df.dropna(subset=['speed', 'timestamp'])
+        return result
         
-        if len(valid_data) >= 10:  # Trenger minimum 10 datapunkter
-            # Sorter etter timestamp
-            valid_data = valid_data.sort_values('timestamp')
-            
-            # Del i to halvdeler
-            midpoint = len(valid_data) // 2
-            first_half = valid_data.iloc[:midpoint]
-            second_half = valid_data.iloc[midpoint:]
-            
-            # Beregn gjennomsnittlig speed for hver halvdel (ignorer 0-verdier)
-            first_half_speed = first_half[first_half['speed'] > 0]['speed'].mean()
-            second_half_speed = second_half[second_half['speed'] > 0]['speed'].mean()
-            
-            if not pd.isna(first_half_speed) and not pd.isna(second_half_speed) and first_half_speed > 0:
-                # Konverter speed (antatt m/s) til pace (min/km)
-                # pace = 1000 / (speed * 60) for å få min/km
-                first_half_pace = 1000 / (first_half_speed * 60)
-                second_half_pace = 1000 / (second_half_speed * 60)
-                
-                # Beregn negativ split som prosentvis forbedring (omvendt fortegn)
-                negative_split_percent = -((first_half_pace - second_half_pace) / first_half_pace) * 100
-                
-                # Lagre beregnet negative split i databasen for fremtidig bruk
-                try:
-                    activity.negative_split_percent = negative_split_percent
-                    db.commit()
-                    logger.info(f"Lagret negative split {negative_split_percent:.2f}% for aktivitet {activity_id}")
-                except Exception as e:
-                    db.rollback()
-                    logger.warning(f"Kunne ikke lagre negative split for aktivitet {activity_id}: {e}")
-                
-                return {
-                    "activity_id": activity_id,
-                    "negative_split_percent": round(negative_split_percent, 2),
-                    "first_half_pace": round(first_half_pace, 2),
-                    "second_half_pace": round(second_half_pace, 2),
-                    "data_points": len(valid_data),
-                    "first_half_points": len(first_half),
-                    "second_half_points": len(second_half),
-                    "calculation_method": "detailed_fit_data"
-                }
-    
-    # Ingen FIT-data tilgjengelig - returnerer feil
-    logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - negative split ikke tilgjengelig")
-    raise HTTPException(status_code=404, detail="No detailed FIT data available for negative split calculation")
+    except HTTPException:
+        # Re-raise HTTPExceptions (like 404) without wrapping them
+        raise
+    except Exception as e:
+        logger.error(f"Feil ved beregning av negative split for aktivitet {activity_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
 
 @router.get("/activities/{activity_id}/decoupling")
 def get_activity_decoupling(
@@ -398,99 +343,19 @@ def get_activity_decoupling(
     db: Session = Depends(get_db)
 ):
     """
-    Beregner cardiac-aerobic decoupling for en aktivitet. Prøver først cache, deretter detaljerte FIT-data.
-    Decoupling (%) = ((HR:PACE ratio (del 2) / HR:PACE ratio (del 1)) - 1) × 100
-    Positiv verdi = decoupling (hjerteraten øker mer enn hastigheten - tretthet)
-    Negativ verdi = negative decoupling (hjerteraten øker mindre enn hastigheten - forbedring)
+    Beregner cardiac-aerobic decoupling for en aktivitet basert på FIT-data.
     """
-    
     try:
-        # Sjekk først cache i databasen
-        activity = db.query(Activity).filter(Activity.id == str(activity_id)).first()
-        if not activity:
-            raise HTTPException(status_code=404, detail="Activity not found")
+        from ..services.analysis_service import AnalysisService
         
-        # Hvis decoupling allerede er beregnet og lagret, returner cache
-        if activity.decoupling_percent is not None:
-            logger.info(f"Returnerer cached decoupling for aktivitet {activity_id}")
-            
-            return {
-                "activity_id": activity_id,
-                "decoupling_percent": round(activity.decoupling_percent, 2),
-                "calculation_method": "cached"
-            }
+        analysis_service = AnalysisService(storage)
+        result = analysis_service.calculate_decoupling(activity_id, db)
         
-        # Beregn decoupling fra FIT-data
-        details_df = storage.get_activity_details(activity_id)
+        return result
         
-        if details_df is not None and len(details_df) > 0:
-            # Filtrer ut rader med gyldig heart_rate, speed og timestamp data
-            valid_data = details_df.dropna(subset=['heart_rate', 'speed', 'timestamp'])
-            
-            # Fjern rader med 0-verdier eller ugyldig data
-            valid_data = valid_data[(valid_data['heart_rate'] > 0) & (valid_data['speed'] > 0)]
-            
-            if len(valid_data) >= 20:  # Trenger minimum 20 datapunkter for pålitelig decoupling
-                # Sorter etter timestamp
-                valid_data = valid_data.sort_values('timestamp')
-                
-                # Del i to halvdeler
-                midpoint = len(valid_data) // 2
-                first_half = valid_data.iloc[:midpoint]
-                second_half = valid_data.iloc[midpoint:]
-                
-                # Beregn gjennomsnittlig HR og speed for hver halvdel
-                first_half_hr = first_half['heart_rate'].mean()
-                first_half_speed = first_half['speed'].mean()
-                second_half_hr = second_half['heart_rate'].mean()
-                second_half_speed = second_half['speed'].mean()
-                
-                if (not pd.isna(first_half_hr) and not pd.isna(first_half_speed) and 
-                    not pd.isna(second_half_hr) and not pd.isna(second_half_speed) and
-                    first_half_speed > 0 and second_half_speed > 0):
-                    
-                    # Beregn HR:PACE ratio for hver halvdel
-                    # HR:PACE = HR / speed (høyere verdi = mindre effektiv)
-                    first_half_ratio = first_half_hr / first_half_speed
-                    second_half_ratio = second_half_hr / second_half_speed
-                    
-                    # Beregn decoupling prosentvis
-                    decoupling_percent = ((second_half_ratio / first_half_ratio) - 1) * 100
-                    
-                    # Lagre beregnet decoupling i databasen for fremtidig bruk
-                    try:
-                        activity.decoupling_percent = decoupling_percent
-                        db.commit()
-                        logger.info(f"Lagret decoupling {decoupling_percent:.2f}% for aktivitet {activity_id}")
-                    except Exception as e:
-                        db.rollback()
-                        logger.warning(f"Kunne ikke lagre decoupling for aktivitet {activity_id}: {e}")
-                    
-                    return {
-                        "activity_id": activity_id,
-                        "decoupling_percent": round(decoupling_percent, 2),
-                        "first_half_hr": round(first_half_hr, 1),
-                        "first_half_speed": round(first_half_speed, 2),
-                        "second_half_hr": round(second_half_hr, 1),
-                        "second_half_speed": round(second_half_speed, 2),
-                        "first_half_ratio": round(first_half_ratio, 2),
-                        "second_half_ratio": round(second_half_ratio, 2),
-                        "data_points": len(valid_data),
-                        "first_half_points": len(first_half),
-                        "second_half_points": len(second_half),
-                        "calculation_method": "detailed_fit_data"
-                    }
-        
-        # Ingen FIT-data tilgjengelig - returnerer feil
-        logger.info(f"Ingen detaljerte FIT-data for aktivitet {activity_id} - decoupling ikke tilgjengelig")
-        raise HTTPException(status_code=404, detail="No detailed FIT data available for decoupling calculation")
-    
     except HTTPException:
-        # Re-raise HTTP exceptions som forventet
+        # Re-raise HTTPExceptions (like 404) without wrapping them
         raise
     except Exception as e:
-        # Catch all other exceptions og log dem
-        logger.error(f"Uventet feil i decoupling beregning for aktivitet {activity_id}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        logger.error(f"Feil ved beregning av decoupling for aktivitet {activity_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")

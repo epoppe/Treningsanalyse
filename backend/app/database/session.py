@@ -13,3 +13,11 @@ engine = create_engine(
 
 # Opprett en SessionLocal-klasse som vi vil bruke for å lage database-sesjoner
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Dependency for å få database-sesjon
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
