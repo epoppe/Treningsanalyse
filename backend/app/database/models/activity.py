@@ -50,6 +50,8 @@ class Activity(Base):
     # Treningsbelastning
     training_stress_score = Column(Float, nullable=True)
     intensity_factor = Column(Float, nullable=True)
+    total_training_effect = Column(Float, nullable=True)  # Aerobic Training Effect (1.0-5.0)
+    total_anaerobic_training_effect = Column(Float, nullable=True)  # Anaerobic Training Effect (1.0-5.0)
     
     # Fysiologiske målinger
     vo2_max = Column(Float, nullable=True)
@@ -66,6 +68,7 @@ class Activity(Base):
     negative_split_percent = Column(Float, nullable=True)
     running_economy = Column(Float, nullable=True)
     decoupling_percent = Column(Float, nullable=True)
+    body_battery_start = Column(Float, nullable=True)  # Body Battery ved start av aktivitet (0-100)
     
     # Metadata
     device_name = Column(String(100), nullable=True)

@@ -180,8 +180,8 @@ class DataStorage:
     def get_existing_activity_ids(self, db: Session) -> set:
         """Henter alle eksisterende aktivitets-ID-er fra databasen."""
         try:
-            existing_activities = db.query(Activity.id).all()
-            existing_ids = {str(activity.id) for activity in existing_activities}
+            existing_activities = db.query(Activity.activity_id).all()
+            existing_ids = {str(activity.activity_id) for activity in existing_activities}
             logger.info(f"Hentet {len(existing_ids)} eksisterende aktivitets-ID-er fra databasen")
             return existing_ids
         except Exception as e:

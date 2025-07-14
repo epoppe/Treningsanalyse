@@ -159,19 +159,20 @@ class SyncService:
                 avg_speed = (1000 / (avg_pace * 60))
 
             new_activity = Activity(
-                id=activity_id,
-                name=act_data.get('activityName'),
-                type=act_data.get('activityType', {}).get('typeKey'), # Lagrer den rå typen
+                activity_id=activity_id,
+                activity_name=act_data.get('activityName'),
                 start_time=datetime.fromisoformat(act_data['startTimeInSeconds']),
                 distance=act_data.get('distance'),
                 duration=act_data.get('duration'),
                 calories=act_data.get('calories'),
                 vo2_max=act_data.get('vO2MaxValue'),
-                average_hr=act_data.get('averageHR'),
+                average_heart_rate=act_data.get('averageHR'),
                 average_speed=avg_speed,
                 average_pace=avg_pace,
                 activity_type_id=activity_type_obj.id if activity_type_obj else None,
-                average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute')
+                average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
+                total_training_effect=act_data.get('trainingEffect'),
+                total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect')
             )
             self.db.add(new_activity)
             added_count += 1
@@ -292,9 +293,11 @@ class SyncService:
             # Beregn grensen for "nylige" data (siste 2 dager)
             recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
 
+            # Inkluder alle aktiviteter, ikke bare de med GPS-data
+            # Dette sikrer at styrketrening, indoor cycling, svømming etc. også synkroniseres
             activities_to_save = [
                 act for act in activities_raw
-                if act.get('distance', 0) is not None and act.get('distance', 0) > 0
+                if act.get('activityId') is not None  # Bare sørg for at vi har en gyldig ID
             ]
 
             if not activities_to_save:
@@ -311,6 +314,9 @@ class SyncService:
             for i, act_data in enumerate(activities_to_save):
                 if not logged_one:
                     logger.info(f"DEBUG: Nøkler i første aktivitet: {list(act_data.keys())}")
+                    # Log alle Training Effect-relaterte felter
+                    training_fields = [f"{k}: {v}" for k, v in act_data.items() if 'training' in k.lower() or 'effect' in k.lower()]
+                    logger.info(f"DEBUG: Training Effect-felter: {training_fields}")
                     logged_one = True
 
                 activity_id = str(act_data.get('activityId'))
@@ -336,7 +342,7 @@ class SyncService:
                 elif activity_id in existing_ids and force_refresh_recent and is_recent:
                     logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (force_refresh_recent=True).")
                     # Slett eksisterende aktivitet først
-                    existing_activity = self.db.query(Activity).filter_by(id=activity_id).first()
+                    existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                     if existing_activity:
                         self.db.delete(existing_activity)
 
@@ -416,20 +422,20 @@ class SyncService:
                     start_time = start_time.replace(tzinfo=timezone.utc)
                 
                 new_activity = Activity(
-                    id=activity_id,
-                    name=act_data.get('activityName'),
-                    type=activity_type_key,
+                    activity_id=activity_id,
+                    activity_name=act_data.get('activityName'),
                     start_time=start_time,
                     distance=act_data.get('distance'),
                     duration=act_data.get('duration'),
                     calories=act_data.get('calories'),
                     vo2_max=act_data.get('vO2MaxValue'),
-                    average_hr=act_data.get('averageHR'),
+                    average_heart_rate=act_data.get('averageHR'),
                     average_speed=avg_speed,
                     average_pace=avg_pace,
                     activity_type_id=activity_type_obj.id if activity_type_obj else None,
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
-                    details=details_json
+                    total_training_effect=act_data.get('trainingEffect'),
+                    total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect')
                 )
                 self.db.add(new_activity)
                 added_count += 1
@@ -605,9 +611,9 @@ class SyncService:
                 logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
                 
                 # Oppdater også database med details_json
-                activity = self.db.query(Activity).filter_by(id=activity_id).first()
+                activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                 if activity:
-                    activity.details = details_json
+                    activity.detailed_metrics = details_json
                     self.db.commit()
                     logger.info(f"Oppdaterte database med FIT-data for aktivitet {activity_id}")
                 
@@ -637,7 +643,7 @@ class SyncService:
                     existing_fit_activity_ids = set()
                 
                 # Hent alle aktiviteter fra database og sjekk details-felt
-                query = self.db.query(Activity.id, Activity.details).order_by(Activity.id.desc())
+                query = self.db.query(Activity.activity_id, Activity.detailed_metrics).order_by(Activity.activity_id.desc())
                 if limit:
                     query = query.limit(limit * 3)  # Hent flere siden mange kan mangle FIT-data
                 
@@ -646,9 +652,9 @@ class SyncService:
                 # Finn aktiviteter som mangler FIT-data (enten i parquet eller details)
                 activity_ids = []
                 for activity in all_activities:
-                    activity_id = activity.id
+                    activity_id = activity.activity_id
                     has_parquet_data = activity_id in existing_fit_activity_ids
-                    has_db_details = activity.details is not None and activity.details != {} and 'records' in str(activity.details)
+                    has_db_details = activity.detailed_metrics is not None and activity.detailed_metrics != {} and 'records' in str(activity.detailed_metrics)
                     
                     if not (has_parquet_data and has_db_details):
                         activity_ids.append(activity_id)
@@ -705,7 +711,7 @@ class SyncService:
             
             # Hent aktiviteter i perioden fra database
             from sqlalchemy import and_
-            activities_in_period = self.db.query(Activity.id, Activity.start_time, Activity.name).filter(
+            activities_in_period = self.db.query(Activity.activity_id, Activity.start_time, Activity.activity_name).filter(
                 and_(
                     Activity.start_time >= start_date,
                     Activity.start_time <= end_date
@@ -717,7 +723,7 @@ class SyncService:
             # Finn aktiviteter som mangler FIT-data
             missing_fit_activities = []
             for activity in activities_in_period:
-                if activity.id not in existing_fit_activity_ids:
+                if activity.activity_id not in existing_fit_activity_ids:
                     missing_fit_activities.append(activity)
             
             logger.info(f"Av disse mangler {len(missing_fit_activities)} aktiviteter FIT-data")
@@ -729,9 +735,9 @@ class SyncService:
             total_count = len(missing_fit_activities)
             
             for i, activity in enumerate(missing_fit_activities):
-                logger.info(f"Prosesserer aktivitet {activity.id} ({i+1}/{total_count}) - {activity.start_time.strftime('%Y-%m-%d')} - {activity.name}")
+                logger.info(f"Prosesserer aktivitet {activity.activity_id} ({i+1}/{total_count}) - {activity.start_time.strftime('%Y-%m-%d')} - {activity.activity_name}")
                 
-                if await self._download_and_store_fit_file(activity.id):
+                if await self._download_and_store_fit_file(activity.activity_id):
                     success_count += 1
                 
                 # Liten pause for å unngå rate limiting

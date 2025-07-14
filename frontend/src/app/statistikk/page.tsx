@@ -220,6 +220,7 @@ const StatistikkPage = () => {
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [allFilteredActivities, setAllFilteredActivities] = useState<Activity[]>([]);
   const [allActivitiesForCharts, setAllActivitiesForCharts] = useState<Activity[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Hent unike aktivitetstyper
   const activityTypes = useMemo(() => {
@@ -327,8 +328,29 @@ const StatistikkPage = () => {
     setSelectedActivityTypes([]);
   };
 
-  const handleForceRefresh = () => {
-    dispatch(fetchAllActivities({ count: 1000 })); // Hent alle aktiviteter
+  const handleForceRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      // 1. Hent alle aktiviteter
+      dispatch(fetchAllActivities({ count: 1000 }));
+      
+      // 2. Oppdater sammendragstabeller
+      const response = await fetch('http://localhost:8000/api/analysis/refresh-summaries', {
+        method: 'POST',
+      });
+      
+      if (!response.ok) {
+        console.error('Failed to refresh summaries');
+      } else {
+        console.log('Sammendragstabeller oppdatert');
+        // Vent litt for at data skal bli oppdatert i backend
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      console.error('Feil ved oppdatering:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const isLoading = status === 'loading';
@@ -444,10 +466,10 @@ const StatistikkPage = () => {
         
         <FilterButton 
           onClick={handleForceRefresh} 
-          disabled={isLoading}
+          disabled={isLoading || isRefreshing}
           style={{ background: '#e74c3c', alignSelf: 'flex-start' }}
         >
-          {isLoading ? <LoadingSpinner /> : 'Oppdater fra Garmin'}
+          {(isLoading || isRefreshing) ? <LoadingSpinner /> : 'Oppdater fra Garmin'}
         </FilterButton>
       </FiltersContainer>
 

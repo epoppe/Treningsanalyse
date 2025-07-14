@@ -361,3 +361,50 @@ class GarminClient:
             logger.error(f"En uventet feil oppstod under henting av HRV-data for {date_str}: {e}")
             logger.error(traceback.format_exc())
             return None
+
+    async def get_activity_training_effect(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """Henter Training Effect data for en spesifikk aktivitet fra activity-service."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente Training Effect data.")
+            return None
+        
+        try:
+            logger.info(f"Henter Training Effect data for aktivitet {activity_id}")
+            
+            # Hent detaljerte aktivitetsdata fra activity-service
+            activity_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/activity-service/activity/{activity_id}"
+            )
+            
+            if isinstance(activity_data, dict) and 'summaryDTO' in activity_data:
+                summary = activity_data['summaryDTO']
+                
+                training_effect_data = {
+                    "aerobic_training_effect": summary.get('trainingEffect'),
+                    "anaerobic_training_effect": summary.get('anaerobicTrainingEffect'),
+                    "aerobic_te_message": summary.get('aerobicTrainingEffectMessage'),
+                    "anaerobic_te_message": summary.get('anaerobicTrainingEffectMessage'),
+                    "training_effect_label": summary.get('trainingEffectLabel'),
+                    "training_load": summary.get('activityTrainingLoad')
+                }
+                
+                logger.info(f"Hentet Training Effect for aktivitet {activity_id}: "
+                           f"Aerobic={training_effect_data['aerobic_training_effect']}, "
+                           f"Anaerobic={training_effect_data['anaerobic_training_effect']}")
+                
+                return training_effect_data
+            else:
+                logger.warning(f"Uventet respons fra activity-service for aktivitet {activity_id}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen detaljerte data funnet for aktivitet {activity_id}")
+                return None
+            logger.error(f"HTTP-feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
+            logger.error(traceback.format_exc())
+            return None

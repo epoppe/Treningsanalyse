@@ -37,6 +37,8 @@ class ActivityResponse(BaseModel):
     avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
     negativeSplitPercent: Optional[float] = Field(None, description="Negative split percentage")
     decouplingPercent: Optional[float] = Field(None, description="Decoupling percentage")
+    totalTrainingEffect: Optional[float] = Field(None, description="Aerobic Training Effect (1.0-5.0)")
+    totalAnaerobicTrainingEffect: Optional[float] = Field(None, description="Anaerobic Training Effect (1.0-5.0)")
 
 @router.get("/activities", response_model=List[ActivityResponse])
 def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
@@ -86,7 +88,9 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 "activityType": act_type_data,
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,
-                "decouplingPercent": act.decoupling_percent
+                "decouplingPercent": act.decoupling_percent,
+                "totalTrainingEffect": act.total_training_effect,
+                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect
             })
             
         logger.info(f"Returnerer {len(response_data)} aktiviteter til frontend")

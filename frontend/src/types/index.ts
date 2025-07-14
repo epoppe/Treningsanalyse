@@ -19,5 +19,7 @@ export interface Activity {
   vO2MaxValue?: number;
   negativeSplitPercent?: number;
   decouplingPercent?: number;
+  totalTrainingEffect?: number;
+  totalAnaerobicTrainingEffect?: number;
   details?: { [key: string]: any };
 } 

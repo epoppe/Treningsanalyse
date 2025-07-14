@@ -45,6 +45,14 @@ const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
       if ($value <= 37) return '#fef9c3'; // yellow-100
       return '#dcfce7'; // green-100
     }
+
+    if ($statKey === 'training_effect') {
+      if ($value < 2.0) return '#f8f9fa'; // gray - Minimal effect
+      if ($value < 3.0) return '#dcfce7'; // green-100 - Aerobic benefit
+      if ($value < 4.0) return '#dbeafe'; // blue-100 - High aerobic benefit
+      if ($value < 5.0) return '#fef9c3'; // yellow-100 - Very high aerobic benefit
+      return '#fee2e2'; // red-100 - Overreaching
+    }
     
     return '#f8f9fa'; // default gray
   }};
@@ -94,6 +102,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const [hrvData, setHrvData] = useState<{[activityId: string]: number | null}>({});
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
 
+
   useEffect(() => {
     const fetchHrvDataForActivities = async () => {
       if (activities.length === 0) {
@@ -135,6 +144,8 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
     fetchHrvDataForActivities();
   }, [activities]);
+
+
 
 
   const handleActivityClick = (activityId: number) => {
@@ -193,6 +204,11 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const formatHrv = (hrv?: number) => {
     if (!hrv) return 'N/A';
     return `${Math.round(hrv)}`;
+  };
+
+  const formatTrainingEffect = (trainingEffect?: number) => {
+    if (!trainingEffect || trainingEffect <= 0) return 'N/A';
+    return trainingEffect.toFixed(1);
   };
 
   const calculatePace = (distance?: number, duration?: number) => {
@@ -304,6 +320,12 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                   label: 'HRV',
                   value: isLoadingHrv ? 'Laster...' : formatHrv(hrvValue),
                   rawValue: hrvValue
+                },
+                {
+                  key: 'training_effect',
+                  label: 'Training Effect',
+                  value: formatTrainingEffect(activity.totalTrainingEffect),
+                  rawValue: activity.totalTrainingEffect
                 }
               ].map(stat => (
                 <ActivityStat 

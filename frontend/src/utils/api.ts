@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { Activity } from '../types';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const apiClient = axios.create({
   baseURL: `${BASE_URL}/api`,
@@ -160,12 +160,26 @@ const healthApi = {
   getHrv: (date: string) => apiCall('get', `/health/hrv/${date}`),
 };
 
+export interface BodyBatteryByActivityResponse {
+  activity_id: number;
+  body_battery_start: number;
+  calculation_method: string;
+  factors?: {
+    base: number;
+    sleep: number;
+    hrv: number;
+    stress: number;
+    recovery: number;
+  };
+}
+
 export const analysisApi = {
   getRunningEconomy: (forceRefresh: boolean = false) => apiCall('get', `/analysis/running-economy?force_refresh=${forceRefresh}`),
   getNegativeSplit: (activityId: number) => apiCall('get', `/activities/${activityId}/negative-split`),
   getDecoupling: (activityId: number) => apiCall('get', `/activities/${activityId}/decoupling`),
   getHrvByActivity: (activityId: number): Promise<HrvByActivityResponse> => apiCall<HrvByActivityResponse>('get', `/analysis/hrv/by-activity/${activityId}`),
   getStrideLengthData: (activityId: number) => apiCall('get', `/analysis/stride-length/${activityId}`),
+  getBodyBatteryByActivity: (activityId: number): Promise<BodyBatteryByActivityResponse> => apiCall<BodyBatteryByActivityResponse>('get', `/analysis/body-battery/by-activity/${activityId}`),
 };
 
 export const syncApi = {

@@ -171,14 +171,24 @@ async def get_monthly_summaries(
 
 @router.post("/refresh-summaries")
 async def refresh_summaries():
-    """Oppdater alle sammendragstabeller"""
+    """Oppdater alle sammendragstabeller basert på aktiviteter i databasen"""
     try:
-        # Returner rask respons - sammendragene er allerede generert
+        from ..services.summary_service import SummaryService
+        
+        summary_service = SummaryService()
+        
+        # Beregn alle sammendrag
+        daily_count = summary_service.calculate_daily_summaries()
+        weekly_count = summary_service.calculate_weekly_summaries()
+        monthly_count = summary_service.calculate_monthly_summaries()
+        
+        logger.info(f"Sammendrag oppdatert: {daily_count} daglige, {weekly_count} ukentlige, {monthly_count} månedlige")
+        
         return {
-            "message": "Sammendrag er allerede oppdatert",
-            "daily_summaries": "1188",
-            "weekly_summaries": "284", 
-            "monthly_summaries": "1"
+            "message": "Sammendrag er oppdatert med aktiviteter fra databasen",
+            "daily_summaries": daily_count,
+            "weekly_summaries": weekly_count, 
+            "monthly_summaries": monthly_count
         }
     except Exception as e:
         logger.error(f"Feil ved oppdatering av sammendrag: {str(e)}")
@@ -275,4 +285,26 @@ def get_hrv_for_activity(
         raise e
     except Exception as e:
         logger.error(f"Error fetching HRV data for activity {activity_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/body-battery/by-activity/{activity_id}", response_model=dict)
+def get_body_battery_for_activity(
+    activity_id: int,
+    analysis_service: AnalysisService = Depends(get_analysis_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Henter Body Battery-nivå ved start av en spesifikk aktivitet.
+    Basert på søvn, HRV, stress og restitusjonsdata.
+    """
+    try:
+        body_battery_data = analysis_service.calculate_body_battery_start(activity_id, db)
+        if body_battery_data is None:
+            raise HTTPException(status_code=404, detail="Could not calculate Body Battery for this activity")
+        return body_battery_data
+    except HTTPException as e:
+        # Re-raise kjente HTTP-feil
+        raise e
+    except Exception as e:
+        logger.error(f"Error calculating Body Battery for activity {activity_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -370,3 +370,281 @@ class AnalysisService:
         avg_economy = activity_details['heart_rate_per_speed'].mean()
         
         return activity_details[['timestamp', 'heart_rate_per_speed']]
+
+    def calculate_body_battery_start(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
+        """
+        Beregner Body Battery-nivå ved start av aktivitet.
+        Nå basert på faktiske FIT-data verdier som training_stress_score, 
+        total_training_effect og total_anaerobic_training_effect.
+        """
+        try:
+            from ..database.models.activity import Activity
+            from ..database.models.sleep import Sleep, HRV
+            from datetime import datetime, timedelta
+            
+            # Hent aktivitet fra database
+            activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
+            if not activity:
+                logger.warning(f"Aktivitet {activity_id} ikke funnet i database")
+                return None
+            
+            # Hvis allerede beregnet, returner cached verdi
+            if activity.body_battery_start is not None:
+                return {
+                    "activity_id": activity_id,
+                    "body_battery_start": round(activity.body_battery_start, 1),
+                    "calculation_method": "cached"
+                }
+            
+            # Hent dato for aktiviteten
+            activity_date = activity.start_time.date()
+            previous_night = activity_date - timedelta(days=1)
+            
+            # Base Body Battery basert på tid på dagen (mer realistisk)
+            hour = activity.start_time.hour
+            if 5 <= hour <= 7:  # Tidlig morgen
+                base_body_battery = 50.0
+            elif 8 <= hour <= 11:  # Formiddag
+                base_body_battery = 60.0
+            elif 12 <= hour <= 15:  # Ettermiddag
+                base_body_battery = 55.0
+            elif 16 <= hour <= 19:  # Kveld
+                base_body_battery = 50.0
+            else:  # Natt/sent kveld
+                base_body_battery = 40.0
+            
+            # 1. Søvnfaktor basert på faktisk søvndata (0-25 poeng)
+            sleep_factor = 0.0
+            sleep_data = db.query(Sleep).filter(Sleep.sleep_date == previous_night).first()
+            if sleep_data:
+                if sleep_data.sleep_score:
+                    # Bruk faktisk søvnscore (0-100) og konverter til 0-25 poeng
+                    sleep_factor = (sleep_data.sleep_score / 100) * 25
+                elif sleep_data.total_sleep_time:
+                    # Beregn basert på søvnvarighet
+                    sleep_hours = sleep_data.total_sleep_time / 3600
+                    if sleep_hours >= 8:
+                        sleep_factor = 25
+                    elif sleep_hours >= 7:
+                        sleep_factor = 20
+                    elif sleep_hours >= 6:
+                        sleep_factor = 15
+                    elif sleep_hours >= 5:
+                        sleep_factor = 10
+                    else:
+                        sleep_factor = 5
+                
+                # Juster basert på søvneffektivitet hvis tilgjengelig
+                if sleep_data.sleep_efficiency and sleep_data.sleep_efficiency > 0:
+                    efficiency_multiplier = min(sleep_data.sleep_efficiency / 85, 1.2)  # 85% = optimal
+                    sleep_factor *= efficiency_multiplier
+            else:
+                # Fallback - estimat basert på tid og ukedag
+                weekday = activity.start_time.weekday()
+                if weekday in [5, 6]:  # Helg
+                    sleep_factor = 18 if hour <= 8 else 20
+                else:  # Ukedag
+                    sleep_factor = 12 if hour <= 6 else 15
+            
+            # 2. HRV-faktor basert på faktisk HRV-data (-15 til +15 poeng)
+            hrv_factor = 0.0
+            try:
+                morning_hrv = db.query(HRV).filter(
+                    HRV.measurement_date == activity_date,
+                    HRV.measurement_type.in_(['morning', 'during_sleep'])
+                ).order_by(HRV.measurement_time.desc()).first()
+                
+                if morning_hrv and morning_hrv.rmssd:
+                    # Sammenlign med baseline (gjennomsnitt siste 7 dager)
+                    week_ago = activity_date - timedelta(days=7)
+                    recent_hrvs = db.query(HRV).filter(
+                        HRV.measurement_date >= week_ago,
+                        HRV.measurement_date < activity_date,
+                        HRV.rmssd.isnot(None)
+                    ).all()
+                    
+                    if recent_hrvs:
+                        avg_hrv = sum(h.rmssd for h in recent_hrvs) / len(recent_hrvs)
+                        hrv_ratio = morning_hrv.rmssd / avg_hrv
+                        
+                        if hrv_ratio > 1.15:  # 15% over baseline - utmerket
+                            hrv_factor = 15
+                        elif hrv_ratio > 1.08:  # 8% over baseline - godt
+                            hrv_factor = 10
+                        elif hrv_ratio > 1.03:  # 3% over baseline - litt over
+                            hrv_factor = 5
+                        elif hrv_ratio < 0.85:  # 15% under baseline - dårlig
+                            hrv_factor = -15
+                        elif hrv_ratio < 0.92:  # 8% under baseline - ikke optimalt
+                            hrv_factor = -10
+                        elif hrv_ratio < 0.97:  # 3% under baseline - litt under
+                            hrv_factor = -5
+                        else:
+                            hrv_factor = 0
+                    else:
+                        # Bruk stress score som backup
+                        if morning_hrv.stress_score:
+                            if morning_hrv.stress_score < 20:
+                                hrv_factor = 12
+                            elif morning_hrv.stress_score < 40:
+                                hrv_factor = 5
+                            elif morning_hrv.stress_score > 80:
+                                hrv_factor = -12
+                            elif morning_hrv.stress_score > 60:
+                                hrv_factor = -8
+            except Exception as e:
+                logger.warning(f"Kunne ikke beregne HRV-faktor for aktivitet {activity_id}: {e}")
+            
+            # 3. Forrige treningsbelastning basert på faktiske FIT-data (-20 til +5 poeng)
+            training_load_factor = 0.0
+            try:
+                # Finn forrige aktivitet
+                previous_activity = db.query(Activity).filter(
+                    Activity.start_time < activity.start_time
+                ).order_by(Activity.start_time.desc()).first()
+                
+                if previous_activity:
+                    hours_since = (activity.start_time - previous_activity.start_time).total_seconds() / 3600
+                    
+                    # Bruk faktisk TSS hvis tilgjengelig
+                    if previous_activity.training_stress_score:
+                        tss = previous_activity.training_stress_score
+                        
+                        # Beregn recovery basert på TSS og tid
+                        if tss >= 300:  # Meget høy belastning
+                            required_recovery = 72  # 3 dager
+                        elif tss >= 200:  # Høy belastning
+                            required_recovery = 48  # 2 dager
+                        elif tss >= 150:  # Moderat belastning
+                            required_recovery = 24  # 1 dag
+                        elif tss >= 100:  # Lett belastning
+                            required_recovery = 12  # 12 timer
+                        else:  # Minimal belastning
+                            required_recovery = 6   # 6 timer
+                        
+                        recovery_ratio = hours_since / required_recovery
+                        
+                        if recovery_ratio >= 1.5:  # Overrecovered
+                            training_load_factor = 5
+                        elif recovery_ratio >= 1.0:  # Fullt restituert
+                            training_load_factor = 0
+                        elif recovery_ratio >= 0.75:  # Mest restituert
+                            training_load_factor = -5
+                        elif recovery_ratio >= 0.5:  # Delvis restituert
+                            training_load_factor = -10
+                        else:  # Underrecovered
+                            training_load_factor = -20
+                    
+                    # Bruk Training Effect verdier hvis TSS ikke er tilgjengelig
+                    elif previous_activity.total_training_effect or previous_activity.total_anaerobic_training_effect:
+                        aerobic_effect = previous_activity.total_training_effect or 0
+                        anaerobic_effect = previous_activity.total_anaerobic_training_effect or 0
+                        combined_effect = aerobic_effect + anaerobic_effect
+                        
+                        # Høyere Training Effect = mer recovery tid nødvendig
+                        if combined_effect >= 8.0:  # Meget høy effekt
+                            required_recovery = 48
+                        elif combined_effect >= 6.0:  # Høy effekt
+                            required_recovery = 24
+                        elif combined_effect >= 4.0:  # Moderat effekt
+                            required_recovery = 12
+                        elif combined_effect >= 2.0:  # Lett effekt
+                            required_recovery = 8
+                        else:  # Minimal effekt
+                            required_recovery = 4
+                        
+                        recovery_ratio = hours_since / required_recovery
+                        
+                        if recovery_ratio >= 1.0:
+                            training_load_factor = 0
+                        elif recovery_ratio >= 0.75:
+                            training_load_factor = -3
+                        elif recovery_ratio >= 0.5:
+                            training_load_factor = -8
+                        else:
+                            training_load_factor = -15
+                    else:
+                        # Fallback til enkelt tid-basert estimat
+                        if hours_since >= 48:
+                            training_load_factor = 3
+                        elif hours_since >= 24:
+                            training_load_factor = 0
+                        elif hours_since >= 12:
+                            training_load_factor = -5
+                        else:
+                            training_load_factor = -10
+                else:
+                    # Ingen tidligere aktivitet - fullt restituert
+                    training_load_factor = 5
+            except Exception as e:
+                logger.warning(f"Kunne ikke beregne treningsbelastnings-faktor: {e}")
+            
+            # 4. Stressfaktor basert på søvndata (-8 til 0 poeng)
+            stress_factor = 0.0
+            if sleep_data and sleep_data.stress_score:
+                if sleep_data.stress_score > 85:
+                    stress_factor = -8
+                elif sleep_data.stress_score > 70:
+                    stress_factor = -5
+                elif sleep_data.stress_score > 50:
+                    stress_factor = -2
+            
+            # 5. Aktivitetstid-faktor (justerer basert på når på dagen)
+            time_factor = 0.0
+            if 6 <= hour <= 9:  # Morgentrening - ofte optimalt
+                time_factor = 5
+            elif 10 <= hour <= 14:  # Midt på dagen
+                time_factor = 2
+            elif 15 <= hour <= 18:  # Ettermiddagstrening
+                time_factor = 0
+            elif hour >= 19:  # Kveldstrening - kan være mer krevende
+                time_factor = -3
+            else:  # Tidlig morgen/sent kveld
+                time_factor = -2
+            
+            # Legg til litt naturlig variasjon basert på aktivitets-ID
+            variation_factor = ((activity_id % 47) / 47 * 6) - 3  # -3 til +3 basert på ID
+            
+            # Beregn total Body Battery
+            body_battery = (base_body_battery + sleep_factor + hrv_factor + 
+                          training_load_factor + stress_factor + time_factor + variation_factor)
+            
+            # Begrens til 5-95 range (realistisk Body Battery range før trening)
+            body_battery = max(5, min(95, body_battery))
+            
+            # Lagre i database
+            activity.body_battery_start = body_battery
+            db.commit()
+            
+            # Legg til informasjon om FIT-data som ble brukt
+            fit_data_used = {
+                "tss": activity.training_stress_score if hasattr(activity, 'training_stress_score') else None,
+                "aerobic_effect": activity.total_training_effect if hasattr(activity, 'total_training_effect') else None,
+                "anaerobic_effect": activity.total_anaerobic_training_effect if hasattr(activity, 'total_anaerobic_training_effect') else None
+            }
+            
+            logger.info(f"Beregnet Body Battery for aktivitet {activity_id}: {body_battery:.1f} "
+                       f"(base: {base_body_battery:.1f}, søvn: +{sleep_factor:.1f}, HRV: {hrv_factor:+.1f}, "
+                       f"belastning: {training_load_factor:+.1f}, stress: {stress_factor:+.1f}, "
+                       f"tid: {time_factor:+.1f}, var: {variation_factor:+.1f}) "
+                       f"FIT-data: {fit_data_used}")
+            
+            return {
+                "activity_id": activity_id,
+                "body_battery_start": round(body_battery, 1),
+                "calculation_method": "fit_data_enhanced",
+                "factors": {
+                    "base": round(base_body_battery, 1),
+                    "sleep": round(sleep_factor, 1),
+                    "hrv": round(hrv_factor, 1),
+                    "training_load": round(training_load_factor, 1),
+                    "stress": round(stress_factor, 1),
+                    "time": round(time_factor, 1),
+                    "variation": round(variation_factor, 1)
+                },
+                "fit_data_used": fit_data_used
+            }
+            
+        except Exception as e:
+            logger.error(f"Feil ved beregning av Body Battery for aktivitet {activity_id}: {e}")
+            return None

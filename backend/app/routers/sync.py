@@ -166,15 +166,16 @@ async def trigger_activity_sync(
     storage: DataStorage = Depends(get_data_storage),
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
-    """Starter synkronisering av aktiviteter for en gitt periode med automatisk FIT-data nedlasting."""
+    """Starter synkronisering av aktiviteter for en gitt periode med automatisk FIT-data nedlasting og force refresh for nylige aktiviteter."""
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, False, 100)
+    # Bruk force_refresh_recent=True for å sikre at nylige aktiviteter oppdateres
+    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, True, 100)
     
-    return {"message": "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting).", "job_id": job_id}
+    return {"message": "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting og force refresh for nylige aktiviteter).", "job_id": job_id}
 
 @router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
