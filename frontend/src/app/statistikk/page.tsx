@@ -567,12 +567,12 @@ const StatistikkPage = () => {
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="distance"
-              title="Månedlig distanse - 2022-2024 (valgte aktivitetstyper)"
+              title="Månedlig distanse fra 2022 (valgte aktivitetstyper)"
             />
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="time"
-              title="Månedlig treningstid - 2022-2024 (valgte aktivitetstyper)"
+              title="Månedlig treningstid fra 2022 (valgte aktivitetstyper)"
             />
           </ChartsContainer>
         </>

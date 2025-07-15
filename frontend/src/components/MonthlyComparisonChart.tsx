@@ -48,9 +48,12 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
     );
   }
 
-  // Beregn de siste 4 årene
+  // Vis data fra 2022 til inneværende år
   const currentYear = new Date().getFullYear();
-  const years = [currentYear - 3, currentYear - 2, currentYear - 1, currentYear];
+  const years = [];
+  for (let year = 2022; year <= currentYear; year++) {
+    years.push(year);
+  }
   
   // Grupper data per måned og år
   const monthlyData: { [key: string]: { [year: number]: number } } = {};
@@ -64,9 +67,8 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
     });
   }
 
-  // Filtrer aktiviteter til siste 4 år - bruk den eldste året i years array
-  const earliestYear = Math.min(...years);
-  const earliestDate = new Date(earliestYear, 0, 1); // 1. januar av det eldste året
+  // Filtrer aktiviteter til 2022-2024
+  const earliestDate = new Date(2022, 0, 1); // 1. januar 2022
 
   const relevantActivities = activities.filter(activity => {
     const activityDate = new Date(activity.startTimeLocal);
@@ -93,7 +95,7 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
   });
 
   // Debug logging - kun grunnleggende info
-  console.log(`[MonthlyComparisonChart] ${title}: ${activities.length} aktiviteter, ${relevantActivities.length} relevante aktiviteter (${earliestDate.getFullYear()}-${new Date().getFullYear()})`);
+  console.log(`[MonthlyComparisonChart] ${title}: ${activities.length} aktiviteter, ${relevantActivities.length} relevante aktiviteter (2022-${currentYear})`);
 
   // Konverter til format som Recharts kan bruke
   const chartData = monthNames.map(month => {
@@ -126,8 +128,9 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
     return newData;
   });
 
-  // Farger for hvert år
-  const yearColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
+  // Farger for hvert år (dynamisk basert på antall år)
+  const baseColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#8dd1e1', '#d084d0', '#82d982'];
+  const yearColors = baseColors.slice(0, years.length);
 
   return (
     <ChartContainer>
