@@ -29,6 +29,14 @@ class SummaryService:
         if not activities:
             return None
         
+        # Fjern duplikater basert på activity_id
+        unique_activities = {}
+        for activity in activities:
+            if activity.activity_id not in unique_activities:
+                unique_activities[activity.activity_id] = activity
+        
+        activities = list(unique_activities.values())
+        
         # Beregn totaler
         total_distance = sum(a.distance or 0 for a in activities)
         total_duration = sum(a.duration or 0 for a in activities)
@@ -151,6 +159,14 @@ class SummaryService:
         
         if not activities:
             return None
+        
+        # Fjern duplikater basert på activity_id
+        unique_activities = {}
+        for activity in activities:
+            if activity.activity_id not in unique_activities:
+                unique_activities[activity.activity_id] = activity
+        
+        activities = list(unique_activities.values())
         
         # Beregn totaler (samme logikk som daglig)
         total_distance = sum(a.distance or 0 for a in activities)
@@ -285,6 +301,14 @@ class SummaryService:
         
         if not activities:
             return None
+        
+        # Fjern duplikater basert på activity_id
+        unique_activities = {}
+        for activity in activities:
+            if activity.activity_id not in unique_activities:
+                unique_activities[activity.activity_id] = activity
+        
+        activities = list(unique_activities.values())
         
         # Samme beregningslogikk som ukentlig, men med månedlige beregninger
         total_distance = sum(a.distance or 0 for a in activities)
@@ -524,7 +548,7 @@ class SummaryService:
         """Beregn alle daglige sammendrag."""
         count = 0
         
-        # Hent alle unike datoer med aktiviteter
+        # Hent alle unike datoer med aktiviteter (fjern duplikater basert på activity_id)
         dates = self.db.query(func.date(Activity.start_time)).distinct().all()
         
         for date_tuple in dates:
@@ -545,7 +569,7 @@ class SummaryService:
         """Beregn alle ukentlige sammendrag."""
         count = 0
         
-        # Hent alle unike år og uker
+        # Hent alle unike år og uker (fjern duplikater basert på activity_id)
         year_weeks = self.db.query(
             extract('year', Activity.start_time).label('year'),
             extract('week', Activity.start_time).label('week')
@@ -563,7 +587,7 @@ class SummaryService:
         """Beregn alle månedlige sammendrag."""
         count = 0
         
-        # Hent alle unike år og måneder
+        # Hent alle unike år og måneder (fjern duplikater basert på activity_id)
         year_months = self.db.query(
             extract('year', Activity.start_time).label('year'),
             extract('month', Activity.start_time).label('month')

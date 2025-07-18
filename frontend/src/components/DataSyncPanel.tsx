@@ -116,6 +116,12 @@ const DataSyncPanel = () => {
               const teStatus = statusData.result.summary.te_synced ? 'Training Effect synkronisert' : 'Training Effect sjekket (ingen oppdateringer nødvendig)';
               message += ` | ${teStatus}`;
             }
+            
+            // Vis sammendrag oppdateringsstatus hvis tilgjengelig
+            if (statusData.result?.summary?.summaries_updated !== undefined) {
+              const summaryStatus = statusData.result.summary.summaries_updated ? 'Sammendrag oppdatert' : 'Sammendrag ikke oppdatert';
+              message += ` | ${summaryStatus}`;
+            }
             setStatusMessage(message);
             dispatch(fetchActivities());
             setTimeout(() => setStatusMessage(''), 8000); // Fjerner melding etter 8 sek

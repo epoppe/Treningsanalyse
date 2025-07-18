@@ -44,11 +44,12 @@ def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
         'other': 'Annet'
     }
     
-    # Map engelske aktivitetstyper til norske
+    # Map engelske aktivitetstyper til norske og fjern duplikater
     norwegian_activity_types = []
     for activity_type in activity_types:
         norwegian_type = activity_type_mapping.get(activity_type, activity_type)
-        norwegian_activity_types.append(norwegian_type)
+        if norwegian_type not in norwegian_activity_types:
+            norwegian_activity_types.append(norwegian_type)
     
     filtered_summaries = []
     for summary in summaries:

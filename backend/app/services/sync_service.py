@@ -281,19 +281,41 @@ class SyncService:
             logger.error(f"Feil under Training Effect synkronisering: {e}")
             te_result = {"status": "Feil", "message": str(e)}
         
+        # Oppdater sammendragstabeller automatisk hvis nye aktiviteter ble synkronisert
+        summary_result = {"status": "Ikke kjørt", "message": "Ingen nye aktiviteter"}
+        if sync_result.get("total_fetched", 0) > 0:
+            try:
+                logger.info("Starter automatisk oppdatering av sammendragstabeller...")
+                from ..services.summary_service import SummaryService
+                summary_service = SummaryService()
+                
+                # Oppdater sammendrag for perioden som ble synkronisert
+                summary_service.bulk_update_summaries(start_date.date(), end_date.date())
+                
+                summary_result = {
+                    "status": "Fullført", 
+                    "message": f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()}"
+                }
+                logger.info("Sammendragstabeller oppdatert automatisk")
+            except Exception as e:
+                logger.error(f"Feil under automatisk oppdatering av sammendrag: {e}")
+                summary_result = {"status": "Feil", "message": str(e)}
+        
         # Kombiner resultater
         combined_result = {
             "sync_result": sync_result,
             "fit_data_result": fit_result,
             "hrv_result": hrv_result,
             "te_result": te_result,
-            "status": "Fullført med FIT-data, HRV og Training Effect",
+            "summary_result": summary_result,
+            "status": "Fullført med FIT-data, HRV, Training Effect og sammendrag",
             "summary": {
                 "activities_synced": sync_result.get("total_fetched", 0),
                 "fit_data_downloaded": fit_result.get("success_count", 0),
                 "fit_data_attempted": fit_result.get("total_count", 0),
                 "hrv_synced": hrv_result.get("status") == "Fullført",
                 "te_synced": te_result.get("status") == "Fullført",
+                "summaries_updated": summary_result.get("status") == "Fullført",
                 "metrics_calculated": {
                     "from_sync": sync_result.get("metrics_calculated", {}),
                     "from_fit_data": fit_result.get("metrics_calculated", {})
@@ -301,7 +323,8 @@ class SyncService:
                 "sync_status": sync_result.get("status", "Ukjent"),
                 "fit_status": fit_result.get("status", "Ukjent"),
                 "hrv_status": hrv_result.get("status", "Ukjent"),
-                "te_status": te_result.get("status", "Ukjent")
+                "te_status": te_result.get("status", "Ukjent"),
+                "summary_status": summary_result.get("status", "Ukjent")
             }
         }
         

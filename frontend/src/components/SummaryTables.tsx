@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 
 // Styled components
@@ -203,27 +203,12 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     return date.toISOString().split('T')[0]; // Format: YYYY-MM-DD
   };
 
-  // Bygg query-parametere basert på aktivitetstyper og datofilter
-  const buildQueryParams = (baseParams: string = '') => {
-    const params = new URLSearchParams(baseParams);
-    
-    // Legg til startdato for siste 12 måneder
-    params.append('start_date', getStartDate());
-    
-    // Legg til aktivitetstyper hvis spesifisert
-    if (selectedActivityTypes.length > 0) {
-      selectedActivityTypes.forEach(activityType => {
-        params.append('activity_types', activityType);
-      });
-    }
-    
-    return params.toString();
-  };
+
 
   // Fetch data functions
   const fetchDailyData = async () => {
     try {
-      const queryParams = buildQueryParams('limit=30');
+      const queryParams = memoizedBuildQueryParams('limit=30');
       const response = await fetch(`http://localhost:8000/api/analysis/daily-summaries?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch daily summaries');
       const data = await response.json();
@@ -235,7 +220,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
 
   const fetchWeeklyData = async () => {
     try {
-      const queryParams = buildQueryParams('limit=12');
+      const queryParams = memoizedBuildQueryParams('limit=12');
       const response = await fetch(`http://localhost:8000/api/analysis/weekly-summaries?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch weekly summaries');
       const data = await response.json();
@@ -247,7 +232,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
 
   const fetchMonthlyData = async () => {
     try {
-      const queryParams = buildQueryParams('limit=12');
+      const queryParams = memoizedBuildQueryParams('limit=12');
       const response = await fetch(`http://localhost:8000/api/analysis/monthly-summaries?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch monthly summaries');
       const data = await response.json();
@@ -295,6 +280,28 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     }
   };
 
+  // Stabiliser selectedActivityTypes for å unngå uendelige loops
+  const stableSelectedTypes = useMemo(() => selectedActivityTypes, [selectedActivityTypes]);
+
+  // Memoize buildQueryParams for å unngå unødvendige re-renders
+  const memoizedBuildQueryParams = useMemo(() => {
+    return (baseParams: string = '') => {
+      const params = new URLSearchParams(baseParams);
+      
+      // Legg til startdato for siste 12 måneder
+      params.append('start_date', getStartDate());
+      
+      // Legg til aktivitetstyper hvis spesifisert
+      if (stableSelectedTypes.length > 0) {
+        stableSelectedTypes.forEach(activityType => {
+          params.append('activity_types', activityType);
+        });
+      }
+      
+      return params.toString();
+    };
+  }, [stableSelectedTypes]);
+
   // Load data when component mounts or when selectedActivityTypes changes
   useEffect(() => {
     const loadData = async () => {
@@ -315,7 +322,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     };
 
     loadData();
-  }, [selectedActivityTypes]); // Re-run when selectedActivityTypes changes
+  }, [stableSelectedTypes]); // Re-run when selectedActivityTypes content changes (not reference)
 
   // Helper functions
   const formatDate = (dateString: string) => {
@@ -537,6 +544,10 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
         {stats && (
           <StatsInfo>
             Totalt: {stats.daily?.count || 0} dager, {stats.weekly?.count || 0} uker, {stats.monthly?.count || 0} måneder
+            <br />
+            <span style={{ fontSize: '0.8rem', color: '#27ae60' }}>
+              ✓ Sammendrag filtrerer automatisk ut duplikater basert på activity_id
+            </span>
           </StatsInfo>
         )}
       </ControlsContainer>

@@ -217,9 +217,6 @@ const StatistikkPage = () => {
   const dispatch = useAppDispatch();
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
-  const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
-  const [allFilteredActivities, setAllFilteredActivities] = useState<Activity[]>([]);
-  const [allActivitiesForCharts, setAllActivitiesForCharts] = useState<Activity[]>([]);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Hent unike aktivitetstyper
@@ -255,7 +252,7 @@ const StatistikkPage = () => {
   }, []);
 
   // Filtrer aktiviteter basert på valgte typer og siste 12 måneder
-  useEffect(() => {
+  const filteredActivities = useMemo(() => {
     let tempActivities = activities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= trailing12MonthsDate;
@@ -267,11 +264,11 @@ const StatistikkPage = () => {
       );
     }
 
-    setFilteredActivities(tempActivities);
+    return tempActivities;
   }, [activities, selectedActivityTypes, trailing12MonthsDate]);
 
   // Filtrer aktiviteter basert på valgte typer for 2022-2024 (for grafene)
-  useEffect(() => {
+  const allFilteredActivities = useMemo(() => {
     let tempActivities = activities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= startOf2022Date;
@@ -283,17 +280,17 @@ const StatistikkPage = () => {
       );
     }
 
-    setAllFilteredActivities(tempActivities);
+    return tempActivities;
   }, [activities, selectedActivityTypes, startOf2022Date]);
 
   // Alle aktiviteter for siste 4 år (for grafene - ufiltrert)
-  useEffect(() => {
+  const allActivitiesForCharts = useMemo(() => {
     const tempActivities = activities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= trailing48MonthsDate;
     });
 
-    setAllActivitiesForCharts(tempActivities);
+    return tempActivities;
   }, [activities, trailing48MonthsDate]);
 
   // Initialiser med alle aktivitetstyper valgt kun første gang
@@ -304,13 +301,24 @@ const StatistikkPage = () => {
       setSelectedActivityTypes(activityTypes);
       setHasInitialized(true);
     }
-  }, [activityTypes, selectedActivityTypes.length, hasInitialized]);
+  }, [activityTypes, hasInitialized]); // Fjernet selectedActivityTypes.length fra avhengigheten
 
   useEffect(() => {
     if (status === 'idle') {
       dispatch(fetchAllActivities({ count: 1000 })); // Hent alle aktiviteter
     }
   }, [status, dispatch]);
+
+  useEffect(() => {
+    // Sjekk for duplikater i activities-arrayet
+    const ids = activities.map(a => a.activityId);
+    const uniqueIds = new Set(ids);
+    if (ids.length !== uniqueIds.size) {
+      const duplicates = ids.filter((id, idx) => ids.indexOf(id) !== idx);
+      console.warn('[Statistikk] Duplikater funnet i activities-arrayet:', duplicates);
+    }
+    console.log(`[Statistikk] Antall aktiviteter: ${ids.length}, unike: ${uniqueIds.size}`);
+  }, [activities]);
 
   const handleActivityTypeChange = (type: string, checked: boolean) => {
     if (checked) {
@@ -356,7 +364,7 @@ const StatistikkPage = () => {
   const isLoading = status === 'loading';
 
   // Beregn månedlig statistikk for trailing 12 måneder og sammenlign med året før
-  const getMonthlyStats = () => {
+  const getMonthlyStats = useMemo(() => {
     const monthlyData: { [key: string]: { distance: number; time: number; count: number } } = {};
     const monthlyDataLastYear: { [key: string]: { distance: number; time: number; count: number } } = {};
     
@@ -399,22 +407,26 @@ const StatistikkPage = () => {
     });
 
     return { current: monthlyData, lastYear: monthlyDataLastYear };
-  };
+  }, [activities, selectedActivityTypes, trailing24MonthsDate]);
 
-  const monthlyStats = getMonthlyStats();
+  const monthlyStats = getMonthlyStats;
   
   // Hjelpefunksjon for å beregne endring i prosent
-  const calculatePercentChange = (current: number, previous: number) => {
-    if (previous === 0) return current > 0 ? 100 : 0;
-    return ((current - previous) / previous) * 100;
-  };
+  const calculatePercentChange = useMemo(() => {
+    return (current: number, previous: number) => {
+      if (previous === 0) return current > 0 ? 100 : 0;
+      return ((current - previous) / previous) * 100;
+    };
+  }, []);
 
   // Hjelpefunksjon for å finne tilsvarende måned året før
-  const getLastYearMonth = (currentMonthKey: string) => {
-    const [year, month] = currentMonthKey.split('-');
-    const lastYearKey = `${parseInt(year) - 1}-${month}`;
-    return monthlyStats.lastYear[lastYearKey] || { distance: 0, time: 0, count: 0 };
-  };
+  const getLastYearMonth = useMemo(() => {
+    return (currentMonthKey: string) => {
+      const [year, month] = currentMonthKey.split('-');
+      const lastYearKey = `${parseInt(year) - 1}-${month}`;
+      return monthlyStats.lastYear[lastYearKey] || { distance: 0, time: 0, count: 0 };
+    };
+  }, [monthlyStats]);
 
   if (error) {
     return (
@@ -431,6 +443,20 @@ const StatistikkPage = () => {
       <Header>
         <Title>Treningsstatistikk - Siste 12 måneder</Title>
         <Subtitle>Oversikt over dine treningsprestasjoner</Subtitle>
+        <div style={{ 
+          marginTop: '1rem', 
+          padding: '0.75rem', 
+          backgroundColor: '#e8f5e8', 
+          border: '1px solid #27ae60',
+          borderRadius: '6px',
+          fontSize: '0.9rem',
+          color: '#2c3e50',
+          textAlign: 'center',
+          maxWidth: '600px',
+          margin: '1rem auto 0'
+        }}>
+          <strong>✓ Forbedret nøyaktighet:</strong> Sammendragene filtrerer automatisk ut duplikater basert på activity_id for å sikre korrekte statistikk.
+        </div>
       </Header>
 
       <FiltersContainer>
