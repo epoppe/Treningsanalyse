@@ -10,6 +10,7 @@ from fitparse.utils import FitHeaderError
 import pandas as pd
 
 from .garmin_client import GarminClient
+from .analysis_service import AnalysisService
 from ..storage import DataStorage, DateTimeEncoder
 from ..database.models.activity import Activity, ActivityType
 
@@ -25,6 +26,7 @@ class SyncService:
         self.garmin_client = garmin_client
         self.storage = storage
         self.db = db_session
+        self.analysis_service = AnalysisService(storage)
 
     def _extract_numeric_value(self, value) -> Optional[float]:
         """Ekstraherer numerisk verdi fra FIT-data som kan inneholde enheter."""
@@ -228,7 +230,7 @@ class SyncService:
 
     async def sync_activities_with_fit_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100) -> dict:
         """
-        Synkroniserer aktiviteter og laster automatisk ned FIT-data for aktiviteter som mangler det.
+        Synkroniserer aktiviteter og laster automatisk ned FIT-data, HRV-data og Training Effect for aktiviteter som mangler det.
         
         Args:
             start_date: Startdato for synkronisering
@@ -236,33 +238,70 @@ class SyncService:
             force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
             fit_data_limit: Maksimalt antall aktiviteter å laste ned FIT-data for
         """
-        logger.info(f"Starter utvidet aktivitetssynkronisering med automatisk FIT-data nedlasting")
+        logger.info(f"Starter utvidet aktivitetssynkronisering med automatisk FIT-data, HRV og Training Effect nedlasting")
         
         # Først, gjør vanlig aktivitetssynkronisering
         sync_result = await self.sync_activities(start_date, end_date, force_refresh_recent)
         
-        # Så, last ned FIT-data for aktiviteter som mangler det
+        # Så, last ned FIT-data for aktiviteter som mangler det (kun for aktiviteter i det valgte tidsrommet)
         fit_result = {"status": "Ikke kjørt", "success_count": 0, "total_count": 0}
         
+        # Kun last ned FIT-data hvis perioden er kort (mindre enn 7 dager) for å unngå timeout
+        days_diff = (end_date - start_date).days
+        if days_diff <= 7:
+            try:
+                logger.info(f"Starter automatisk FIT-data nedlasting for aktiviteter i perioden {start_date.date()} til {end_date.date()}...")
+                fit_result = await self.download_fit_data_for_period(start_date, end_date)
+                logger.info(f"FIT-data nedlasting ferdig: {fit_result.get('message', 'Ukjent status')}")
+            except Exception as e:
+                logger.error(f"Feil under automatisk FIT-data nedlasting: {e}")
+                fit_result = {"status": "Feil", "message": str(e), "success_count": 0, "total_count": 0}
+        else:
+            logger.info(f"Hopper over automatisk FIT-data nedlasting for periode på {days_diff} dager (for lang)")
+            fit_result = {"status": "Hoppet over", "message": f"Periode på {days_diff} dager er for lang", "success_count": 0, "total_count": 0}
+        
+        # Synkroniser HRV-data for samme periode
+        hrv_result = {"status": "Ikke kjørt", "message": "Ikke kjørt"}
         try:
-            logger.info(f"Starter automatisk FIT-data nedlasting for aktiviteter som mangler data...")
-            fit_result = await self.download_fit_data_for_activities(limit=fit_data_limit)
-            logger.info(f"FIT-data nedlasting ferdig: {fit_result.get('message', 'Ukjent status')}")
+            logger.info(f"Starter automatisk HRV-synkronisering for perioden {start_date.date()} til {end_date.date()}...")
+            await self.sync_health_data(start_date, end_date, force_refresh_recent)
+            hrv_result = {"status": "Fullført", "message": "HRV-data synkronisert"}
+            logger.info("HRV-synkronisering fullført")
         except Exception as e:
-            logger.error(f"Feil under automatisk FIT-data nedlasting: {e}")
-            fit_result = {"status": "Feil", "message": str(e), "success_count": 0, "total_count": 0}
+            logger.error(f"Feil under HRV-synkronisering: {e}")
+            hrv_result = {"status": "Feil", "message": str(e)}
+        
+        # Synkroniser Training Effect data for samme periode
+        te_result = {"status": "Ikke kjørt", "message": "Ikke kjørt"}
+        try:
+            logger.info(f"Starter automatisk Training Effect synkronisering for perioden {start_date.date()} til {end_date.date()}...")
+            te_result = await self.sync_training_effect_data(start_date, end_date, force_refresh_recent)
+            logger.info(f"Training Effect synkronisering fullført: {te_result.get('message', 'Ukjent status')}")
+        except Exception as e:
+            logger.error(f"Feil under Training Effect synkronisering: {e}")
+            te_result = {"status": "Feil", "message": str(e)}
         
         # Kombiner resultater
         combined_result = {
             "sync_result": sync_result,
             "fit_data_result": fit_result,
-            "status": "Fullført med FIT-data",
+            "hrv_result": hrv_result,
+            "te_result": te_result,
+            "status": "Fullført med FIT-data, HRV og Training Effect",
             "summary": {
                 "activities_synced": sync_result.get("total_fetched", 0),
                 "fit_data_downloaded": fit_result.get("success_count", 0),
                 "fit_data_attempted": fit_result.get("total_count", 0),
+                "hrv_synced": hrv_result.get("status") == "Fullført",
+                "te_synced": te_result.get("status") == "Fullført",
+                "metrics_calculated": {
+                    "from_sync": sync_result.get("metrics_calculated", {}),
+                    "from_fit_data": fit_result.get("metrics_calculated", {})
+                },
                 "sync_status": sync_result.get("status", "Ukjent"),
-                "fit_status": fit_result.get("status", "Ukjent")
+                "fit_status": fit_result.get("status", "Ukjent"),
+                "hrv_status": hrv_result.get("status", "Ukjent"),
+                "te_status": te_result.get("status", "Ukjent")
             }
         }
         
@@ -346,54 +385,57 @@ class SyncService:
                     if existing_activity:
                         self.db.delete(existing_activity)
 
-                # Hent detaljerte data (FIT-fil)
+                # Hent detaljerte data (FIT-fil) - kun for nylige aktiviteter for å unngå timeout
                 details_json = None
-                fit_data = await self.garmin_client.get_activity_details(activity_id)
-                if fit_data:
-                    details_json = self._parse_fit_data(fit_data)
-                    
-                    # Lagre FIT-data også i parquet-format for decoupling-beregninger
-                    if details_json and 'records' in details_json:
-                        logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
-                        parquet_records = []
-                        for record in details_json['records']:
-                            # Konverter timestamp til UTC hvis det eksisterer
-                            timestamp = record.get('timestamp')
-                            if timestamp:
-                                if isinstance(timestamp, str):
-                                    timestamp = pd.to_datetime(timestamp, utc=True)
-                                elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
-                                    timestamp = pd.to_datetime(timestamp, utc=True)
-                                elif not hasattr(timestamp, 'tzinfo'):
-                                    timestamp = pd.to_datetime(timestamp, utc=True)
-                            
-                            parquet_record = {
-                                'activity_id': int(activity_id),
-                                'timestamp': timestamp,
-                                'latitude': self._extract_numeric_value(record.get('position_lat')),
-                                'longitude': self._extract_numeric_value(record.get('position_long')),
-                                'distance': self._extract_numeric_value(record.get('distance')),
-                                'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
-                                'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
-                                'cadence': self._extract_numeric_value(record.get('cadence')),
-                                'temperature': self._extract_numeric_value(record.get('temperature')),
-                                'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
-                            }
-                            
-                            # Kun legg til record hvis den har nødvendige data
-                            if parquet_record['timestamp'] is not None:
-                                parquet_records.append(parquet_record)
+                if is_recent:  # Kun last ned FIT-data for nylige aktiviteter
+                    fit_data = await self.garmin_client.get_activity_details(activity_id)
+                    if fit_data:
+                        details_json = self._parse_fit_data(fit_data)
                         
-                        if parquet_records:
-                            try:
-                                self.storage.save_activity_details(parquet_records)
-                                logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
-                            except Exception as e:
-                                logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
+                        # Lagre FIT-data også i parquet-format for decoupling-beregninger
+                        if details_json and 'records' in details_json:
+                            logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
+                            parquet_records = []
+                            for record in details_json['records']:
+                                # Konverter timestamp til UTC hvis det eksisterer
+                                timestamp = record.get('timestamp')
+                                if timestamp:
+                                    if isinstance(timestamp, str):
+                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                    elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                    elif not hasattr(timestamp, 'tzinfo'):
+                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                
+                                parquet_record = {
+                                    'activity_id': int(activity_id),
+                                    'timestamp': timestamp,
+                                    'latitude': self._extract_numeric_value(record.get('position_lat')),
+                                    'longitude': self._extract_numeric_value(record.get('position_long')),
+                                    'distance': self._extract_numeric_value(record.get('distance')),
+                                    'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
+                                    'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
+                                    'cadence': self._extract_numeric_value(record.get('cadence')),
+                                    'temperature': self._extract_numeric_value(record.get('temperature')),
+                                    'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
+                                }
+                                
+                                # Kun legg til record hvis den har nødvendige data
+                                if parquet_record['timestamp'] is not None:
+                                    parquet_records.append(parquet_record)
+                            
+                            if parquet_records:
+                                try:
+                                    self.storage.save_activity_details(parquet_records)
+                                    logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
+                                except Exception as e:
+                                    logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
+                            else:
+                                logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
                         else:
-                            logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
-                    else:
-                        logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
+                            logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
+                else:
+                    logger.info(f"Hopper over FIT-data nedlasting for aktivitet {activity_id} (ikke nylig)")
 
                 # Håndter ActivityType
                 activity_type_key = act_data.get('activityType', {}).get('typeKey')
@@ -435,13 +477,40 @@ class SyncService:
                     activity_type_id=activity_type_obj.id if activity_type_obj else None,
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                     total_training_effect=act_data.get('trainingEffect'),
-                    total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect')
+                    total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                    detailed_metrics=details_json
                 )
                 self.db.add(new_activity)
                 added_count += 1
 
             self.db.commit()
+            
+            # Beregn metrics for nye aktiviteter
+            logger.info("Starter beregning av metrics for nye aktiviteter...")
+            metrics_results = []
+            for act_data in activities_to_save:
+                activity_id = str(act_data.get('activityId'))
+                if activity_id and activity_id not in existing_ids:
+                    metrics_result = self._calculate_metrics_for_new_activity(activity_id)
+                    metrics_results.append(metrics_result)
+            
+            # Logg resultater
+            successful_negative_splits = sum(1 for r in metrics_results if r["negative_split_calculated"])
+            successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
+            successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
+            
+            logger.info(f"Metrics-beregning fullført:")
+            logger.info(f"  - Negative split: {successful_negative_splits}/{len(metrics_results)}")
+            logger.info(f"  - Decoupling: {successful_decouplings}/{len(metrics_results)}")
+            logger.info(f"  - HRV tilgjengelig: {successful_hrv}/{len(metrics_results)}")
+            
             summary["total_fetched"] = added_count
+            summary["metrics_calculated"] = {
+                "negative_split": successful_negative_splits,
+                "decoupling": successful_decouplings,
+                "hrv_available": successful_hrv,
+                "total_activities": len(metrics_results)
+            }
             summary["status"] = "Fullført"
             logger.info(f"Synkronisering fra Garmin fullført. La til {added_count} nye aktiviteter i databasen.")
 
@@ -616,6 +685,11 @@ class SyncService:
                     activity.detailed_metrics = details_json
                     self.db.commit()
                     logger.info(f"Oppdaterte database med FIT-data for aktivitet {activity_id}")
+                    
+                    # Beregn metrics for aktiviteten siden vi nå har FIT-data
+                    logger.info(f"Beregner metrics for aktivitet {activity_id} etter FIT-data nedlasting...")
+                    metrics_result = self._calculate_metrics_for_new_activity(str(activity_id))
+                    logger.info(f"Metrics-beregning for aktivitet {activity_id}: Negative split={metrics_result['negative_split_calculated']}, Decoupling={metrics_result['decoupling_calculated']}")
                 
                 return True
             else:
@@ -669,24 +743,39 @@ class SyncService:
             
             success_count = 0
             total_count = len(activity_ids)
+            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
             
             for i, activity_id in enumerate(activity_ids):
                 logger.info(f"Prosesserer aktivitet {activity_id} ({i+1}/{total_count})")
                 
                 if await self._download_and_store_fit_file(activity_id):
                     success_count += 1
+                    
+                    # Sjekk om metrics ble beregnet for denne aktiviteten
+                    try:
+                        metrics_result = self._calculate_metrics_for_new_activity(str(activity_id))
+                        if metrics_result["negative_split_calculated"]:
+                            metrics_calculated["negative_split"] += 1
+                        if metrics_result["decoupling_calculated"]:
+                            metrics_calculated["decoupling"] += 1
+                        if metrics_result["hrv_calculated"]:
+                            metrics_calculated["hrv_available"] += 1
+                    except Exception as e:
+                        logger.warning(f"Kunne ikke sjekke metrics for aktivitet {activity_id}: {e}")
                 
                 # Liten pause for å unngå rate limiting
                 await asyncio.sleep(0.5)
             
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
             logger.info(message)
+            logger.info(f"Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
             
             return {
                 "status": "Fullført",
                 "message": message,
                 "success_count": success_count,
-                "total_count": total_count
+                "total_count": total_count,
+                "metrics_calculated": metrics_calculated
             }
             
         except Exception as e:
@@ -720,10 +809,16 @@ class SyncService:
             
             logger.info(f"Fant {len(activities_in_period)} aktiviteter i perioden {start_date.date()} til {end_date.date()}")
             
-            # Finn aktiviteter som mangler FIT-data
+            # Finn aktiviteter som mangler FIT-data (enten i parquet eller details)
             missing_fit_activities = []
             for activity in activities_in_period:
-                if activity.activity_id not in existing_fit_activity_ids:
+                has_parquet_data = activity.activity_id in existing_fit_activity_ids
+                
+                # Sjekk også om aktiviteten har details i database
+                db_activity = self.db.query(Activity.detailed_metrics).filter_by(activity_id=activity.activity_id).first()
+                has_db_details = db_activity and db_activity.detailed_metrics is not None and db_activity.detailed_metrics != {} and 'records' in str(db_activity.detailed_metrics)
+                
+                if not (has_parquet_data and has_db_details):
                     missing_fit_activities.append(activity)
             
             logger.info(f"Av disse mangler {len(missing_fit_activities)} aktiviteter FIT-data")
@@ -733,27 +828,196 @@ class SyncService:
             
             success_count = 0
             total_count = len(missing_fit_activities)
+            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
             
             for i, activity in enumerate(missing_fit_activities):
                 logger.info(f"Prosesserer aktivitet {activity.activity_id} ({i+1}/{total_count}) - {activity.start_time.strftime('%Y-%m-%d')} - {activity.activity_name}")
                 
                 if await self._download_and_store_fit_file(activity.activity_id):
                     success_count += 1
+                    
+                    # Sjekk om metrics ble beregnet for denne aktiviteten
+                    try:
+                        metrics_result = self._calculate_metrics_for_new_activity(str(activity.activity_id))
+                        if metrics_result["negative_split_calculated"]:
+                            metrics_calculated["negative_split"] += 1
+                        if metrics_result["decoupling_calculated"]:
+                            metrics_calculated["decoupling"] += 1
+                        if metrics_result["hrv_calculated"]:
+                            metrics_calculated["hrv_available"] += 1
+                    except Exception as e:
+                        logger.warning(f"Kunne ikke sjekke metrics for aktivitet {activity.activity_id}: {e}")
                 
                 # Liten pause for å unngå rate limiting
                 await asyncio.sleep(1)
             
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter i perioden {start_date.date()} til {end_date.date()}"
             logger.info(message)
+            logger.info(f"Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
             
             return {
                 "status": "Fullført", 
                 "message": message,
                 "success_count": success_count,
                 "total_count": total_count,
-                "period": f"{start_date.date()} til {end_date.date()}"
+                "period": f"{start_date.date()} til {end_date.date()}",
+                "metrics_calculated": metrics_calculated
             }
             
         except Exception as e:
             logger.error(f"Feil under FIT-data nedlasting for periode: {e}")
             return {"status": "Feil", "message": str(e)} 
+
+    async def sync_training_effect_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False) -> dict:
+        """
+        Synkroniserer Training Effect data for aktiviteter i en gitt periode.
+        
+        Args:
+            start_date: Startdato for synkronisering
+            end_date: Sluttdato for synkronisering
+            force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
+        """
+        logger.info(f"Starter Training Effect synkronisering for perioden {start_date.date()} til {end_date.date()}")
+        
+        try:
+            if not await self.garmin_client.initialize():
+                logger.error("Kunne ikke initialisere Garmin-klient for Training Effect synkronisering.")
+                return {"status": "Feil", "message": "Kunne ikke autentisere mot Garmin"}
+            
+            # Hent aktiviteter fra databasen i den gitte perioden
+            activities = self.db.query(Activity).filter(
+                Activity.start_time >= start_date,
+                Activity.start_time <= end_date
+            ).order_by(Activity.start_time.desc()).all()
+            
+            logger.info(f"Fant {len(activities)} aktiviteter i perioden {start_date.date()} til {end_date.date()}")
+            
+            # Beregn grensen for "nylige" data (siste 2 dager)
+            recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
+            
+            updated_count = 0
+            skipped_count = 0
+            failed_count = 0
+            
+            for i, activity in enumerate(activities, 1):
+                activity_id = str(activity.activity_id)
+                activity_start_time = activity.start_time
+                
+                # Sjekk om aktiviteten er nylig og om vi skal force refresh
+                # Sørg for at begge datetimes har samme timezone-oppsett
+                if activity_start_time.tzinfo is None:
+                    activity_start_time = activity_start_time.replace(tzinfo=timezone.utc)
+                is_recent = activity_start_time >= recent_cutoff
+                has_training_effect = (activity.total_training_effect is not None or 
+                                     activity.total_anaerobic_training_effect is not None)
+                
+                # Skip hvis aktiviteten allerede har Training Effect data og ikke er nylig
+                if has_training_effect and not (force_refresh_recent and is_recent):
+                    skipped_count += 1
+                    continue
+                
+                logger.info(f"Prosesserer Training Effect for aktivitet {activity_id} ({i}/{len(activities)}) - {activity.activity_name}")
+                
+                try:
+                    # Hent Training Effect data fra Garmin
+                    te_data = await self.garmin_client.get_activity_training_effect(activity_id)
+                    
+                    if te_data:
+                        # Oppdater databasen
+                        activity.total_training_effect = te_data.get('aerobic_training_effect')
+                        activity.total_anaerobic_training_effect = te_data.get('anaerobic_training_effect')
+                        
+                        logger.info(f"✅ Oppdatert Training Effect for aktivitet {activity_id}: "
+                                  f"Aerobic={activity.total_training_effect}, "
+                                  f"Anaerobic={activity.total_anaerobic_training_effect}")
+                        
+                        updated_count += 1
+                    else:
+                        logger.info(f"❌ Ingen Training Effect data funnet for aktivitet {activity_id}")
+                        failed_count += 1
+                    
+                    # Liten pause for å unngå rate limiting
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"❌ Feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
+                    failed_count += 1
+            
+            # Lagre endringene til databasen
+            self.db.commit()
+            
+            result = {
+                "status": "Fullført",
+                "message": f"Training Effect synkronisering fullført: {updated_count} oppdatert, {skipped_count} hoppet over, {failed_count} feilet",
+                "updated_count": updated_count,
+                "skipped_count": skipped_count,
+                "failed_count": failed_count,
+                "total_processed": len(activities)
+            }
+            
+            logger.info(f"Training Effect synkronisering fullført: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Feil under Training Effect synkronisering: {e}")
+            return {"status": "Feil", "message": str(e)}
+
+    def _calculate_metrics_for_new_activity(self, activity_id: str) -> dict:
+        """
+        Beregner og lagrer decoupling og negative split for en ny aktivitet.
+        Returnerer en ordbok med resultater.
+        """
+        results = {
+            "activity_id": activity_id,
+            "negative_split_calculated": False,
+            "decoupling_calculated": False,
+            "hrv_calculated": False,
+            "errors": []
+        }
+        
+        try:
+            activity_id_int = int(activity_id)
+            
+            # Beregn negative split
+            try:
+                negative_split_result = self.analysis_service.calculate_negative_split(activity_id_int, self.db)
+                if negative_split_result:
+                    results["negative_split_calculated"] = True
+                    logger.info(f"Beregnet negative split for aktivitet {activity_id}: {negative_split_result.get('negative_split_percent', 'N/A')}%")
+                else:
+                    results["errors"].append("Kunne ikke beregne negative split")
+            except Exception as e:
+                logger.warning(f"Feil ved beregning av negative split for aktivitet {activity_id}: {e}")
+                results["errors"].append(f"Negative split feil: {str(e)}")
+            
+            # Beregn decoupling
+            try:
+                decoupling_result = self.analysis_service.calculate_decoupling(activity_id_int, self.db)
+                if decoupling_result:
+                    results["decoupling_calculated"] = True
+                    logger.info(f"Beregnet decoupling for aktivitet {activity_id}: {decoupling_result.get('decoupling_percent', 'N/A')}%")
+                else:
+                    results["errors"].append("Kunne ikke beregne decoupling")
+            except Exception as e:
+                logger.warning(f"Feil ved beregning av decoupling for aktivitet {activity_id}: {e}")
+                results["errors"].append(f"Decoupling feil: {str(e)}")
+            
+            # HRV beregnes ikke her - det hentes separat via sync_health_data
+            # Men vi kan sjekke om HRV-data finnes for aktivitetens dato
+            try:
+                activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+                if activity and activity.start_time:
+                    # HRV-data er kun tilgjengelig fra 2023
+                    if activity.start_time.year >= 2023:
+                        hrv_data = self.analysis_service.get_hrv_for_activity_date(activity_id_int, self.db)
+                        if hrv_data and hrv_data.get('last_night_avg'):
+                            results["hrv_calculated"] = True
+                            logger.info(f"HRV-data tilgjengelig for aktivitet {activity_id}: {hrv_data.get('last_night_avg')}ms")
+            except Exception as e:
+                logger.debug(f"HRV-sjekk for aktivitet {activity_id}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Generell feil ved beregning av metrics for aktivitet {activity_id}: {e}")
+            results["errors"].append(f"Generell feil: {str(e)}")
+        
+        return results 

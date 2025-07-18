@@ -89,9 +89,36 @@ const DataSyncPanel = () => {
           clearInterval(interval);
           setJobId(null);
           if (statusData.status === 'completed') {
-            setStatusMessage('Synkronisering fullført! Henter nye data...');
+            // Vis metrics-beregning hvis tilgjengelig
+            let message = 'Synkronisering fullført! Henter nye data...';
+            if (statusData.result?.summary?.metrics_calculated) {
+              const metrics = statusData.result.summary.metrics_calculated;
+              const fromSync = metrics.from_sync || {};
+              const fromFitData = metrics.from_fit_data || {};
+              
+              const totalNegativeSplit = (fromSync.negative_split || 0) + (fromFitData.negative_split || 0);
+              const totalDecoupling = (fromSync.decoupling || 0) + (fromFitData.decoupling || 0);
+              const totalHrv = (fromSync.hrv_available || 0) + (fromFitData.hrv_available || 0);
+              
+              if (totalNegativeSplit > 0 || totalDecoupling > 0 || totalHrv > 0) {
+                message += ` Metrics beregnet: Negativ split=${totalNegativeSplit}, Decoupling=${totalDecoupling}, HRV=${totalHrv}`;
+              }
+            }
+            
+            // Vis HRV-synkroniseringsstatus hvis tilgjengelig
+            if (statusData.result?.summary?.hrv_synced !== undefined) {
+              const hrvStatus = statusData.result.summary.hrv_synced ? 'HRV synkronisert' : 'HRV ikke synkronisert';
+              message += ` | ${hrvStatus}`;
+            }
+            
+            // Vis Training Effect synkroniseringsstatus hvis tilgjengelig
+            if (statusData.result?.summary?.te_synced !== undefined) {
+              const teStatus = statusData.result.summary.te_synced ? 'Training Effect synkronisert' : 'Training Effect sjekket (ingen oppdateringer nødvendig)';
+              message += ` | ${teStatus}`;
+            }
+            setStatusMessage(message);
             dispatch(fetchActivities());
-            setTimeout(() => setStatusMessage(''), 5000); // Fjerner melding etter 5 sek
+            setTimeout(() => setStatusMessage(''), 8000); // Fjerner melding etter 8 sek
           } else {
             setStatusMessage(`Feil under synkronisering: ${statusData.error}`);
           }
@@ -145,10 +172,10 @@ const DataSyncPanel = () => {
       </InputGroup>
       <ButtonGroup>
         <Button onClick={handleSync} disabled={isLoading || !startDate || !endDate}>
-          {isLoading ? 'Opptatt...' : 'Synk valgt periode'}
+          {isLoading ? 'Opptatt...' : 'Synk valgt periode (inkl. HRV & Training Effect)'}
         </Button>
         <Button onClick={handleSync30Days} disabled={isLoading}>
-          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager (force refresh)'}
+          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager (inkl. HRV & Training Effect)'}
         </Button>
       </ButtonGroup>
       {statusMessage && <StatusMessage>{statusMessage}</StatusMessage>}

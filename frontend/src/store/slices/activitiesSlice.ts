@@ -33,8 +33,13 @@ export const fetchActivities = createAsyncThunk<Activity[], { forceRefresh?: boo
       console.log('[fetchActivities] Hentet response:', response?.length || 0, 'aktiviteter');
       // Backend sender nå en flat liste, så vi returnerer den direkte.
       return response;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[fetchActivities] Feil ved henting av aktiviteter:', error);
+      console.error('[fetchActivities] Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
       const errorInfo = errorHandler(error);
       return rejectWithValue(errorInfo.error);
     }
@@ -65,8 +70,13 @@ export const fetchActivityCount = createAsyncThunk<number, void, { rejectValue: 
       const count = await activitiesApi.getActivityCount();
       console.log('[fetchActivityCount] Hentet antall aktiviteter:', count);
       return count;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[fetchActivityCount] Feil ved henting av aktivitetsantall:', error);
+      console.error('[fetchActivityCount] Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
       const errorInfo = errorHandler(error);
       return rejectWithValue(errorInfo.error);
     }

@@ -56,6 +56,7 @@ export const activitiesApi = {
   // Hent alle aktiviteter
   getActivities: async (forceRefresh: boolean = false, limit: number = 100) => {
     console.log('[API] Sender GET request til /activities...');
+    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const params = new URLSearchParams();
       if (forceRefresh) params.append('force_refresh', 'true');
@@ -64,11 +65,16 @@ export const activitiesApi = {
       const queryString = params.toString();
       const url = `/activities${queryString ? '?' + queryString : ''}`;
       
+      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
+      
       const response = await apiClient.get<Activity[]>(url);
       console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[API] Feil ved GET /activities:', error);
+      console.error('[API] Error response:', error.response?.data);
+      console.error('[API] Error status:', error.response?.status);
+      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
@@ -76,6 +82,7 @@ export const activitiesApi = {
   // Hent aktiviteter med høyere limit for å vise flere
   getMoreActivities: async (forceRefresh: boolean = false, limit: number = 500, offset: number = 0) => {
     console.log('[API] Sender GET request til /activities med høyere limit og offset...');
+    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const params = new URLSearchParams();
       if (forceRefresh) params.append('force_refresh', 'true');
@@ -85,11 +92,16 @@ export const activitiesApi = {
       const queryString = params.toString();
       const url = `/activities${queryString ? '?' + queryString : ''}`;
       
+      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
+      
       const response = await apiClient.get<Activity[]>(url);
       console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return response.data;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[API] Feil ved GET /activities med høyere limit:', error);
+      console.error('[API] Error response:', error.response?.data);
+      console.error('[API] Error status:', error.response?.status);
+      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
@@ -97,12 +109,16 @@ export const activitiesApi = {
   // Hent totalt antall aktiviteter
   getActivityCount: async () => {
     console.log('[API] Sender GET request til /activities/count...');
+    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const response = await apiClient.get<{count: number}>('/activities/count');
       console.log('[API] Mottok activity count:', response.data.count);
       return response.data.count;
-    } catch (error) {
+    } catch (error: any) {
       console.error('[API] Feil ved GET /activities/count:', error);
+      console.error('[API] Error response:', error.response?.data);
+      console.error('[API] Error status:', error.response?.status);
+      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
