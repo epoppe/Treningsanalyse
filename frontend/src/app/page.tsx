@@ -9,6 +9,7 @@ import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
 import DataSyncPanel from '../components/DataSyncPanel';
 import RunningEconomyTable from '../components/RunningEconomyTable';
+import TrainingReadiness from '../components/TrainingReadiness';
 
 const MainContainer = styled.div`
   max-width: 1200px;
@@ -417,6 +418,12 @@ export default function Home() {
         </FilterSection>
       </FiltersContainer>
 
+      <TrainingReadiness showDetails={false} />
+      <div style={{ textAlign: 'center', marginTop: '1rem' }}>
+        <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
+          💡 Se detaljert daglig readiness på <a href="/daglig-readiness" style={{ color: '#3b82f6', textDecoration: 'underline' }}>Daglig Readiness</a> siden
+        </p>
+      </div>
       <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />
       <RunningEconomyTable activities={filteredActivities} />
       <ActivityList activities={filteredActivities} />

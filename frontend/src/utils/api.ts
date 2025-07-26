@@ -123,13 +123,27 @@ export const activitiesApi = {
     }
   },
 
-  // Hent aktiviteter for en spesifikk periode
+  // Hent aktiviteter for en datoperiode
   getActivitiesByDateRange: async (startDate: string, endDate: string, forceRefresh: boolean = false) => {
-    const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24));
-    const response = await apiClient.get<ActivityResponse>(
-      `/activities?days=${days}${forceRefresh ? '&force_refresh=true' : ''}`
-    );
-    return response.data;
+    console.log('[API] Sender GET request til /activities/date-range...');
+    try {
+      const params = new URLSearchParams();
+      params.append('start_date', startDate);
+      params.append('end_date', endDate);
+      if (forceRefresh) params.append('force_refresh', 'true');
+      
+      const queryString = params.toString();
+      const url = `/activities/date-range?${queryString}`;
+      
+      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
+      
+      const response = await apiClient.get<Activity[]>(url);
+      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
+      return { activities: response.data };
+    } catch (error: any) {
+      console.error('[API] Feil ved GET /activities/date-range:', error);
+      throw error;
+    }
   },
 
   // Hent hvilepulsdata
@@ -168,12 +182,49 @@ export const activitiesApi = {
       end_date: formatDate(endDate)
     });
     return response.data;
+  },
+
+  // Training Readiness API
+  getTrainingReadiness: async (date?: string) => {
+    const params = date ? `?target_date=${date}` : '';
+    const response = await apiClient.get<ApiResponse<any>>(`/training-readiness${params}`);
+    return response.data;
+  },
+
+  getWeeklyTrainingReadiness: async (endDate?: string) => {
+    const params = endDate ? `?end_date=${endDate}` : '';
+    const response = await apiClient.get<ApiResponse<any>>(`/training-readiness/weekly${params}`);
+    return response.data;
+  },
+
+  getTrainingReadinessStatus: async (date?: string) => {
+    const params = date ? `?target_date=${date}` : '';
+    const response = await apiClient.get<ApiResponse<any>>(`/training-readiness/status${params}`);
+    return response.data;
   }
 };
 
 const healthApi = {
   getStress: (date: string) => apiCall('get', `/health/stress/${date}`),
   getHrv: (date: string) => apiCall('get', `/health/hrv/${date}`),
+  
+  // Nye metrics basert på Garmy
+  getBodyBattery: (date: string) => apiCall('get', `/health/body-battery/${date}`),
+  getBodyBatteryRange: (startDate: string, endDate: string) => 
+    apiCall('get', `/health/body-battery/range?start_date=${startDate}&end_date=${endDate}`),
+  
+  getSleep: (date: string) => apiCall('get', `/health/sleep/${date}`),
+  getSleepRange: (startDate: string, endDate: string) => 
+    apiCall('get', `/health/sleep/range?start_date=${startDate}&end_date=${endDate}`),
+  
+  getStressRange: (startDate: string, endDate: string) => 
+    apiCall('get', `/health/stress/range?start_date=${startDate}&end_date=${endDate}`),
+  
+  getHrvRange: (startDate: string, endDate: string) => 
+    apiCall('get', `/health/hrv/range?start_date=${startDate}&end_date=${endDate}`),
+  
+  getMetricsSummary: (date: string) => 
+    apiCall('get', `/health/metrics/summary?date=${date}`),
 };
 
 export interface BodyBatteryByActivityResponse {

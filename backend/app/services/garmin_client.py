@@ -2,7 +2,7 @@ import asyncio
 import logging
 import traceback
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -408,3 +408,321 @@ class GarminClient:
             logger.error(f"Feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
             logger.error(traceback.format_exc())
             return None
+
+    # Nye metoder basert på Garmy metrics
+
+    async def get_body_battery_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+        """Henter body battery data for en spesifikk dato."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente body battery data.")
+            return None
+        
+        try:
+            date_str = date.strftime("%Y-%m-%d")
+            logger.info(f"Henter body battery data for {date_str}")
+            
+            # Hent body battery data fra Garmin Connect API
+            body_battery_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                {"calendarDate": date_str}
+            )
+            
+            if isinstance(body_battery_data, dict) and 'allMetrics' in body_battery_data:
+                metrics = body_battery_data.get('allMetrics', {}).get('metricsMap', {})
+                
+                # Hent body battery metrics
+                body_battery_charged = metrics.get('BODY_BATTERY_CHARGED', {}).get('value')
+                body_battery_drained = metrics.get('BODY_BATTERY_DRAINED', {}).get('value')
+                body_battery_charged_start = metrics.get('BODY_BATTERY_CHARGED_START', {}).get('value')
+                body_battery_drained_start = metrics.get('BODY_BATTERY_DRAINED_START', {}).get('value')
+                
+                result = {
+                    "date": date_str,
+                    "body_battery_charged": body_battery_charged,
+                    "body_battery_drained": body_battery_drained,
+                    "body_battery_charged_start": body_battery_charged_start,
+                    "body_battery_drained_start": body_battery_drained_start,
+                    "net_charge": (body_battery_charged or 0) - (body_battery_drained or 0)
+                }
+                
+                logger.info(f"Hentet body battery data for {date_str}: {result}")
+                return result
+            else:
+                logger.info(f"Ingen body battery data funnet for {date_str}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen body battery data funnet for {date_str}")
+                return None
+            logger.error(f"HTTP-feil ved henting av body battery data for {date_str}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av body battery data for {date_str}: {e}")
+            return None
+
+    async def get_body_battery_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Henter body battery data for en datoperiode."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente body battery data.")
+            return []
+        
+        try:
+            logger.info(f"Henter body battery data fra {start_date.date()} til {end_date.date()}")
+            
+            all_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                data = await self.get_body_battery_data(current_date)
+                if data:
+                    all_data.append(data)
+                
+                current_date += timedelta(days=1)
+                await asyncio.sleep(0.5)  # Rate limiting
+            
+            logger.info(f"Hentet {len(all_data)} dager med body battery data")
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"Feil ved henting av body battery range: {e}")
+            return []
+
+    async def get_sleep_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+        """Henter søvndata for en spesifikk dato."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente søvndata.")
+            return None
+        
+        try:
+            date_str = date.strftime("%Y-%m-%d")
+            logger.info(f"Henter søvndata for {date_str}")
+            
+            # Hent søvndata fra Garmin Connect API
+            sleep_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                {"calendarDate": date_str}
+            )
+            
+            if isinstance(sleep_data, dict) and 'allMetrics' in sleep_data:
+                metrics = sleep_data.get('allMetrics', {}).get('metricsMap', {})
+                
+                # Hent søvn-relaterte metrics
+                sleep_time = metrics.get('SLEEP_TIME', {}).get('value')
+                sleep_goal = metrics.get('SLEEP_GOAL', {}).get('value')
+                sleep_score = metrics.get('SLEEP_SCORE', {}).get('value')
+                deep_sleep = metrics.get('DEEP_SLEEP', {}).get('value')
+                light_sleep = metrics.get('LIGHT_SLEEP', {}).get('value')
+                rem_sleep = metrics.get('REM_SLEEP', {}).get('value')
+                awake_time = metrics.get('AWAKE_TIME', {}).get('value')
+                
+                result = {
+                    "date": date_str,
+                    "sleep_time": sleep_time,
+                    "sleep_goal": sleep_goal,
+                    "sleep_score": sleep_score,
+                    "deep_sleep": deep_sleep,
+                    "light_sleep": light_sleep,
+                    "rem_sleep": rem_sleep,
+                    "awake_time": awake_time,
+                    "total_sleep": (deep_sleep or 0) + (light_sleep or 0) + (rem_sleep or 0)
+                }
+                
+                logger.info(f"Hentet søvndata for {date_str}: {result}")
+                return result
+            else:
+                logger.info(f"Ingen søvndata funnet for {date_str}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen søvndata funnet for {date_str}")
+                return None
+            logger.error(f"HTTP-feil ved henting av søvndata for {date_str}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av søvndata for {date_str}: {e}")
+            return None
+
+    async def get_sleep_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Henter søvndata for en datoperiode."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente søvndata.")
+            return []
+        
+        try:
+            logger.info(f"Henter søvndata fra {start_date.date()} til {end_date.date()}")
+            
+            all_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                data = await self.get_sleep_data(current_date)
+                if data:
+                    all_data.append(data)
+                
+                current_date += timedelta(days=1)
+                await asyncio.sleep(0.5)  # Rate limiting
+            
+            logger.info(f"Hentet {len(all_data)} dager med søvndata")
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"Feil ved henting av søvndata range: {e}")
+            return []
+
+    async def get_stress_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+        """Henter stressdata for en spesifikk dato."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente stressdata.")
+            return None
+        
+        try:
+            date_str = date.strftime("%Y-%m-%d")
+            logger.info(f"Henter stressdata for {date_str}")
+            
+            # Hent stressdata fra Garmin Connect API
+            stress_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                {"calendarDate": date_str}
+            )
+            
+            if isinstance(stress_data, dict) and 'allMetrics' in stress_data:
+                metrics = stress_data.get('allMetrics', {}).get('metricsMap', {})
+                
+                # Hent stress-relaterte metrics
+                stress_time = metrics.get('STRESS_TIME', {}).get('value')
+                rest_time = metrics.get('REST_TIME', {}).get('value')
+                low_stress_time = metrics.get('LOW_STRESS_TIME', {}).get('value')
+                medium_stress_time = metrics.get('MEDIUM_STRESS_TIME', {}).get('value')
+                high_stress_time = metrics.get('HIGH_STRESS_TIME', {}).get('value')
+                
+                result = {
+                    "date": date_str,
+                    "stress_time": stress_time,
+                    "rest_time": rest_time,
+                    "low_stress_time": low_stress_time,
+                    "medium_stress_time": medium_stress_time,
+                    "high_stress_time": high_stress_time,
+                    "total_time": (stress_time or 0) + (rest_time or 0)
+                }
+                
+                logger.info(f"Hentet stressdata for {date_str}: {result}")
+                return result
+            else:
+                logger.info(f"Ingen stressdata funnet for {date_str}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen stressdata funnet for {date_str}")
+                return None
+            logger.error(f"HTTP-feil ved henting av stressdata for {date_str}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av stressdata for {date_str}: {e}")
+            return None
+
+    async def get_stress_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Henter stressdata for en datoperiode."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente stressdata.")
+            return []
+        
+        try:
+            logger.info(f"Henter stressdata fra {start_date.date()} til {end_date.date()}")
+            
+            all_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                data = await self.get_stress_data(current_date)
+                if data:
+                    all_data.append(data)
+                
+                current_date += timedelta(days=1)
+                await asyncio.sleep(0.5)  # Rate limiting
+            
+            logger.info(f"Hentet {len(all_data)} dager med stressdata")
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"Feil ved henting av stressdata range: {e}")
+            return []
+
+    async def get_hrv_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+        """Henter HRV-data for en datoperiode."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente HRV-data.")
+            return []
+        
+        try:
+            logger.info(f"Henter HRV-data fra {start_date.date()} til {end_date.date()}")
+            
+            all_data = []
+            current_date = start_date
+            
+            while current_date <= end_date:
+                data = await self.get_hrv_data(current_date)
+                if data:
+                    all_data.append(data)
+                
+                current_date += timedelta(days=1)
+                await asyncio.sleep(0.5)  # Rate limiting
+            
+            logger.info(f"Hentet {len(all_data)} dager med HRV-data")
+            return all_data
+            
+        except Exception as e:
+            logger.error(f"Feil ved henting av HRV-data range: {e}")
+            return []
+
+    async def get_daily_metrics_summary(self, date: datetime) -> Dict[str, Any]:
+        """Henter et sammendrag av alle tilgjengelige metrics for en dato."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente metrics sammendrag.")
+            return {}
+        
+        try:
+            date_str = date.strftime("%Y-%m-%d")
+            logger.info(f"Henter metrics sammendrag for {date_str}")
+            
+            # Hent alle metrics for dagen
+            summary_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                {"calendarDate": date_str}
+            )
+            
+            if isinstance(summary_data, dict) and 'allMetrics' in summary_data:
+                metrics = summary_data.get('allMetrics', {}).get('metricsMap', {})
+                
+                # Samle alle tilgjengelige metrics
+                result = {
+                    "date": date_str,
+                    "metrics": {}
+                }
+                
+                # Legg til alle tilgjengelige metrics
+                for metric_name, metric_data in metrics.items():
+                    if isinstance(metric_data, dict) and 'value' in metric_data:
+                        result["metrics"][metric_name] = metric_data['value']
+                
+                logger.info(f"Hentet metrics sammendrag for {date_str} med {len(result['metrics'])} metrics")
+                return result
+            else:
+                logger.info(f"Ingen metrics sammendrag funnet for {date_str}")
+                return {"date": date_str, "metrics": {}}
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen metrics sammendrag funnet for {date_str}")
+                return {"date": date_str, "metrics": {}}
+            logger.error(f"HTTP-feil ved henting av metrics sammendrag for {date_str}: {e}")
+            return {"date": date_str, "metrics": {}}
+        except Exception as e:
+            logger.error(f"Feil ved henting av metrics sammendrag for {date_str}: {e}")
+            return {"date": date_str, "metrics": {}}

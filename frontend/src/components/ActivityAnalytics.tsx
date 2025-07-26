@@ -69,23 +69,32 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
     fetchAnalytics();
   }, [activityId]);
 
-  const formatPace = (pace: number) => {
+  const formatPace = (pace: number | null | undefined) => {
+    if (pace === null || pace === undefined || isNaN(pace)) {
+      return 'N/A';
+    }
     const minutes = Math.floor(pace);
     const seconds = Math.round((pace - minutes) * 60);
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  const getNegativeSplitBadge = (value: number) => {
-    if (value > 0) {
+  const getNegativeSplitBadge = (value: number | null | undefined) => {
+    if (value === null || value === undefined || isNaN(value)) {
+      return <Badge color="gray">Ingen data</Badge>;
+    }
+    if (value < 0) {
       return <Badge color="green">Negativ Split</Badge>;
-    } else if (value < 0) {
+    } else if (value > 0) {
       return <Badge color="red">Positiv Split</Badge>;
     } else {
       return <Badge color="gray">Jevn Split</Badge>;
     }
   };
 
-  const getDecouplingBadge = (value: number) => {
+  const getDecouplingBadge = (value: number | null | undefined) => {
+    if (value === null || value === undefined || isNaN(value)) {
+      return <Badge color="gray">Ingen data</Badge>;
+    }
     if (value > 5) {
       return <Badge color="red">Høy Decoupling</Badge>;
     } else if (value > 0) {
@@ -125,7 +134,7 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           </Flex>
           
           <Metric className="mt-4">
-            {negativeSplit.negative_split_percent > 0 ? '+' : ''}{negativeSplit.negative_split_percent.toFixed(2)}%
+            {negativeSplit.negative_split_percent > 0 ? '+' : ''}{negativeSplit.negative_split_percent?.toFixed(2) || '0.00'}%
           </Metric>
           
           <div className="mt-4 space-y-2">
@@ -139,7 +148,7 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
             </div>
             <div className="flex justify-between">
               <Text>Datapunkter:</Text>
-              <Text>{negativeSplit.data_points.toLocaleString()}</Text>
+              <Text>{negativeSplit.data_points?.toLocaleString() || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>Kilde:</Text>
@@ -149,9 +158,11 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           
           <div className="mt-4">
             <Text className="text-sm text-gray-600">
-              {negativeSplit.negative_split_percent > 0 
+              {negativeSplit.negative_split_percent && negativeSplit.negative_split_percent < 0 
                 ? 'Løp raskere i andre halvdel - bra pacing!' 
-                : 'Løp saktere i andre halvdel - vurder pacing-strategi.'
+                : negativeSplit.negative_split_percent && negativeSplit.negative_split_percent > 0
+                ? 'Løp saktere i andre halvdel - vurder pacing-strategi.'
+                : 'Ikke nok data for pacing-analyse.'
               }
             </Text>
           </div>
@@ -166,29 +177,29 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           </Flex>
           
           <Metric className="mt-4">
-            {decoupling.decoupling_percent > 0 ? '+' : ''}{decoupling.decoupling_percent.toFixed(2)}%
+            {decoupling.decoupling_percent > 0 ? '+' : ''}{decoupling.decoupling_percent?.toFixed(2) || '0.00'}%
           </Metric>
           
           <div className="mt-4 space-y-2">
             <div className="flex justify-between">
               <Text>Første halvdel:</Text>
-              <Text>HR {decoupling.first_half_hr.toFixed(0)} / Speed {decoupling.first_half_speed.toFixed(2)}</Text>
+              <Text>HR {decoupling.first_half_hr?.toFixed(0) || 'N/A'} / Speed {decoupling.first_half_speed?.toFixed(2) || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>Andre halvdel:</Text>
-              <Text>HR {decoupling.second_half_hr.toFixed(0)} / Speed {decoupling.second_half_speed.toFixed(2)}</Text>
+              <Text>HR {decoupling.second_half_hr?.toFixed(0) || 'N/A'} / Speed {decoupling.second_half_speed?.toFixed(2) || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>HR:Speed ratio 1. del:</Text>
-              <Text>{decoupling.first_half_ratio.toFixed(2)}</Text>
+              <Text>{decoupling.first_half_ratio?.toFixed(2) || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>HR:Speed ratio 2. del:</Text>
-              <Text>{decoupling.second_half_ratio.toFixed(2)}</Text>
+              <Text>{decoupling.second_half_ratio?.toFixed(2) || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>Datapunkter:</Text>
-              <Text>{decoupling.data_points.toLocaleString()}</Text>
+              <Text>{decoupling.data_points?.toLocaleString() || 'N/A'}</Text>
             </div>
             <div className="flex justify-between">
               <Text>Kilde:</Text>
@@ -198,11 +209,13 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           
           <div className="mt-4">
             <Text className="text-sm text-gray-600">
-              {decoupling.decoupling_percent > 5 
+              {decoupling.decoupling_percent && decoupling.decoupling_percent > 5 
                 ? 'Høy decoupling kan indikere tretthet eller dehydrering.' 
-                : decoupling.decoupling_percent > 0
+                : decoupling.decoupling_percent && decoupling.decoupling_percent > 0
                 ? 'Moderat decoupling - normal respons på anstrengelse.'
-                : 'Negativ decoupling - utmerket aerob effektivitet!'
+                : decoupling.decoupling_percent && decoupling.decoupling_percent < 0
+                ? 'Negativ decoupling - utmerket aerob effektivitet!'
+                : 'Ikke nok data for decoupling-analyse.'
               }
             </Text>
           </div>

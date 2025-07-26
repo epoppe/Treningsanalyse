@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { fetchAllActivities, Activity } from '../../store/slices/activitiesSlice';
 import styled from 'styled-components';
 import ActivityChart from '../../components/ActivityChart';
 import MonthlyComparisonChart from '../../components/MonthlyComparisonChart';
 import SummaryTables from '../../components/SummaryTables';
+import { useSyncListener } from '../../hooks/useSyncListener';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -301,7 +302,26 @@ const StatistikkPage = () => {
       setSelectedActivityTypes(activityTypes);
       setHasInitialized(true);
     }
-  }, [activityTypes, hasInitialized]); // Fjernet selectedActivityTypes.length fra avhengigheten
+  }, [activityTypes, selectedActivityTypes.length, hasInitialized]);
+
+  // Callback for å oppdatere data når synkronisering er fullført
+  const handleSyncComplete = useCallback(async () => {
+    console.log('[Statistikk] Synkronisering fullført, oppdaterer data...');
+    // Oppdater sammendragstabeller i backend
+    try {
+      const response = await fetch('http://localhost:8000/api/analysis/refresh-summaries', {
+        method: 'POST',
+      });
+      if (response.ok) {
+        console.log('[Statistikk] Sammendragstabeller oppdatert');
+      }
+    } catch (error) {
+      console.error('[Statistikk] Feil ved oppdatering av sammendragstabeller:', error);
+    }
+  }, []);
+
+  // Lytter etter synkroniseringshendelser
+  useSyncListener(handleSyncComplete);
 
   useEffect(() => {
     if (status === 'idle') {

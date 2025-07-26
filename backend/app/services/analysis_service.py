@@ -17,8 +17,8 @@ class AnalysisService:
         """
         Beregner negativ split for en aktivitet basert på FIT-data.
         Negativ split = (andre halvdel pace - første halvdel pace) / første halvdel pace * 100
-        Positiv verdi = negativ split (raskere andre halvdel)
-        Negativ verdi = positiv split (saktere andre halvdel)
+        Negativ verdi = negativ split (raskere andre halvdel)
+        Positiv verdi = positiv split (saktere andre halvdel)
         """
         try:
             # Hent aktivitet fra database
@@ -72,7 +72,9 @@ class AnalysisService:
                 return None
             
             # Beregn negative split prosentvis
-            negative_split_percent = ((first_half_pace - second_half_pace) / first_half_pace) * 100
+            # Endret logikk: negativ verdi = raskere andre halvdel (negativ split)
+            # positiv verdi = saktere andre halvdel (positiv split)
+            negative_split_percent = ((second_half_pace - first_half_pace) / first_half_pace) * 100
             
             # Lagre i database
             activity.negative_split_percent = negative_split_percent

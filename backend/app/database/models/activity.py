@@ -68,6 +68,7 @@ class Activity(Base):
     negative_split_percent = Column(Float, nullable=True)
     running_economy = Column(Float, nullable=True)
     decoupling_percent = Column(Float, nullable=True)
+    training_readiness_score = Column(Float, nullable=True)  # Training readiness score (0-100)
     body_battery_start = Column(Float, nullable=True)  # Body Battery ved start av aktivitet (0-100)
     
     # Metadata

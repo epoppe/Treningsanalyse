@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -37,8 +37,74 @@ class ActivityResponse(BaseModel):
     avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
     negativeSplitPercent: Optional[float] = Field(None, description="Negative split percentage")
     decouplingPercent: Optional[float] = Field(None, description="Decoupling percentage")
+    trainingReadinessScore: Optional[float] = Field(None, description="Training readiness score (0-100)")
     totalTrainingEffect: Optional[float] = Field(None, description="Aerobic Training Effect (1.0-5.0)")
     totalAnaerobicTrainingEffect: Optional[float] = Field(None, description="Anaerobic Training Effect (1.0-5.0)")
+
+@router.get("/activities/date-range", response_model=List[ActivityResponse])
+def get_activities_by_date_range(
+    start_date: str = Query(..., description="Startdato (YYYY-MM-DD)"),
+    end_date: str = Query(..., description="Sluttdato (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    """Hent aktiviteter for en spesifikk datoperiode."""
+    try:
+        from datetime import datetime
+        
+        # Konverter string til datetime
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        
+        # Hent aktiviteter i perioden
+        activities = db.query(Activity).filter(
+            Activity.start_time >= start_dt,
+            Activity.start_time <= end_dt
+        ).order_by(Activity.start_time.desc()).all()
+        
+        response_data = []
+        for act in activities:
+            # Hent aktivitetstype
+            act_type_data = None
+            if act.activity_type:
+                act_type_data = {
+                    "typeKey": act.activity_type.type_key,
+                    "parentTypeKey": act.activity_type.parent_type_key
+                }
+            
+            # Beregn gjennomsnittlig steglengde hvis tilgjengelig
+            avg_stride_length = None
+            if act.average_running_cadence and act.distance and act.total_steps:
+                # Gjennomsnittlig steglengde = distanse / antall steg
+                avg_stride_length = act.distance / act.total_steps
+            
+            # Manually construct the dictionary for the response, ensuring correct field names
+            response_data.append({
+                "activityId": act.activity_id,
+                "activityName": act.activity_name,
+                "startTimeLocal": act.start_time,
+                "distance": act.distance,
+                "duration": act.duration,
+                "calories": act.calories,
+                "averageHR": act.average_heart_rate,
+                "averageSpeed": act.average_speed,
+                "averagePace": act.average_pace,
+                "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
+                "vO2MaxValue": act.vo2_max,
+                "activityType": act_type_data,
+                "avgStrideLength": avg_stride_length,
+                "negativeSplitPercent": act.negative_split_percent,
+                "decouplingPercent": act.decoupling_percent,
+                "trainingReadinessScore": act.training_readiness_score,
+                "totalTrainingEffect": act.total_training_effect,
+                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect
+            })
+            
+        logger.info(f"Returnerer {len(response_data)} aktiviteter for perioden {start_date} til {end_date}")
+        return response_data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 @router.get("/activities", response_model=List[ActivityResponse])
 def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
@@ -89,6 +155,7 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,
                 "decouplingPercent": act.decoupling_percent,
+                "trainingReadinessScore": act.training_readiness_score,
                 "totalTrainingEffect": act.total_training_effect,
                 "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect
             })
@@ -128,21 +195,51 @@ async def read_activity_details(
     try:
         # 1. Sjekk lokal lagring først
         details = storage.get_activity_details(activity_id)
-        if details:
-            return details
+        if details is not None:
+            return details.to_dict('records')
 
         # 2. Hvis ikke lokalt, hent fra Garmin
         fit_data = await garmin_client.get_activity_details(str(activity_id))
         if not fit_data:
             raise HTTPException(status_code=404, detail="Kunne ikke hente aktivitetsdetaljer fra Garmin.")
 
-        # 3. Lagre dataene lokalt
-        storage.save_activity_details(activity_id, fit_data)
+        # 3. Parse FIT-data til parquet-format
+        from ..services.sync_service import SyncService
+        sync_service = SyncService(garmin_client, storage, None)  # db_session er ikke nødvendig for parsing
+        parsed_data = sync_service._parse_fit_data(fit_data)
+        
+        if not parsed_data or 'records' not in parsed_data:
+            raise HTTPException(status_code=500, detail="Kunne ikke parse FIT-data.")
 
-        # 4. Hent og returner de nylig lagrede dataene
+        # 4. Konverter til parquet-format
+        parquet_records = []
+        for record in parsed_data['records']:
+            parquet_record = {
+                'activity_id': activity_id,
+                'timestamp': record.get('timestamp'),
+                'latitude': record.get('position_lat'),
+                'longitude': record.get('position_long'),
+                'speed': record.get('speed'),
+                'heart_rate': record.get('heart_rate'),
+                'cadence': record.get('cadence'),
+                'temperature': record.get('temperature'),
+                'altitude': record.get('enhanced_altitude') or record.get('altitude')
+            }
+            
+            # Kun legg til record hvis den har nødvendige data
+            if parquet_record['timestamp'] is not None:
+                parquet_records.append(parquet_record)
+
+        # 5. Lagre dataene lokalt
+        if parquet_records:
+            storage.save_activity_details(parquet_records)
+        else:
+            raise HTTPException(status_code=500, detail="Ingen gyldige data funnet i FIT-filen.")
+
+        # 6. Hent og returner de nylig lagrede dataene
         new_details = storage.get_activity_details(activity_id)
-        if new_details:
-            return new_details
+        if new_details is not None:
+            return new_details.to_dict('records')
         else:
             # Dette skal i teorien ikke skje hvis lagring var vellykket
             raise HTTPException(status_code=500, detail="Klarte ikke å hente data etter lagring.")
@@ -161,7 +258,7 @@ def get_activity_chart(
     Generate and return a Plotly chart for a given activity and chart type.
     """
     details_list = storage.get_activity_details(activity_id)
-    if not details_list:
+    if details_list is None:
         raise HTTPException(status_code=404, detail="Activity details not found")
 
     details_df = pd.DataFrame(details_list)

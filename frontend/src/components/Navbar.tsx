@@ -65,6 +65,15 @@ export default function Navbar() {
           <NavLink href="/hrv" $active={pathname === '/hrv'}>
             HRV
           </NavLink>
+          <NavLink href="/daglig-readiness" $active={pathname === '/daglig-readiness'}>
+            Daglig Readiness
+          </NavLink>
+          <NavLink href="/body-battery" $active={pathname === '/body-battery'}>
+            Body Battery
+          </NavLink>
+          <NavLink href="/training-stress" $active={pathname === '/training-stress'}>
+            Training Stress Score
+          </NavLink>
         </NavLinks>
       </NavContainer>
     </Nav>

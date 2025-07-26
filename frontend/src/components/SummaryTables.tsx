@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
+import { useSyncListener } from '../hooks/useSyncListener';
 
 // Styled components
 const Container = styled.div`
@@ -203,10 +204,30 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     return date.toISOString().split('T')[0]; // Format: YYYY-MM-DD
   };
 
+  // Stabiliser selectedActivityTypes for å unngå uendelige loops
+  const stableSelectedTypes = useMemo(() => selectedActivityTypes, [selectedActivityTypes]);
 
+  // Memoize buildQueryParams for å unngå unødvendige re-renders
+  const memoizedBuildQueryParams = useMemo(() => {
+    return (baseParams: string = '') => {
+      const params = new URLSearchParams(baseParams);
+      
+      // Legg til startdato for siste 12 måneder
+      params.append('start_date', getStartDate());
+      
+      // Legg til aktivitetstyper hvis spesifisert
+      if (stableSelectedTypes.length > 0) {
+        stableSelectedTypes.forEach(activityType => {
+          params.append('activity_types', activityType);
+        });
+      }
+      
+      return params.toString();
+    };
+  }, [stableSelectedTypes]);
 
   // Fetch data functions
-  const fetchDailyData = async () => {
+  const fetchDailyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=30');
       const response = await fetch(`http://localhost:8000/api/analysis/daily-summaries?${queryParams}`);
@@ -216,9 +237,9 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     } catch (err) {
       setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
     }
-  };
+  }, [memoizedBuildQueryParams]);
 
-  const fetchWeeklyData = async () => {
+  const fetchWeeklyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=12');
       const response = await fetch(`http://localhost:8000/api/analysis/weekly-summaries?${queryParams}`);
@@ -228,9 +249,9 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     } catch (err) {
       setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
     }
-  };
+  }, [memoizedBuildQueryParams]);
 
-  const fetchMonthlyData = async () => {
+  const fetchMonthlyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=12');
       const response = await fetch(`http://localhost:8000/api/analysis/monthly-summaries?${queryParams}`);
@@ -240,9 +261,9 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     } catch (err) {
       setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
     }
-  };
+  }, [memoizedBuildQueryParams]);
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await fetch('http://localhost:8000/api/analysis/summary-stats');
       if (!response.ok) throw new Error('Failed to fetch summary stats');
@@ -251,9 +272,9 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     } catch (err) {
       setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
     }
-  };
+  }, []);
 
-  const refreshSummaries = async () => {
+  const refreshSummaries = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -278,29 +299,16 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchDailyData, fetchWeeklyData, fetchMonthlyData, fetchStats]);
 
-  // Stabiliser selectedActivityTypes for å unngå uendelige loops
-  const stableSelectedTypes = useMemo(() => selectedActivityTypes, [selectedActivityTypes]);
+  // Callback for å oppdatere data når synkronisering er fullført
+  const handleSyncComplete = useCallback(async () => {
+    console.log('[SummaryTables] Synkronisering fullført, oppdaterer data...');
+    await refreshSummaries();
+  }, [refreshSummaries]);
 
-  // Memoize buildQueryParams for å unngå unødvendige re-renders
-  const memoizedBuildQueryParams = useMemo(() => {
-    return (baseParams: string = '') => {
-      const params = new URLSearchParams(baseParams);
-      
-      // Legg til startdato for siste 12 måneder
-      params.append('start_date', getStartDate());
-      
-      // Legg til aktivitetstyper hvis spesifisert
-      if (stableSelectedTypes.length > 0) {
-        stableSelectedTypes.forEach(activityType => {
-          params.append('activity_types', activityType);
-        });
-      }
-      
-      return params.toString();
-    };
-  }, [stableSelectedTypes]);
+  // Lytter etter synkroniseringshendelser
+  useSyncListener(handleSyncComplete);
 
   // Load data when component mounts or when selectedActivityTypes changes
   useEffect(() => {
@@ -322,7 +330,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     };
 
     loadData();
-  }, [stableSelectedTypes]); // Re-run when selectedActivityTypes content changes (not reference)
+  }, [fetchDailyData, fetchWeeklyData, fetchMonthlyData, fetchStats]); // Re-run when fetch functions change
 
   // Helper functions
   const formatDate = (dateString: string) => {

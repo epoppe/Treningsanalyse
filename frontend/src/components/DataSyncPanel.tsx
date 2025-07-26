@@ -123,6 +123,7 @@ const DataSyncPanel = () => {
               message += ` | ${summaryStatus}`;
             }
             setStatusMessage(message);
+            // Hent nye aktiviteter og trigger oppdatering av statistikk
             dispatch(fetchActivities());
             setTimeout(() => setStatusMessage(''), 8000); // Fjerner melding etter 8 sek
           } else {
