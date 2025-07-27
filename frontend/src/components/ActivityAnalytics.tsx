@@ -95,14 +95,12 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
     if (value === null || value === undefined || isNaN(value)) {
       return <Badge color="gray">Ingen data</Badge>;
     }
-    if (value > 5) {
+    if (value > 10) {
       return <Badge color="red">Høy Decoupling</Badge>;
-    } else if (value > 0) {
+    } else if (value >= 5) {
       return <Badge color="yellow">Moderat Decoupling</Badge>;
-    } else if (value < 0) {
-      return <Badge color="green">Negativ Decoupling</Badge>;
     } else {
-      return <Badge color="gray">Ingen Decoupling</Badge>;
+      return <Badge color="green">Lav Decoupling</Badge>;
     }
   };
 
@@ -209,12 +207,12 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
           
           <div className="mt-4">
             <Text className="text-sm text-gray-600">
-              {decoupling.decoupling_percent && decoupling.decoupling_percent > 5 
+              {decoupling.decoupling_percent && decoupling.decoupling_percent > 10 
                 ? 'Høy decoupling kan indikere tretthet eller dehydrering.' 
-                : decoupling.decoupling_percent && decoupling.decoupling_percent > 0
-                ? 'Moderat decoupling - normal respons på anstrengelse.'
-                : decoupling.decoupling_percent && decoupling.decoupling_percent < 0
-                ? 'Negativ decoupling - utmerket aerob effektivitet!'
+                : decoupling.decoupling_percent && decoupling.decoupling_percent >= 5
+                ? 'Moderat decoupling - vær oppmerksom på tretthet.'
+                : decoupling.decoupling_percent && decoupling.decoupling_percent < 5
+                ? 'Lav decoupling - god aerob effektivitet!'
                 : 'Ikke nok data for decoupling-analyse.'
               }
             </Text>

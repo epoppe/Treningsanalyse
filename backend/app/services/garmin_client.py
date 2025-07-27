@@ -362,6 +362,53 @@ class GarminClient:
             logger.error(traceback.format_exc())
             return None
 
+    async def get_activity_epoc_data(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """Henter EPOC (Exercise Post Oxygen Consumption) data for en aktivitet."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente EPOC-data.")
+            return None
+        
+        try:
+            logger.info(f"Henter EPOC data for aktivitet {activity_id}")
+            
+            # Hent detaljerte aktivitetsdata fra activity-service
+            activity_data = await asyncio.to_thread(
+                garth.connectapi, 
+                f"/activity-service/activity/{activity_id}"
+            )
+            
+            if isinstance(activity_data, dict) and 'summaryDTO' in activity_data:
+                summary = activity_data['summaryDTO']
+                
+                epoc_data = {
+                    "activity_training_load": summary.get('activityTrainingLoad'),  # Dette er EPOC
+                    "training_effect": summary.get('trainingEffect'),
+                    "aerobic_training_effect": summary.get('aerobicTrainingEffect'),
+                    "anaerobic_training_effect": summary.get('anaerobicTrainingEffect'),
+                    "training_effect_label": summary.get('trainingEffectLabel'),
+                    "aerobic_te_message": summary.get('aerobicTrainingEffectMessage'),
+                    "anaerobic_te_message": summary.get('anaerobicTrainingEffectMessage')
+                }
+                
+                logger.info(f"Hentet EPOC data for aktivitet {activity_id}: "
+                           f"Training Load={epoc_data['activity_training_load']}")
+                
+                return epoc_data
+            else:
+                logger.warning(f"Uventet respons fra activity-service for aktivitet {activity_id}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen EPOC data funnet for aktivitet {activity_id}")
+                return None
+            logger.error(f"HTTP-feil ved henting av EPOC data for aktivitet {activity_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av EPOC data for aktivitet {activity_id}: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
     async def get_activity_training_effect(self, activity_id: str) -> Optional[Dict[str, Any]]:
         """Henter Training Effect data for en spesifikk aktivitet fra activity-service."""
         if not self.is_authenticated():
@@ -726,3 +773,54 @@ class GarminClient:
         except Exception as e:
             logger.error(f"Feil ved henting av metrics sammendrag for {date_str}: {e}")
             return {"date": date_str, "metrics": {}}
+
+    async def get_lactate_threshold_speed(self) -> Optional[float]:
+        """
+        Henter lactate threshold speed fra Garmin Connect eller konfigurasjon.
+        
+        Returns:
+            Optional[float]: Lactate threshold speed i m/s, eller None hvis ikke tilgjengelig
+        """
+        try:
+            if not self.is_authenticated():
+                logger.warning("Garmin-klient ikke autentisert")
+                # Sjekk konfigurasjon som fallback
+                from app.config import settings
+                if settings.LACTATE_THRESHOLD_SPEED is not None:
+                    logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
+                    return settings.LACTATE_THRESHOLD_SPEED
+                return None
+            
+            logger.info("Henter lactate threshold speed fra Garmin Connect")
+            
+            # Prøv å bruke garth.UserSettings.get() direkte
+            try:
+                import garth
+                user_settings = await asyncio.to_thread(garth.UserSettings.get)
+                
+                if hasattr(user_settings, 'user_data') and user_settings.user_data:
+                    user_data = user_settings.user_data
+                    if hasattr(user_data, 'lactate_threshold_speed') and user_data.lactate_threshold_speed:
+                        lactate_speed = user_data.lactate_threshold_speed
+                        logger.info(f"Lactate threshold speed hentet fra Garmin: {lactate_speed} m/s")
+                        return lactate_speed
+                    else:
+                        logger.warning("Lactate threshold speed ikke tilgjengelig i user_data")
+                else:
+                    logger.warning("user_data ikke tilgjengelig")
+                    
+            except Exception as e:
+                logger.warning(f"Kunne ikke hente lactate threshold speed via garth.UserSettings.get(): {e}")
+                
+            # Fallback til konfigurasjon
+            from app.config import settings
+            if settings.LACTATE_THRESHOLD_SPEED is not None:
+                logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
+                return settings.LACTATE_THRESHOLD_SPEED
+            else:
+                logger.info("Ingen lactate threshold speed tilgjengelig fra Garmin eller konfigurasjon")
+                return None
+                    
+        except Exception as e:
+            logger.error(f"Uventet feil ved henting av lactate threshold speed: {e}")
+            return None

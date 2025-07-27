@@ -206,9 +206,12 @@ const ActivityDetails = styled.div`
 const TSSValue = styled.div<{ tss: number }>`
   font-weight: bold;
   color: ${props => {
-    if (props.tss >= 100) return '#e74c3c'; // Rød for høy TSS
-    if (props.tss >= 50) return '#f39c12'; // Oransje for moderat TSS
-    return '#27ae60'; // Grønn for lav TSS
+    // EPOC-baserte verdier: 50-400 er typisk for løping
+    if (props.tss >= 300) return '#8b0000'; // Mørk rød for svært høy TSS
+    if (props.tss >= 200) return '#e74c3c'; // Rød for høy TSS
+    if (props.tss >= 100) return '#f39c12'; // Oransje for moderat TSS
+    if (props.tss >= 50) return '#27ae60'; // Grønn for lav TSS
+    return '#95a5a6'; // Grå for svært lav TSS
   }};
   font-size: 1rem;
 `;
@@ -252,7 +255,7 @@ interface Activity {
   date: string;
   duration: number;
   distance: number;
-  tss: number;
+  tss: number;  // Dette er nå EPOC-verdien
   training_effect?: number;
   anaerobic_training_effect?: number;
   average_heart_rate?: number;
@@ -322,9 +325,12 @@ const TrainingStressPage: React.FC = () => {
   };
 
   const getTSSStatus = (tss: number) => {
-    if (tss >= 100) return 'Høy belastning';
-    if (tss >= 50) return 'Moderat belastning';
-    return 'Lav belastning';
+    // EPOC-baserte verdier: 50-400 er typisk for løping
+    if (tss >= 300) return 'Svært høy belastning';
+    if (tss >= 200) return 'Høy belastning';
+    if (tss >= 100) return 'Moderat belastning';
+    if (tss >= 50) return 'Lav belastning';
+    return 'Svært lav belastning';
   };
 
   const formatDuration = (seconds: number) => {
@@ -350,7 +356,7 @@ const TrainingStressPage: React.FC = () => {
 
   return (
     <Container>
-      <Title>📊 Training Stress Score</Title>
+      <Title>📊 Training Stress Score (EPOC-basert)</Title>
       
       <DateRangeSelector>
         <label htmlFor="start-date">Fra:</label>
@@ -406,15 +412,15 @@ const TrainingStressPage: React.FC = () => {
             </MetricCard>
 
             <MetricCard>
-              <MetricTitle>Total TSS (Periode)</MetricTitle>
+              <MetricTitle>Total EPOC/TSS (Periode)</MetricTitle>
               <MetricValue style={{ color: '#9b59b6' }}>
                 {data.summary.total_tss_period}
               </MetricValue>
-              <MetricLabel>Kumulativ Training Stress Score</MetricLabel>
+              <MetricLabel>Kumulativ EPOC (brukes som TSS)</MetricLabel>
             </MetricCard>
 
             <MetricCard>
-              <MetricTitle>Gjennomsnittlig Daglig TSS</MetricTitle>
+              <MetricTitle>Gjennomsnittlig Daglig EPOC/TSS</MetricTitle>
               <MetricValue style={{ color: '#f39c12' }}>
                 {data.summary.avg_daily_tss}
               </MetricValue>
@@ -623,7 +629,7 @@ const TrainingStressPage: React.FC = () => {
           </ChartContainer>
 
           <ActivityList>
-            <MetricTitle>Aktiviteter med TSS</MetricTitle>
+            <MetricTitle>Aktiviteter med EPOC/TSS</MetricTitle>
             {data.activities.length > 0 ? (
               data.activities.map((activity) => (
                 <ActivityItem key={activity.activity_id}>
@@ -647,14 +653,14 @@ const TrainingStressPage: React.FC = () => {
               ))
             ) : (
               <EmptyMessage>
-                Ingen aktiviteter med TSS data i valgt periode.
+                Ingen aktiviteter med EPOC/TSS data i valgt periode.
               </EmptyMessage>
             )}
           </ActivityList>
         </>
       ) : (
         <EmptyMessage>
-          Ingen Training Stress Score data tilgjengelig for valgt periode.
+          Ingen EPOC/TSS data tilgjengelig for valgt periode.
         </EmptyMessage>
       )}
     </Container>

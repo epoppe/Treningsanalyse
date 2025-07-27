@@ -40,6 +40,9 @@ class ActivityResponse(BaseModel):
     trainingReadinessScore: Optional[float] = Field(None, description="Training readiness score (0-100)")
     totalTrainingEffect: Optional[float] = Field(None, description="Aerobic Training Effect (1.0-5.0)")
     totalAnaerobicTrainingEffect: Optional[float] = Field(None, description="Anaerobic Training Effect (1.0-5.0)")
+    epoc: Optional[float] = Field(None, description="Exercise Post Oxygen Consumption (også brukt som TSS)")
+    lactateThresholdSpeed: Optional[float] = Field(None, description="Lactate threshold speed in m/s")
+    details: Optional[Dict[str, Any]] = Field(None, description="Detailed metrics for the activity")
 
 @router.get("/activities/date-range", response_model=List[ActivityResponse])
 def get_activities_by_date_range(
@@ -96,7 +99,10 @@ def get_activities_by_date_range(
                 "decouplingPercent": act.decoupling_percent,
                 "trainingReadinessScore": act.training_readiness_score,
                 "totalTrainingEffect": act.total_training_effect,
-                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect
+                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
+                "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
+                "details": act.detailed_metrics
             })
             
         logger.info(f"Returnerer {len(response_data)} aktiviteter for perioden {start_date} til {end_date}")
@@ -157,7 +163,10 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 "decouplingPercent": act.decoupling_percent,
                 "trainingReadinessScore": act.training_readiness_score,
                 "totalTrainingEffect": act.total_training_effect,
-                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect
+                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
+                "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
+                "details": act.detailed_metrics
             })
             
         logger.info(f"Returnerer {len(response_data)} aktiviteter til frontend")

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 # Få absolutt sti til backend-mappen
 BACKEND_DIR = Path(__file__).parent.parent.absolute()
@@ -25,12 +26,14 @@ class Settings(BaseSettings):
     # Database URL
     DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
     
-    # Garmin Connect konfigurasjon
-    GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "").strip('"')
-    GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "").strip('"')
+    # Garmin Connect API konfigurasjon
+    GARMIN_EMAIL: str = "erik.p.poppe@gmail.com"
+    GARMIN_PASSWORD: str = "Erik1984!"
+    TOKEN_DIR: str = "tokens"
     
-    # Token lagring
-    TOKEN_DIR: str = token_dir_str
+    # Lactate threshold speed konfigurasjon (i m/s)
+    # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API
+    LACTATE_THRESHOLD_SPEED: Optional[float] = 0.347  # m/s, tilsvarer 1.25 km/t
     
     # Data Storage konfigurasjon
     DATA_DIR: str = os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR.absolute()))

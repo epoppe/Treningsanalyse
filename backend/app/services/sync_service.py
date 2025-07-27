@@ -160,6 +160,15 @@ class SyncService:
             if not avg_speed and avg_pace and avg_pace > 0:
                 avg_speed = (1000 / (avg_pace * 60))
 
+            # Hent lactate threshold speed fra Garmin-klienten
+            lactate_threshold_speed = None
+            try:
+                # Bruk asyncio.run for å kjøre async funksjon i sync kontekst
+                import asyncio
+                lactate_threshold_speed = asyncio.run(self.garmin_client.get_lactate_threshold_speed())
+            except Exception as e:
+                logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
+
             new_activity = Activity(
                 activity_id=activity_id,
                 activity_name=act_data.get('activityName'),
@@ -174,7 +183,8 @@ class SyncService:
                 activity_type_id=activity_type_obj.id if activity_type_obj else None,
                 average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                 total_training_effect=act_data.get('trainingEffect'),
-                total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect')
+                total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                lactate_threshold_speed=lactate_threshold_speed  # Lactate threshold speed
             )
             self.db.add(new_activity)
             added_count += 1
@@ -486,6 +496,13 @@ class SyncService:
                 if start_time.tzinfo is None:
                     start_time = start_time.replace(tzinfo=timezone.utc)
                 
+                # Hent lactate threshold speed fra Garmin-klienten
+                lactate_threshold_speed = None
+                try:
+                    lactate_threshold_speed = await self.garmin_client.get_lactate_threshold_speed()
+                except Exception as e:
+                    logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
+
                 new_activity = Activity(
                     activity_id=activity_id,
                     activity_name=act_data.get('activityName'),
@@ -501,6 +518,8 @@ class SyncService:
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                     total_training_effect=act_data.get('trainingEffect'),
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                    epoc=act_data.get('activityTrainingLoad'),  # EPOC data
+                    lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
                     detailed_metrics=details_json
                 )
                 self.db.add(new_activity)
@@ -942,26 +961,23 @@ class SyncService:
                 logger.info(f"Prosesserer Training Effect for aktivitet {activity_id} ({i}/{len(activities)}) - {activity.activity_name}")
                 
                 try:
-                    # Hent Training Effect data fra Garmin
+                    # Hent Training Effect data
                     te_data = await self.garmin_client.get_activity_training_effect(activity_id)
-                    
                     if te_data:
-                        # Oppdater databasen
                         activity.total_training_effect = te_data.get('aerobic_training_effect')
                         activity.total_anaerobic_training_effect = te_data.get('anaerobic_training_effect')
-                        
-                        logger.info(f"✅ Oppdatert Training Effect for aktivitet {activity_id}: "
-                                  f"Aerobic={activity.total_training_effect}, "
-                                  f"Anaerobic={activity.total_anaerobic_training_effect}")
-                        
-                        updated_count += 1
-                    else:
-                        logger.info(f"❌ Ingen Training Effect data funnet for aktivitet {activity_id}")
-                        failed_count += 1
                     
-                    # Liten pause for å unngå rate limiting
-                    await asyncio.sleep(0.5)
+                    # Hent EPOC data
+                    epoc_data = await self.garmin_client.get_activity_epoc_data(activity_id)
+                    if epoc_data:
+                        activity.epoc = epoc_data.get('activity_training_load')
                     
+                    # Oppdater databasen
+                    logger.info(f"✅ Oppdatert Training Effect for aktivitet {activity_id}: "
+                              f"Aerobic={activity.total_training_effect}, "
+                              f"Anaerobic={activity.total_anaerobic_training_effect}")
+                    
+                    updated_count += 1
                 except Exception as e:
                     logger.error(f"❌ Feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
                     failed_count += 1

@@ -26,14 +26,25 @@ class TrainingStressService:
     
     def calculate_tss_for_activity(self, activity: Activity) -> float:
         """
-        Beregn TSS for en enkelt aktivitet.
+        Beregn TSS for en enkelt aktivitet basert på EPOC (Exercise Post Oxygen Consumption).
         
-        TSS = (varighet * IF * IF) / (FTP * 3600) * 100
-        hvor IF = Intensity Factor (normalisert intensitet)
+        TSS er det samme som EPOC-verdien fra Garmin Connect.
         """
         try:
             if not activity.duration or activity.duration <= 0:
                 return 0.0
+            
+            # Prioritet 1: Bruk EPOC hvis tilgjengelig
+            if activity.epoc and activity.epoc > 0:
+                # TSS er det samme som EPOC-verdien fra Garmin
+                epoc_value = activity.epoc
+                
+                logger.info(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
+                          f"EPOC={epoc_value}")
+                return round(epoc_value, 1)  # TSS = EPOC
+            
+            # Prioritet 2: Fallback til estimert beregning hvis ingen EPOC
+            logger.info(f"Ingen EPOC-data for aktivitet {activity.activity_id}, bruker estimert TSS")
             
             # Konverter varighet til timer
             duration_hours = activity.duration / 3600
@@ -42,16 +53,15 @@ class TrainingStressService:
             intensity_factor = self._calculate_intensity_factor(activity)
             
             # Estimer FTP (Functional Threshold Power) eller bruk standard
-            # For løping kan vi estimere basert på VO2max eller bruke standard
             ftp_equivalent = self._estimate_ftp_equivalent(activity)
             
-            # Beregn TSS
+            # Beregn estimert TSS
             tss = (duration_hours * intensity_factor * intensity_factor) / (ftp_equivalent * 3600) * 100
             
-            # Begrens TSS til realistiske verdier
+            # Begrens estimert TSS til realistiske verdier
             tss = max(0, min(200, tss))
             
-            logger.info(f"TSS beregnet for aktivitet {activity.activity_id}: {tss:.1f}")
+            logger.info(f"Estimert TSS beregnet for aktivitet {activity.activity_id}: {tss:.1f}")
             return round(tss, 1)
             
         except Exception as e:
@@ -324,8 +334,27 @@ class TrainingStressService:
             tss_data = []
             for activity in activities:
                 try:
-                    # Forbedret TSS-beregning basert på aerob og anaerob Training Effect
-                    if activity.duration and activity.duration > 0:
+                    # Prioritet 1: Bruk EPOC hvis tilgjengelig
+                    if activity.epoc and activity.epoc > 0:
+                        # TSS er det samme som EPOC-verdien fra Garmin
+                        epoc_value = activity.epoc
+                        
+                        logger.info(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
+                                  f"EPOC={epoc_value}")
+                        
+                        tss_data.append({
+                            'date': activity.start_time.date(),
+                            'tss': round(epoc_value, 1),  # TSS = EPOC
+                            'activity_id': activity.activity_id,
+                            'activity_name': activity.activity_name,
+                            'duration': activity.duration,
+                            'distance': activity.distance,
+                            'epoc': epoc_value,
+                            'calculation_method': 'epoc'
+                        })
+                        
+                    # Prioritet 2: Fallback til estimert TSS basert på Training Effect
+                    elif activity.duration and activity.duration > 0:
                         duration_hours = activity.duration / 3600
                         
                         # Bruk Training Effect direkte for TSS-beregning
@@ -333,44 +362,34 @@ class TrainingStressService:
                         anaerobic_te = activity.total_anaerobic_training_effect or 0
                         
                         # Kombiner aerob og anaerob Training Effect
-                        # Aerob TE har større vekt siden den representerer hoveddelen av energiforbruket
                         total_intensity = (aerobic_te * 0.8) + (anaerobic_te * 0.2)
                         
                         # Beregn TSS direkte basert på Training Effect og varighet
-                        # Høyere Training Effect = høyere TSS
-                        base_tss_per_hour = 10  # Base TSS per time for moderat intensitet
+                        base_tss_per_hour = 10
+                        intensity_multiplier = total_intensity / 3.0
+                        intensity_multiplier = max(0.5, min(2.0, intensity_multiplier))
                         
-                        # Juster basert på total intensitet
-                        intensity_multiplier = total_intensity / 3.0  # Normaliser til 3.0 som referanse
-                        intensity_multiplier = max(0.5, min(2.0, intensity_multiplier))  # Begrens til 0.5-2.0
-                        
-                        # Reduser tidsdimensjonen til 50% av den nåværende verdien
                         adjusted_duration_hours = duration_hours * 0.5
-                        
-                        # Ny TSS-formel: Intensitet får større vekt, tid mindre vekt
-                        # TSS = (justert_tid * base_TSS * intensitet^2)
-                        # Dette gir intensitet kvadratisk vekt i stedet for lineær
                         tss = adjusted_duration_hours * base_tss_per_hour * (intensity_multiplier ** 2)
                         tss = max(0, min(200, tss))
                         
-                        logger.info(f"TSS beregnet for aktivitet {activity.activity_id}: "
-                                  f"varighet={duration_hours:.2f}h, justert_varighet={adjusted_duration_hours:.2f}h, "
-                                  f"aerob_TE={aerobic_te}, anaerob_TE={anaerobic_te}, "
-                                  f"total_intensity={total_intensity:.2f}, "
-                                  f"intensity_multiplier={intensity_multiplier:.2f}, "
-                                  f"intensity_squared={intensity_multiplier**2:.2f}, TSS={tss:.1f}")
+                        logger.info(f"Estimert TSS for aktivitet {activity.activity_id}: "
+                                  f"varighet={duration_hours:.2f}h, aerob_TE={aerobic_te}, "
+                                  f"anaerob_TE={anaerobic_te}, estimert_TSS={tss:.1f}")
                         
                         tss_data.append({
                             'date': activity.start_time.date(),
-                            'tss': round(tss, 1),
+                            'tss': round(tss, 1),  # Estimert TSS
                             'activity_id': activity.activity_id,
                             'activity_name': activity.activity_name,
                             'duration': activity.duration,
                             'distance': activity.distance,
                             'aerobic_te': aerobic_te,
                             'anaerobic_te': anaerobic_te,
-                            'total_intensity': round(total_intensity, 2)
+                            'total_intensity': round(total_intensity, 2),
+                            'calculation_method': 'training_effect'
                         })
+                        
                 except Exception as e:
                     logger.warning(f"Kunne ikke beregne TSS for aktivitet {activity.activity_id}: {e}")
                     continue

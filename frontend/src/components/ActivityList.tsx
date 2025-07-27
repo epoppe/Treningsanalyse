@@ -36,7 +36,13 @@ const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
   background-color: ${({ $statKey, $value }) => {
     if ($value === null || $value === undefined) return '#f8f9fa'; // default gray
 
-    if ($statKey === 'decoupling' || $statKey === 'negative_split') {
+    if ($statKey === 'decoupling') {
+      if ($value > 10) return '#fee2e2'; // red-100 for high decoupling
+      if ($value >= 5) return '#fef9c3'; // yellow-100 for moderate decoupling
+      return '#dcfce7'; // green-100 for low decoupling
+    }
+    
+    if ($statKey === 'negative_split') {
       return $value > 0 ? '#fee2e2' : '#dcfce7'; // red-100 for positive, green-100 for negative
     }
 
@@ -46,13 +52,32 @@ const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
       return '#dcfce7'; // green-100
     }
 
-    if ($statKey === 'training_effect') {
+    if ($statKey === 'aerobic_effect') {
       if ($value < 2.0) return '#f8f9fa'; // gray - Minimal effect
-      if ($value < 3.0) return '#dcfce7'; // green-100 - Aerobic benefit
-      if ($value < 4.0) return '#dbeafe'; // blue-100 - High aerobic benefit
+      if ($value < 3.0) return '#dbeafe'; // blue-100 - Aerobic benefit
+      if ($value < 4.0) return '#dcfce7'; // green-100 - High aerobic benefit
       if ($value < 5.0) return '#fef9c3'; // yellow-100 - Very high aerobic benefit
       return '#fee2e2'; // red-100 - Overreaching
     }
+
+    if ($statKey === 'anaerobic_effect') {
+      if ($value < 2.0) return '#f8f9fa'; // gray - Minimal effect
+      if ($value < 3.0) return '#dbeafe'; // blue-100 - Anaerobic benefit
+      if ($value < 4.0) return '#dcfce7'; // green-100 - High anaerobic benefit
+      if ($value < 5.0) return '#fef9c3'; // yellow-100 - Very high anaerobic benefit
+      return '#fee2e2'; // red-100 - Overreaching
+    }
+
+    if ($statKey === 'epoc') {
+      if ($value < 50) return '#f8f9fa'; // gray - Very low load
+      if ($value < 100) return '#dbeafe'; // blue-100 - Low load
+      if ($value < 200) return '#dcfce7'; // green-100 - Moderate load
+      if ($value < 300) return '#fef9c3'; // yellow-100 - High load
+      if ($value < 400) return '#fee2e2'; // red-100 - Very high load
+      return '#7f1d1d'; // red-900 - Extremely high load
+    }
+
+
 
     if ($statKey === 'readiness') {
       if ($value >= 80) return '#dcfce7'; // green-100 - Optimal
@@ -270,9 +295,33 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     return `${Math.round(hrv)}`;
   };
 
-  const formatTrainingEffect = (trainingEffect?: number) => {
-    if (!trainingEffect || trainingEffect <= 0) return 'N/A';
-    return trainingEffect.toFixed(1);
+  const formatAerobicEffect = (aerobicEffect?: number) => {
+    if (!aerobicEffect || aerobicEffect <= 0) return 'N/A';
+    return aerobicEffect.toFixed(1);
+  };
+
+  const formatAnaerobicEffect = (anaerobicEffect?: number) => {
+    if (!anaerobicEffect || anaerobicEffect <= 0) return 'N/A';
+    return anaerobicEffect.toFixed(1);
+  };
+
+  // Formaterer EPOC-verdier (som også brukes som TSS)
+  const formatEpoc = (epoc?: number) => {
+    if (!epoc || epoc <= 0) return 'N/A';
+    return Math.round(epoc).toString();
+  };
+
+
+
+  const formatLactateThreshold = (lactateSpeed?: number) => {
+    if (lactateSpeed === null || lactateSpeed === undefined || isNaN(lactateSpeed)) {
+      return 'N/A';
+    }
+    // Konverter m/s til min/km for bedre lesbarhet
+    const paceMinPerKm = 60 / (lactateSpeed * 3.6);
+    const minutes = Math.floor(paceMinPerKm);
+    const seconds = Math.round((paceMinPerKm - minutes) * 60);
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
   const formatReadiness = (readiness?: {score: number, status: string} | null) => {
@@ -392,10 +441,28 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                   rawValue: hrvValue
                 },
                 {
-                  key: 'training_effect',
-                  label: 'Training Effect',
-                  value: formatTrainingEffect(activity.totalTrainingEffect),
+                  key: 'aerobic_effect',
+                  label: 'Aerob effekt',
+                  value: formatAerobicEffect(activity.totalTrainingEffect),
                   rawValue: activity.totalTrainingEffect
+                },
+                {
+                  key: 'anaerobic_effect',
+                  label: 'Anaerob effekt',
+                  value: formatAnaerobicEffect(activity.totalAnaerobicTrainingEffect),
+                  rawValue: activity.totalAnaerobicTrainingEffect
+                },
+                {
+                  key: 'epoc',
+                  label: 'EPOC/TSS',
+                  value: formatEpoc(activity.epoc),
+                  rawValue: activity.epoc
+                },
+                {
+                  key: 'lactateThresholdSpeed',
+                  label: 'Lactate Threshold',
+                  value: formatLactateThreshold(activity.lactateThresholdSpeed),
+                  rawValue: activity.lactateThresholdSpeed
                 },
                 {
                   key: 'readiness',

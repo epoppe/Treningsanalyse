@@ -22,5 +22,7 @@ export interface Activity {
   trainingReadinessScore?: number;
   totalTrainingEffect?: number;
   totalAnaerobicTrainingEffect?: number;
+  epoc?: number;  // Exercise Post Oxygen Consumption (Training Load) - også brukt som TSS
+  lactateThresholdSpeed?: number;  // Lactate threshold speed in m/s
   details?: { [key: string]: any };
 } 

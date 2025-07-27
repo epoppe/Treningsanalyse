@@ -52,10 +52,12 @@ class Activity(Base):
     intensity_factor = Column(Float, nullable=True)
     total_training_effect = Column(Float, nullable=True)  # Aerobic Training Effect (1.0-5.0)
     total_anaerobic_training_effect = Column(Float, nullable=True)  # Anaerobic Training Effect (1.0-5.0)
+    epoc = Column(Float, nullable=True)  # Exercise Post Oxygen Consumption (Training Load)
     
     # Fysiologiske målinger
     vo2_max = Column(Float, nullable=True)
     lactate_threshold_heart_rate = Column(Float, nullable=True)
+    lactate_threshold_speed = Column(Float, nullable=True)  # m/s
     recovery_time = Column(Integer, nullable=True)  # timer
     
     # Værforhold

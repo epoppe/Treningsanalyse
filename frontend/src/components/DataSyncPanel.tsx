@@ -111,9 +111,9 @@ const DataSyncPanel = () => {
               message += ` | ${hrvStatus}`;
             }
             
-            // Vis Training Effect synkroniseringsstatus hvis tilgjengelig
+            // Vis Aerob/Anaerob effekt synkroniseringsstatus hvis tilgjengelig
             if (statusData.result?.summary?.te_synced !== undefined) {
-              const teStatus = statusData.result.summary.te_synced ? 'Training Effect synkronisert' : 'Training Effect sjekket (ingen oppdateringer nødvendig)';
+              const teStatus = statusData.result.summary.te_synced ? 'Aerob/Anaerob effekt synkronisert' : 'Aerob/Anaerob effekt sjekket (ingen oppdateringer nødvendig)';
               message += ` | ${teStatus}`;
             }
             
@@ -179,10 +179,10 @@ const DataSyncPanel = () => {
       </InputGroup>
       <ButtonGroup>
         <Button onClick={handleSync} disabled={isLoading || !startDate || !endDate}>
-          {isLoading ? 'Opptatt...' : 'Synk valgt periode (inkl. HRV & Training Effect)'}
+          {isLoading ? 'Opptatt...' : 'Synk valgt periode (inkl. HRV & Aerob/Anaerob effekt)'}
         </Button>
         <Button onClick={handleSync30Days} disabled={isLoading}>
-          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager (inkl. HRV & Training Effect)'}
+          {isLoading ? 'Opptatt...' : 'Synk siste 30 dager (inkl. HRV & Aerob/Anaerob effekt)'}
         </Button>
       </ButtonGroup>
       {statusMessage && <StatusMessage>{statusMessage}</StatusMessage>}
