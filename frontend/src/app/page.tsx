@@ -3,24 +3,44 @@
 import { useState, useEffect, useMemo } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActivities, setLoadedCount, Activity } from '../store/slices/activitiesSlice';
+import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActivities, setLoadedCount, Activity, resetActivitiesState } from '../store/slices/activitiesSlice';
 import { selectAllActivities, selectActivitiesStatus, selectActivitiesError, selectActivitiesTotalCount, selectActivitiesLoadedCount } from '../store/slices/activitiesSlice';
 import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
 import DataSyncPanel from '../components/DataSyncPanel';
 import RunningEconomyTable from '../components/RunningEconomyTable';
-import TrainingReadiness from '../components/TrainingReadiness';
 
 const MainContainer = styled.div`
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1rem;
 `;
 
 const Title = styled.h1`
   font-size: 2.5rem;
   color: #333;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
+`;
+
+const HeaderContainer = styled.div`
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+`;
+
+const TitleContainer = styled.div`
+  flex: 1;
+  min-width: 300px;
+`;
+
+const StatusInfo = styled.div`
+  font-size: 0.9rem;
+  color: #666;
+  text-align: right;
+  white-space: nowrap;
 `;
 
 const Header = styled.header`
@@ -34,7 +54,7 @@ const Subtitle = styled.p`
 `;
 
 const FiltersContainer = styled.div`
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
@@ -44,14 +64,14 @@ const FiltersContainer = styled.div`
 
 const FilterSection = styled.div`
   background: white;
-  padding: 1rem;
+  padding: 0.5rem;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   min-width: 300px;
 `;
 
 const FilterTitle = styled.h3`
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.25rem 0;
   color: #2c3e50;
   font-size: 1rem;
 `;
@@ -59,16 +79,16 @@ const FilterTitle = styled.h3`
 const CheckboxContainer = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
 `;
 
 const CheckboxLabel = styled.label`
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.25rem;
   cursor: pointer;
-  padding: 0.25rem 0.5rem;
+  padding: 0.125rem 0.25rem;
   border-radius: 4px;
   transition: background-color 0.2s;
   
@@ -115,25 +135,7 @@ const ClearAllButton = styled.button`
   }
 `;
 
-const RefreshButton = styled.button`
-  padding: 0.5rem 1rem;
-  background: #27ae60;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  margin-bottom: 1rem;
 
-  &:hover {
-    background: #219a52;
-  }
-
-  &:disabled {
-    background: #95a5a6;
-    cursor: not-allowed;
-  }
-`;
 
 const LoadMoreButton = styled.button`
   padding: 0.5rem 1rem;
@@ -155,15 +157,9 @@ const LoadMoreButton = styled.button`
   }
 `;
 
-const ActivityStatus = styled.div`
-  text-align: center;
-  margin: 1rem 0;
-  padding: 0.5rem;
-  background: #f8f9fa;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  color: #666;
-`;
+
+
+
 
 const ButtonContainer = styled.div`
   display: flex;
@@ -172,18 +168,6 @@ const ButtonContainer = styled.div`
   margin: 1rem 0;
   flex-wrap: wrap;
 `;
-
-const SelectedTypesDisplay = styled.div`
-  margin-top: 0.5rem;
-  padding: 0.5rem;
-  background: #f8f9fa;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  color: #666;
-  min-height: 1.5rem;
-`;
-
-
 
 export default function Home() {
   const dispatch = useAppDispatch();
@@ -197,6 +181,7 @@ export default function Home() {
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
   const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
   const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
+  const [timeFilter, setTimeFilter] = useState<'all' | '12months' | '3months'>('all');
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
@@ -254,11 +239,14 @@ export default function Home() {
         dispatch(fetchAllActivities({ forceRefresh: false, count: savedCount }));
         dispatch(setLoadedCount(savedCount));
       } else {
-        // Standard: hent 100 aktiviteter
-        dispatch(fetchActivities());
+        // Standard: hent alle aktiviteter (1517 totalt)
+        dispatch(fetchAllActivities({ forceRefresh: false, count: 2000 }));
       }
       
+      // Hent aktivitetsantall separat (påvirker ikke hovedstatus)
       dispatch(fetchActivityCount());
+      
+      // Sett hasRestoredFromStorage til true umiddelbart
       setHasRestoredFromStorage(true);
     }
   }, [dispatch, status, hasRestoredFromStorage]);
@@ -291,8 +279,11 @@ export default function Home() {
       );
     }
 
+    // Filtrer på tid
+    tempActivities = getFilteredActivitiesByTime(tempActivities);
+
     setFilteredActivities(tempActivities);
-  }, [activities, selectedActivityTypes, loadedCount]);
+  }, [activities, selectedActivityTypes, loadedCount, timeFilter]);
 
   useEffect(() => {
     // Lagre loadedCount i localStorage når den endres
@@ -323,7 +314,12 @@ export default function Home() {
   const handleRefreshActivities = () => {
     // Reset localStorage når vi refresher aktiviteter
     localStorage.removeItem('activitiesLoadedCount');
-    dispatch(fetchActivities({ forceRefresh: true }));
+    // Tøm aktivitetene først for å sikre at refresh fungerer riktig
+    dispatch(resetActivitiesState());
+    // Sett timeFilter til 'all' for å vise alle aktiviteter
+    setTimeFilter('all');
+    // Hent aktiviteter på nytt
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
   };
 
   const handleLoadMoreActivities = () => {
@@ -337,6 +333,29 @@ export default function Home() {
     }
   };
 
+  const handleTimeFilterChange = (filter: 'all' | '12months' | '3months') => {
+    setTimeFilter(filter);
+  };
+
+  const getFilteredActivitiesByTime = (activities: Activity[]) => {
+    const now = new Date();
+    
+    switch (timeFilter) {
+      case '12months':
+        const twelveMonthsAgo = new Date();
+        twelveMonthsAgo.setMonth(now.getMonth() - 12);
+        return activities.filter(activity => new Date(activity.startTimeLocal) >= twelveMonthsAgo);
+      
+      case '3months':
+        const threeMonthsAgo = new Date();
+        threeMonthsAgo.setMonth(now.getMonth() - 3);
+        return activities.filter(activity => new Date(activity.startTimeLocal) >= threeMonthsAgo);
+      
+      default:
+        return activities;
+    }
+  };
+
   if (status === 'loading') {
     return <div>Laster aktiviteter...</div>;
   }
@@ -347,17 +366,30 @@ export default function Home() {
 
   return (
     <MainContainer>
-      <Title>Treningsdagbok</Title>
-      <DataSyncPanel />
+      <HeaderContainer>
+        <TitleContainer>
+          <Title>Treningsdagbok</Title>
+        </TitleContainer>
+        {totalCount !== null && (
+          <StatusInfo>
+            Viser {filteredActivities.length} av {loadedCount} aktiviteter
+            {timeFilter !== 'all' && (
+              <span style={{ color: '#3498db', fontWeight: 'bold' }}>
+                {timeFilter === '12months' ? ' (filtrert: siste 12 måneder)' : ' (filtrert: siste 3 måneder)'}
+              </span>
+            )}
+            {loadedCount > 100 && ` (gjenopprettet fra tidligere sesjon)`}
+          </StatusInfo>
+        )}
+      </HeaderContainer>
+      <DataSyncPanel 
+        onTimeFilterChange={handleTimeFilterChange}
+        currentTimeFilter={timeFilter}
+        onRefreshActivities={handleRefreshActivities}
+        isRefreshing={status === 'loading'}
+      />
       
       <ButtonContainer>
-        <RefreshButton 
-          onClick={handleRefreshActivities}
-          disabled={status === 'loading'}
-        >
-          {status === 'loading' ? 'Laster...' : 'Last inn nye aktiviteter (150 nyeste)'}
-        </RefreshButton>
-        
         {showLoadMoreButton && (
           <>
             <LoadMoreButton 
@@ -377,15 +409,7 @@ export default function Home() {
             )}
           </>
         )}
-      </ButtonContainer>
-
-      {totalCount !== null && (
-        <ActivityStatus>
-          Viser {loadedCount} av {totalCount} aktiviteter
-          {loadedCount > 100 && ` (gjenopprettet fra tidligere sesjon)`}
-          {showLoadMoreButton && ` - Klikk "Last flere aktiviteter" for å se ${Math.min(500, totalCount - loadedCount)} til`}
-        </ActivityStatus>
-      )}
+             </ButtonContainer>
       
       <FiltersContainer>
         <FilterSection>
@@ -406,24 +430,10 @@ export default function Home() {
               </CheckboxLabel>
             ))}
           </CheckboxContainer>
-          <SelectedTypesDisplay>
-            Valgte typer: {selectedActivityTypes.length === 0 
-              ? 'Ingen valgt' 
-              : selectedActivityTypes.map(typeKey => {
-                  const typePair = activityTypes.find(([key]) => key === typeKey);
-                  return typePair ? typePair[1] : typeKey;
-                }).join(', ')
-            }
-          </SelectedTypesDisplay>
         </FilterSection>
       </FiltersContainer>
 
-      <TrainingReadiness showDetails={false} />
-      <div style={{ textAlign: 'center', marginTop: '1rem' }}>
-        <p style={{ color: '#6b7280', fontSize: '0.875rem' }}>
-          💡 Se detaljert daglig readiness på <a href="/daglig-readiness" style={{ color: '#3b82f6', textDecoration: 'underline' }}>Daglig Readiness</a> siden
-        </p>
-      </div>
+
       <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />
       <RunningEconomyTable activities={filteredActivities} />
       <ActivityList activities={filteredActivities} />
