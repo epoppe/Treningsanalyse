@@ -183,15 +183,15 @@ const activitiesSlice = createSlice({
       })
       // fetchActivityCount
       .addCase(fetchActivityCount.pending, (state) => {
-        state.status = 'loading';
+        // Ikke endre hovedstatus for count-kall
         state.error = null;
       })
       .addCase(fetchActivityCount.fulfilled, (state, action: PayloadAction<number>) => {
-        state.status = 'succeeded';
+        // Ikke endre hovedstatus for count-kall
         state.totalCount = action.payload;
       })
       .addCase(fetchActivityCount.rejected, (state, action) => {
-        state.status = 'failed';
+        // Ikke endre hovedstatus for count-kall
         state.error = action.payload as string || 'Kunne ikke hente aktivitetsantall';
       })
       // fetchAllActivities

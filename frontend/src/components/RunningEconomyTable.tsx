@@ -4,17 +4,18 @@ import styled from 'styled-components';
 import { Activity } from '../store/slices/activitiesSlice';
 
 const TableContainer = styled.div`
-  margin-top: 2rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.1rem;
   background: white;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1rem;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
 `;
 
 const TableTitle = styled.h2`
   font-size: 1.5rem;
   color: #2c3e50;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 `;
 
 const StyledTable = styled.table`
@@ -98,4 +99,4 @@ const RunningEconomyTable = ({ activities }: RunningEconomyTableProps) => {
   );
 };
 
-export default RunningEconomyTable; 
+export default RunningEconomyTable;

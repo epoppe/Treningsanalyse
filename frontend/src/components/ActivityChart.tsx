@@ -19,7 +19,7 @@ const ChartContainer = styled.div`
   padding: 1rem;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+  margin-bottom: 0.5rem;
   height: 400px;
 `;
 
@@ -32,6 +32,7 @@ interface ActivityChartProps {
   activities: Activity[];
   metric: 'distance' | 'duration' | 'calories';
   title: string;
+  useDynamicYAxis?: boolean;
 }
 
 const CustomAxisTick = ({ x, y, payload, data }: any) => {
@@ -51,7 +52,7 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   return null;
 };
 
-export default function ActivityChart({ activities, metric, title }: ActivityChartProps) {
+export default function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
   if (activities.length === 0) {
     return (
       <ChartContainer>
@@ -154,6 +155,17 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
     });
   }
 
+  // Beregn dynamisk Y-akse hvis ønsket
+  const getYAxisDomain = () => {
+    if (useDynamicYAxis && metric === 'distance') {
+      const maxValue = Math.max(...chartData.map(d => d[metric] || 0));
+      // Bruk mindre intervaller for bedre skala
+      const roundedMax = Math.ceil(maxValue / 25) * 25; // Runder opp til nærmeste 25
+      return [0, Math.max(roundedMax, 50)]; // Minimum 50km
+    }
+    return [0, 450]; // Fast maksimum for "vis alle"
+  };
+
   const getYAxisLabel = () => {
     switch (metric) {
       case 'distance':
@@ -185,6 +197,7 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
               angle: -90,
               position: 'insideLeft'
             }}
+            domain={getYAxisDomain()}
           />
           <Tooltip
             content={({ active, payload, label }) => {
@@ -204,7 +217,6 @@ export default function ActivityChart({ activities, metric, title }: ActivityCha
               return null;
             }}
           />
-          <Legend />
           <Bar
             dataKey={metric}
             fill="#3498db"

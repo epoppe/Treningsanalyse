@@ -302,9 +302,14 @@ class SyncService:
                 # Oppdater sammendrag for perioden som ble synkronisert
                 summary_service.bulk_update_summaries(start_date.date(), end_date.date())
                 
+                # Oppdater også alle månedlige sammendrag for å sikre at de er à jour
+                logger.info("Oppdaterer alle månedlige sammendrag...")
+                monthly_count = summary_service.calculate_monthly_summaries()
+                logger.info(f"Oppdatert {monthly_count} månedlige sammendrag")
+                
                 summary_result = {
                     "status": "Fullført", 
-                    "message": f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()}"
+                    "message": f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()}, {monthly_count} månedlige sammendrag oppdatert"
                 }
                 logger.info("Sammendragstabeller oppdatert automatisk")
             except Exception as e:

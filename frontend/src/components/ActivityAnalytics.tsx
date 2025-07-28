@@ -41,7 +41,10 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        setLoading(true);
+        // Bare sett loading til true hvis vi ikke har data ennå
+        if (!negativeSplit && !decoupling) {
+          setLoading(true);
+        }
         
         // Hent negativ split data
         try {
@@ -104,7 +107,7 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
     }
   };
 
-  if (loading) {
+  if (loading && !negativeSplit && !decoupling) {
     return (
       <Card>
         <Title>Løpsanalyse</Title>

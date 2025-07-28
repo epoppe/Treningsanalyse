@@ -251,7 +251,6 @@ const StatistikkPage = () => {
   const startOf2022Date = useMemo(() => {
     return new Date('2022-01-01');
   }, []);
-
   // Filtrer aktiviteter basert på valgte typer og siste 12 måneder
   const filteredActivities = useMemo(() => {
     let tempActivities = activities.filter(activity => {
@@ -462,21 +461,6 @@ const StatistikkPage = () => {
     <Container>
       <Header>
         <Title>Treningsstatistikk - Siste 12 måneder</Title>
-        <Subtitle>Oversikt over dine treningsprestasjoner</Subtitle>
-        <div style={{ 
-          marginTop: '1rem', 
-          padding: '0.75rem', 
-          backgroundColor: '#e8f5e8', 
-          border: '1px solid #27ae60',
-          borderRadius: '6px',
-          fontSize: '0.9rem',
-          color: '#2c3e50',
-          textAlign: 'center',
-          maxWidth: '600px',
-          margin: '1rem auto 0'
-        }}>
-          <strong>✓ Forbedret nøyaktighet:</strong> Sammendragene filtrerer automatisk ut duplikater basert på activity_id for å sikre korrekte statistikk.
-        </div>
       </Header>
 
       <FiltersContainer>

@@ -16,45 +16,35 @@ const MainContainer = styled.div`
   padding: 1rem;
 `;
 
-const Title = styled.h1`
-  font-size: 2.5rem;
-  color: #333;
-  margin-bottom: 1rem;
-`;
-
-const HeaderContainer = styled.div`
+const ButtonContainer = styled.div`
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
   gap: 1rem;
+  margin-bottom: 0.25rem;
+  justify-content: center;
+  flex-wrap: wrap;
 `;
 
-const TitleContainer = styled.div`
-  flex: 1;
-  min-width: 300px;
-`;
+const LoadMoreButton = styled.button`
+  background-color: #007bff;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 14px;
 
-const StatusInfo = styled.div`
-  font-size: 0.9rem;
-  color: #666;
-  text-align: right;
-  white-space: nowrap;
-`;
+  &:hover {
+    background-color: #0056b3;
+  }
 
-const Header = styled.header`
-  margin-bottom: 2rem;
-  text-align: center;
-`;
-
-const Subtitle = styled.p`
-  color: #666;
-  font-size: 1.125rem;
+  &:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+  }
 `;
 
 const FiltersContainer = styled.div`
-  margin-bottom: 1rem;
+  margin-bottom: 0.25rem;
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
@@ -133,40 +123,6 @@ const ClearAllButton = styled.button`
   &:hover {
     background: #c0392b;
   }
-`;
-
-
-
-const LoadMoreButton = styled.button`
-  padding: 0.5rem 1rem;
-  background: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  margin: 1rem 0;
-
-  &:hover {
-    background: #2980b9;
-  }
-
-  &:disabled {
-    background: #95a5a6;
-    cursor: not-allowed;
-  }
-`;
-
-
-
-
-
-const ButtonContainer = styled.div`
-  display: flex;
-  gap: 1rem;
-  justify-content: center;
-  margin: 1rem 0;
-  flex-wrap: wrap;
 `;
 
 export default function Home() {
@@ -366,27 +322,12 @@ export default function Home() {
 
   return (
     <MainContainer>
-      <HeaderContainer>
-        <TitleContainer>
-          <Title>Treningsdagbok</Title>
-        </TitleContainer>
-        {totalCount !== null && (
-          <StatusInfo>
-            Viser {filteredActivities.length} av {loadedCount} aktiviteter
-            {timeFilter !== 'all' && (
-              <span style={{ color: '#3498db', fontWeight: 'bold' }}>
-                {timeFilter === '12months' ? ' (filtrert: siste 12 måneder)' : ' (filtrert: siste 3 måneder)'}
-              </span>
-            )}
-            {loadedCount > 100 && ` (gjenopprettet fra tidligere sesjon)`}
-          </StatusInfo>
-        )}
-      </HeaderContainer>
       <DataSyncPanel 
         onTimeFilterChange={handleTimeFilterChange}
         currentTimeFilter={timeFilter}
         onRefreshActivities={handleRefreshActivities}
         isRefreshing={status === 'loading'}
+        activityCount={totalCount !== null ? `Viser ${filteredActivities.length} av ${loadedCount} aktiviteter` : undefined}
       />
       
       <ButtonContainer>
@@ -434,7 +375,12 @@ export default function Home() {
       </FiltersContainer>
 
 
-      <ActivityChart activities={filteredActivities} metric="distance" title="Distanse over tid" />
+      <ActivityChart 
+        activities={filteredActivities} 
+        metric="distance" 
+        title="Distanse over tid" 
+        useDynamicYAxis={timeFilter !== 'all'}
+      />
       <RunningEconomyTable activities={filteredActivities} />
       <ActivityList activities={filteredActivities} />
     </MainContainer>

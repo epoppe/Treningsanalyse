@@ -34,20 +34,12 @@ const Container = styled.div`
   padding: 1rem;
 `;
 
-const Title = styled.h1`
-  color: #2c3e50;
-  text-align: center;
-  margin-bottom: 1rem;
-  font-size: 2rem;
-`;
-
 const DateRangeSelector = styled.div`
   display: flex;
-  justify-content: center;
   gap: 0.5rem;
-  margin-bottom: 1rem;
   align-items: center;
   flex-wrap: wrap;
+  margin-right: 1rem;
 `;
 
 const DateInput = styled.input`
@@ -77,38 +69,73 @@ const Button = styled.button`
   }
 `;
 
-const MetricsGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+const TopSection = styled.div`
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
   gap: 1rem;
-  margin-bottom: 1rem;
 `;
 
-const MetricCard = styled.div`
+const MetricsGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  flex: 1;
+  grid-template-areas: 
+    "card1 card2 card3 card4"
+    "card5 card6 card7 card8";
+`;
+
+const MetricCard = styled.div<{ $tooltip?: string }>`
   background: white;
   border-radius: 8px;
-  padding: 0.75rem;
+  padding: 0.25rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border-left: 4px solid #3498db;
+  position: relative;
+  cursor: help;
+
+  &:hover::after {
+    content: "${props => props.$tooltip || ''}";
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+    z-index: 1000;
+    margin-bottom: 0.5rem;
+  }
+
+  &:hover::before {
+    content: '';
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-top-color: #333;
+    z-index: 1000;
+    margin-bottom: -0.5rem;
+  }
 `;
 
 const MetricTitle = styled.h3`
   color: #2c3e50;
-  margin-bottom: 0.25rem;
-  font-size: 0.8rem;
+  margin-bottom: 0.125rem;
+  font-size: 0.75rem;
   font-weight: 600;
 `;
 
 const MetricValue = styled.div`
-  font-size: 1.3rem;
+  font-size: 1.1rem;
   font-weight: bold;
   color: #3498db;
-  margin-bottom: 0.125rem;
-`;
-
-const MetricLabel = styled.div`
-  color: #666;
-  font-size: 0.7rem;
+  margin-bottom: 0;
 `;
 
 const ChartContainer = styled.div`
@@ -121,7 +148,7 @@ const ChartContainer = styled.div`
 
 const ChartWrapper = styled.div`
   position: relative;
-  height: 450px;
+  height: 675px;
   width: 100%;
   margin-top: 0.5rem;
 `;
@@ -203,28 +230,28 @@ const ActivityDetails = styled.div`
   font-size: 0.9rem;
 `;
 
-const TSSValue = styled.div<{ tss: number }>`
+const TSSValue = styled.div<{ $tss: number }>`
   font-weight: bold;
   color: ${props => {
     // EPOC-baserte verdier: 50-400 er typisk for løping
-    if (props.tss >= 300) return '#8b0000'; // Mørk rød for svært høy TSS
-    if (props.tss >= 200) return '#e74c3c'; // Rød for høy TSS
-    if (props.tss >= 100) return '#f39c12'; // Oransje for moderat TSS
-    if (props.tss >= 50) return '#27ae60'; // Grønn for lav TSS
+    if (props.$tss >= 300) return '#8b0000'; // Mørk rød for svært høy TSS
+    if (props.$tss >= 200) return '#e74c3c'; // Rød for høy TSS
+    if (props.$tss >= 100) return '#f39c12'; // Oransje for moderat TSS
+    if (props.$tss >= 50) return '#27ae60'; // Grønn for lav TSS
     return '#95a5a6'; // Grå for svært lav TSS
   }};
   font-size: 1rem;
 `;
 
-const FormIndicator = styled.div<{ form: number }>`
+const FormIndicator = styled.div<{ $form: number }>`
   padding: 0.25rem 0.75rem;
   border-radius: 4px;
   font-weight: bold;
   color: white;
   font-size: 0.8rem;
   background: ${props => {
-    if (props.form >= 10) return '#27ae60'; // Grønn - god form
-    if (props.form >= 0) return '#f39c12'; // Oransje - nøytral
+    if (props.$form >= 10) return '#27ae60'; // Grønn - god form
+    if (props.$form >= 0) return '#f39c12'; // Oransje - nøytral
     return '#e74c3c'; // Rød - tretthet
   }};
 `;
@@ -356,93 +383,86 @@ const TrainingStressPage: React.FC = () => {
 
   return (
     <Container>
-      <Title>📊 Training Stress Score (EPOC-basert)</Title>
-      
-      <DateRangeSelector>
-        <label htmlFor="start-date">Fra:</label>
-        <DateInput
-          id="start-date"
-          type="date"
-          value={startDate}
-          onChange={handleDateChange('start')}
-          max={endDate}
-        />
-        <label htmlFor="end-date">Til:</label>
-        <DateInput
-          id="end-date"
-          type="date"
-          value={endDate}
-          onChange={handleDateChange('end')}
-          max={new Date().toISOString().split('T')[0]}
-        />
-        <Button onClick={fetchTrainingStressData} disabled={loading}>
-          {loading ? 'Henter...' : 'Oppdater'}
-        </Button>
-      </DateRangeSelector>
-
-      {error && <ErrorMessage>{error}</ErrorMessage>}
-
       {loading ? (
         <LoadingSpinner />
       ) : data ? (
         <>
-          <MetricsGrid>
-            <MetricCard>
-              <MetricTitle>CTL (Chronic Training Load)</MetricTitle>
-              <MetricValue style={{ color: '#3498db' }}>
-                {data.summary.current_ctl}
-              </MetricValue>
-              <MetricLabel>42-dagers eksponentiell glidende gjennomsnitt</MetricLabel>
-            </MetricCard>
+          <TopSection>
+            <DateRangeSelector>
+              <label htmlFor="start-date">Fra:</label>
+              <DateInput
+                id="start-date"
+                type="date"
+                value={startDate}
+                onChange={handleDateChange('start')}
+                max={endDate}
+              />
+              <label htmlFor="end-date">Til:</label>
+              <DateInput
+                id="end-date"
+                type="date"
+                value={endDate}
+                onChange={handleDateChange('end')}
+                max={new Date().toISOString().split('T')[0]}
+              />
+              <Button onClick={fetchTrainingStressData} disabled={loading}>
+                {loading ? 'Henter...' : 'Oppdater'}
+              </Button>
+            </DateRangeSelector>
 
-            <MetricCard>
-              <MetricTitle>ATL (Acute Training Load)</MetricTitle>
-              <MetricValue style={{ color: '#e67e22' }}>
-                {data.summary.current_atl}
-              </MetricValue>
-              <MetricLabel>7-dagers eksponentiell glidende gjennomsnitt</MetricLabel>
-            </MetricCard>
+            <MetricsGrid>
+              <MetricCard $tooltip="42-dagers eksponentiell glidende gjennomsnitt" style={{ gridArea: 'card1' }}>
+                <MetricTitle>CTL (Chronic Training Load)</MetricTitle>
+                <MetricValue style={{ color: '#3498db' }}>
+                  {data.summary.current_ctl}
+                </MetricValue>
+              </MetricCard>
 
-            <MetricCard>
-              <MetricTitle>Form (Fitness/Fatigue)</MetricTitle>
-              <FormIndicator form={data.summary.current_form}>
-                {data.summary.current_form}
-              </FormIndicator>
-              <MetricLabel>{getFormStatus(data.summary.current_form)}</MetricLabel>
-            </MetricCard>
+              <MetricCard $tooltip="7-dagers eksponentiell glidende gjennomsnitt" style={{ gridArea: 'card2' }}>
+                <MetricTitle>ATL (Acute Training Load)</MetricTitle>
+                <MetricValue style={{ color: '#e67e22' }}>
+                  {data.summary.current_atl}
+                </MetricValue>
+              </MetricCard>
 
-            <MetricCard>
-              <MetricTitle>Total EPOC/TSS (Periode)</MetricTitle>
-              <MetricValue style={{ color: '#9b59b6' }}>
-                {data.summary.total_tss_period}
-              </MetricValue>
-              <MetricLabel>Kumulativ EPOC (brukes som TSS)</MetricLabel>
-            </MetricCard>
+              <MetricCard $tooltip={getFormStatus(data.summary.current_form)} style={{ gridArea: 'card3' }}>
+                <MetricTitle>Form (Fitness/Fatigue)</MetricTitle>
+                <FormIndicator $form={data.summary.current_form}>
+                  {data.summary.current_form}
+                </FormIndicator>
+              </MetricCard>
 
-            <MetricCard>
-              <MetricTitle>Gjennomsnittlig Daglig EPOC/TSS</MetricTitle>
-              <MetricValue style={{ color: '#f39c12' }}>
-                {data.summary.avg_daily_tss}
-              </MetricValue>
-              <MetricLabel>Per dag i perioden</MetricLabel>
-            </MetricCard>
+              <MetricCard $tooltip="Kumulativ EPOC (brukes som TSS)" style={{ gridArea: 'card4' }}>
+                <MetricTitle>Total EPOC/TSS (Periode)</MetricTitle>
+                <MetricValue style={{ color: '#9b59b6' }}>
+                  {data.summary.total_tss_period}
+                </MetricValue>
+              </MetricCard>
 
-            <MetricCard>
-              <MetricTitle>Høyeste Daglig TSS</MetricTitle>
-              <MetricValue style={{ color: '#e74c3c' }}>
-                {data.summary.max_daily_tss}
-              </MetricValue>
-              <MetricLabel>Maksimal daglig belastning</MetricLabel>
-            </MetricCard>
+              <MetricCard $tooltip="Per dag i perioden" style={{ gridArea: 'card5' }}>
+                <MetricTitle>Gjennomsnittlig Daglig EPOC/TSS</MetricTitle>
+                <MetricValue style={{ color: '#f39c12' }}>
+                  {data.summary.avg_daily_tss}
+                </MetricValue>
+              </MetricCard>
 
-            <MetricCard>
-              <MetricTitle>Aktivitetsdager</MetricTitle>
-              <MetricValue style={{ color: '#27ae60' }}>
-                {data.summary.days_with_activity} / {data.summary.total_days}
-              </MetricValue>
-              <MetricLabel>Dager med aktivitet i perioden</MetricLabel>
-            </MetricCard>
-          </MetricsGrid>
+              <MetricCard $tooltip="Maksimal daglig belastning" style={{ gridArea: 'card6' }}>
+                <MetricTitle>Høyeste Daglig TSS</MetricTitle>
+                <MetricValue style={{ color: '#e74c3c' }}>
+                  {data.summary.max_daily_tss}
+                </MetricValue>
+              </MetricCard>
+
+              <MetricCard $tooltip="Dager med aktivitet i perioden" style={{ gridArea: 'card7' }}>
+                <MetricTitle>Aktivitetsdager</MetricTitle>
+                <MetricValue style={{ color: '#27ae60' }}>
+                  {data.summary.days_with_activity} / {data.summary.total_days}
+                </MetricValue>
+              </MetricCard>
+            </MetricsGrid>
+          </TopSection>
+
+          {error && <ErrorMessage>{error}</ErrorMessage>}
 
           <ChartContainer>
             <ChartTitleStyled>Training Load Over Tid</ChartTitleStyled>
@@ -451,14 +471,16 @@ const TrainingStressPage: React.FC = () => {
                 data={{
                   labels: data.daily_data.map(day => formatDateForChart(day.date)),
                   datasets: [
-                    {
-                      label: 'CTL',
-                      data: data.daily_data.map(day => day.ctl),
-                      borderColor: '#3498db',
-                      backgroundColor: 'rgba(52, 152, 219, 0.2)',
-                      fill: true,
-                      tension: 0.4,
-                    },
+                                         {
+                       label: 'CTL',
+                       data: data.daily_data.map(day => day.ctl),
+                       borderColor: '#3498db',
+                       backgroundColor: 'rgba(52, 152, 219, 0.2)',
+                       fill: true,
+                       tension: 0.4,
+                       pointRadius: 0,
+                       pointHoverRadius: 0,
+                     },
                     {
                       label: 'ATL',
                       data: data.daily_data.map(day => day.atl),
@@ -488,6 +510,12 @@ const TrainingStressPage: React.FC = () => {
                   plugins: {
                     legend: {
                       position: 'top',
+                      align: 'start',
+                      labels: {
+                        boxWidth: 12,
+                        padding: 8,
+                        usePointStyle: true,
+                      },
                     },
                     tooltip: {
                       callbacks: {
@@ -573,6 +601,12 @@ const TrainingStressPage: React.FC = () => {
                   plugins: {
                     legend: {
                       position: 'top',
+                      align: 'start',
+                      labels: {
+                        boxWidth: 12,
+                        padding: 8,
+                        usePointStyle: true,
+                      },
                     },
                     tooltip: {
                       callbacks: {
@@ -628,10 +662,10 @@ const TrainingStressPage: React.FC = () => {
             </ChartWrapper>
           </ChartContainer>
 
-          <ActivityList>
-            <MetricTitle>Aktiviteter med EPOC/TSS</MetricTitle>
-            {data.activities.length > 0 ? (
-              data.activities.map((activity) => (
+                     <ActivityList>
+             <MetricTitle>Aktiviteter med EPOC/TSS</MetricTitle>
+             {data.activities.length > 0 ? (
+               data.activities.slice().reverse().map((activity) => (
                 <ActivityItem key={activity.activity_id}>
                   <ActivityInfo>
                     <ActivityName>{activity.activity_name}</ActivityName>
@@ -642,7 +676,7 @@ const TrainingStressPage: React.FC = () => {
                     </ActivityDetails>
                   </ActivityInfo>
                   <div style={{ textAlign: 'right' }}>
-                    <TSSValue tss={activity.tss}>
+                    <TSSValue $tss={activity.tss}>
                       {activity.tss}
                     </TSSValue>
                     <div style={{ fontSize: '0.8rem', color: '#666' }}>

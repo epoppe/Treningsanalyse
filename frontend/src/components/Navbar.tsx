@@ -6,22 +6,25 @@ import styled from 'styled-components';
 
 const Nav = styled.nav`
   background: #2c3e50;
-  padding: 1rem;
+  padding: 0.5rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 `;
 
 const NavContainer = styled.div`
-  max-width: 1200px;
-  margin: 0 auto;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: center;
+  gap: 4rem;
+  padding-left: 1rem;
 `;
 
 const Logo = styled.span`
   color: white;
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: bold;
+  line-height: 1;
+  display: flex;
+  align-items: center;
 `;
 
 const NavLinks = styled.div`
@@ -58,9 +61,6 @@ export default function Navbar() {
           </NavLink>
           <NavLink href="/ukesanalyse" $active={pathname === '/ukesanalyse'}>
             Løpsøkonomi
-          </NavLink>
-          <NavLink href="/grafer" $active={pathname === '/grafer'}>
-            Grafer
           </NavLink>
           <NavLink href="/hrv" $active={pathname === '/hrv'}>
             HRV

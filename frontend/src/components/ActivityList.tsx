@@ -9,7 +9,7 @@ import { HrvData } from '../types/hrv';
 
 
 const ActivityContainer = styled.div`
-  padding: 1rem;
+  padding: 0.5rem;
 `;
 
 const ActivityCardWrapper = styled.div`
@@ -79,13 +79,7 @@ const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
 
 
 
-    if ($statKey === 'readiness') {
-      if ($value >= 80) return '#dcfce7'; // green-100 - Optimal
-      if ($value >= 60) return '#dbeafe'; // blue-100 - Good
-      if ($value >= 40) return '#fef9c3'; // yellow-100 - Moderate
-      if ($value >= 20) return '#fee2e2'; // red-100 - Poor
-      return '#f3f4f6'; // gray-100 - Very poor
-    }
+
     
     return '#f8f9fa'; // default gray
   }};
@@ -133,9 +127,7 @@ interface ActivityListProps {
 const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   const router = useRouter();
   const [hrvData, setHrvData] = useState<{[activityId: string]: number | null}>({});
-  const [readinessData, setReadinessData] = useState<{[activityId: string]: {score: number, status: string} | null}>({});
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
-  const [isLoadingReadiness, setIsLoadingReadiness] = useState(false);
 
 
   useEffect(() => {
@@ -180,59 +172,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     fetchHrvDataForActivities();
   }, [activities]);
 
-  useEffect(() => {
-    const fetchReadinessDataForActivities = async () => {
-      if (activities.length === 0) {
-        setReadinessData({});
-        return;
-      }
-      setIsLoadingReadiness(true);
 
-      const readinessResults: {[activityId: string]: {score: number, status: string} | null} = {};
-      
-      const promises = activities.map(async (activity) => {
-        // Sjekk først om aktiviteten har en lagret readiness score
-        if (activity.trainingReadinessScore !== null && activity.trainingReadinessScore !== undefined) {
-          readinessResults[activity.activityId] = {
-            score: activity.trainingReadinessScore,
-            status: activity.trainingReadinessScore >= 80 ? 'optimal' : 
-                   activity.trainingReadinessScore >= 60 ? 'good' : 
-                   activity.trainingReadinessScore >= 40 ? 'moderate' : 
-                   activity.trainingReadinessScore >= 20 ? 'poor' : 'very_poor'
-          };
-          return;
-        }
-
-        // Hvis ikke lagret, hent fra API (kun for aktiviteter uten lagret score)
-        try {
-          const activityDate = new Date(activity.startTimeLocal);
-          const dateString = activityDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-          
-          const data = await activitiesApi.getTrainingReadinessStatus(dateString);
-          console.log(`[Readiness] Data for activity ${activity.activityId} on ${dateString}:`, data);
-          
-          if (data && data.total_score !== undefined) {
-            readinessResults[activity.activityId] = {
-              score: data.total_score,
-              status: data.readiness_status
-            };
-          } else {
-            readinessResults[activity.activityId] = null;
-          }
-        } catch (error: any) {
-          console.error(`Feil ved henting av readiness for aktivitet ${activity.activityId}:`, error);
-          readinessResults[activity.activityId] = null;
-        }
-      });
-
-      await Promise.all(promises);
-
-      setReadinessData(readinessResults);
-      setIsLoadingReadiness(false);
-    };
-
-    fetchReadinessDataForActivities();
-  }, [activities]);
 
 
 
@@ -321,13 +261,10 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     const paceMinPerKm = 60 / (lactateSpeed * 3.6);
     const minutes = Math.floor(paceMinPerKm);
     const seconds = Math.round((paceMinPerKm - minutes) * 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${seconds.toString().padStart(2, '0')} min/km`;
   };
 
-  const formatReadiness = (readiness?: {score: number, status: string} | null) => {
-    if (!readiness) return 'N/A';
-    return `${Math.round(readiness.score)}`;
-  };
+
 
   const calculatePace = (distance?: number, duration?: number) => {
     if (!distance || !duration || distance <= 0 || duration <= 0) return null;
@@ -376,7 +313,6 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     <ActivityContainer>
       {activities.map((activity) => {
         const hrvValue = hrvData[activity.activityId];
-        const readinessValue = readinessData[activity.activityId];
 
         return (
           <ActivityCard 
@@ -464,12 +400,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                   value: formatLactateThreshold(activity.lactateThresholdSpeed),
                   rawValue: activity.lactateThresholdSpeed
                 },
-                {
-                  key: 'readiness',
-                  label: 'Daglig Readiness',
-                  value: isLoadingReadiness ? 'Laster...' : formatReadiness(readinessValue),
-                  rawValue: readinessValue?.score
-                }
+
               ].map(stat => (
                 <ActivityStat 
                   key={stat.key} 
