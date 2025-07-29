@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
-from .routers import activities, analysis, garmin_data, health, sync, training_readiness, training_stress
+from .routers import activities, analysis, garmin_data, health, sync, training_readiness, training_stress, power
 from .database.models.activity import Base
 from .database.session import engine as db_engine, SessionLocal
 from .database.models import activity as activity_model
@@ -84,6 +84,7 @@ app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(health.router, prefix="/api/health", tags=["health"])
 app.include_router(training_readiness.router, prefix="/api", tags=["Training Readiness"])
 app.include_router(training_stress.router, prefix="/api", tags=["Training Stress"])
+app.include_router(power.router, prefix="/api", tags=["Power"])
 
 @app.get("/")
 def read_root():

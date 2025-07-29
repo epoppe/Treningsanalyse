@@ -288,3 +288,13 @@ class DataStorage:
     def save_activity_from_fit(self, db: Session, fit_file_content: bytes, activity_id: int):
         # ... (eksisterende funksjon, ingen endringer)
         pass
+
+# Global storage instance
+_storage_instance = None
+
+def get_storage() -> DataStorage:
+    """Returnerer en global DataStorage instans."""
+    global _storage_instance
+    if _storage_instance is None:
+        _storage_instance = DataStorage()
+    return _storage_instance

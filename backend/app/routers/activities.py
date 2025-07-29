@@ -6,6 +6,7 @@ from datetime import datetime
 from ..dependencies import get_db
 from ..database.models.activity import Activity
 from ..services.garmin_client import GarminClient
+from ..services.power_service import PowerService
 from ..storage import DataStorage
 from ..dependencies import get_data_storage, get_garmin_client
 import plotly.graph_objects as go
@@ -41,6 +42,7 @@ class ActivityResponse(BaseModel):
     totalTrainingEffect: Optional[float] = Field(None, description="Aerobic Training Effect (1.0-5.0)")
     totalAnaerobicTrainingEffect: Optional[float] = Field(None, description="Anaerobic Training Effect (1.0-5.0)")
     epoc: Optional[float] = Field(None, description="Exercise Post Oxygen Consumption (også brukt som TSS)")
+    averagePowerWatts: Optional[float] = Field(None, description="Average power in watts")
     lactateThresholdSpeed: Optional[float] = Field(None, description="Lactate threshold speed in m/s")
     details: Optional[Dict[str, Any]] = Field(None, description="Detailed metrics for the activity")
 
@@ -64,6 +66,10 @@ def get_activities_by_date_range(
             Activity.start_time <= end_dt
         ).order_by(Activity.start_time.desc()).all()
         
+        # Initialiser PowerService for power-beregning
+        storage = DataStorage()
+        power_service = PowerService(storage)
+        
         response_data = []
         for act in activities:
             # Hent aktivitetstype
@@ -79,6 +85,21 @@ def get_activities_by_date_range(
             if act.average_running_cadence and act.distance and act.total_steps:
                 # Gjennomsnittlig steglengde = distanse / antall steg
                 avg_stride_length = act.distance / act.total_steps
+            
+            # Hent power for løpeaktiviteter
+            average_power_watts = None
+            if act.activity_type and act.activity_type.type_key == 'running' or (act_type_data and act_type_data.get('typeKey') == 'running'):
+                # Bruk lagret power fra database hvis tilgjengelig
+                if act.average_power is not None:
+                    average_power_watts = act.average_power
+                else:
+                    # Beregn power hvis ikke lagret
+                    try:
+                        power_result = power_service.calculate_activity_power(int(act.activity_id), db)
+                        if power_result:
+                            average_power_watts = power_result['average_power_watts']
+                    except Exception as e:
+                        logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
             
             # Manually construct the dictionary for the response, ensuring correct field names
             response_data.append({
@@ -101,6 +122,7 @@ def get_activities_by_date_range(
                 "totalTrainingEffect": act.total_training_effect,
                 "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
                 "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                "averagePowerWatts": average_power_watts,  # Power i watt
                 "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
                 "details": act.detailed_metrics
             })
@@ -123,6 +145,10 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
         activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).limit(limit).offset(offset).all()
         logger.info(f"Hentet {len(activities)} aktiviteter fra databasen")
         
+        # Initialiser PowerService for power-beregning
+        storage = DataStorage()
+        power_service = PowerService(storage)
+        
         response_data = []
         for act in activities:
             # Construct the nested activity type object
@@ -132,9 +158,6 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                     "typeKey": act.activity_type.type_key,
                     "parentTypeKey": act.activity_type.parent_type_key
                 }
-            elif act.type:
-                 # Fallback to the 'type' column if the relationship is not set
-                act_type_data = {"typeKey": act.type}
 
             # Calculate average stride length
             avg_stride_length = None
@@ -143,6 +166,21 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 # Convert speed to m/min: average_speed * 60
                 # Stride length (m/step) = (m/min) / (steps/min)
                 avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
+
+            # Hent power for løpeaktiviteter
+            average_power_watts = None
+            if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
+                # Bruk lagret power fra database hvis tilgjengelig
+                if act.average_power is not None:
+                    average_power_watts = act.average_power
+                else:
+                    # Beregn power hvis ikke lagret
+                    try:
+                        power_result = power_service.calculate_activity_power(int(act.activity_id), db)
+                        if power_result:
+                            average_power_watts = power_result['average_power_watts']
+                    except Exception as e:
+                        logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
 
             # Manually construct the dictionary for the response, ensuring correct field names
             response_data.append({
@@ -165,6 +203,7 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 "totalTrainingEffect": act.total_training_effect,
                 "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
                 "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                "averagePowerWatts": average_power_watts,  # Power i watt
                 "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
                 "details": act.detailed_metrics
             })

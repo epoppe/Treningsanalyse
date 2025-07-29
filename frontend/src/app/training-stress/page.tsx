@@ -89,7 +89,7 @@ const MetricsGrid = styled.div`
 const MetricCard = styled.div<{ $tooltip?: string }>`
   background: white;
   border-radius: 8px;
-  padding: 0.25rem;
+  padding: 0.125rem 0.25rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   border-left: 4px solid #3498db;
   position: relative;
@@ -126,16 +126,18 @@ const MetricCard = styled.div<{ $tooltip?: string }>`
 
 const MetricTitle = styled.h3`
   color: #2c3e50;
-  margin-bottom: 0.125rem;
-  font-size: 0.75rem;
+  margin-bottom: 0.0625rem;
+  font-size: 0.7rem;
   font-weight: 600;
+  line-height: 1.1;
 `;
 
 const MetricValue = styled.div`
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: bold;
   color: #3498db;
   margin-bottom: 0;
+  line-height: 1.1;
 `;
 
 const ChartContainer = styled.div`

@@ -23,6 +23,7 @@ export interface Activity {
   totalTrainingEffect?: number;
   totalAnaerobicTrainingEffect?: number;
   epoc?: number;  // Exercise Post Oxygen Consumption (Training Load) - også brukt som TSS
+  averagePowerWatts?: number;  // Gjennomsnittlig power i watt
   lactateThresholdSpeed?: number;  // Lactate threshold speed in m/s
   details?: { [key: string]: any };
 } 

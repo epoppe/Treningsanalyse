@@ -27,11 +27,13 @@ const Label = styled.label`
 `;
 
 const Input = styled.input`
-  padding: 8px;
+  padding: 6px 10px;
   border-radius: 4px;
   border: 1px solid #555;
   background-color: #444;
   color: white;
+  font-size: 11px;
+  min-width: 120px;
 `;
 
 const SyncButton = styled.button`

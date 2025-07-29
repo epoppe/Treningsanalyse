@@ -77,10 +77,16 @@ const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
       return '#7f1d1d'; // red-900 - Extremely high load
     }
 
+    if ($statKey === 'power') {
+      if (!$value || $value <= 0) return '#f8f9fa'; // gray - No power data
+      if ($value < 200) return '#dbeafe'; // blue-100 - Low power
+      if ($value < 300) return '#dcfce7'; // green-100 - Moderate power
+      if ($value < 400) return '#fef9c3'; // yellow-100 - High power
+      if ($value < 500) return '#fee2e2'; // red-100 - Very high power
+      return '#7f1d1d'; // red-900 - Extremely high power
+    }
 
 
-
-    
     return '#f8f9fa'; // default gray
   }};
 `;
@@ -251,6 +257,10 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     return Math.round(epoc).toString();
   };
 
+  const formatPower = (powerWatts?: number) => {
+    if (!powerWatts || powerWatts <= 0) return 'N/A';
+    return `${Math.round(powerWatts)} W`;
+  };
 
 
   const formatLactateThreshold = (lactateSpeed?: number) => {
@@ -387,6 +397,12 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
                   label: 'Anaerob effekt',
                   value: formatAnaerobicEffect(activity.totalAnaerobicTrainingEffect),
                   rawValue: activity.totalAnaerobicTrainingEffect
+                },
+                {
+                  key: 'power',
+                  label: 'Power',
+                  value: formatPower(activity.averagePowerWatts),
+                  rawValue: activity.averagePowerWatts
                 },
                 {
                   key: 'epoc',
