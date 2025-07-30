@@ -241,7 +241,7 @@ export default function SynkroniseringPage() {
     <Container>
       <Title>Synkronisering av Data</Title>
 
-      {/* Main Sync Actions */}
+      {/* All Sync Options in One Row */}
       <SyncSection>
         <SectionTitle>Synkronisering</SectionTitle>
         <QuickActions>
@@ -251,47 +251,44 @@ export default function SynkroniseringPage() {
           >
             Synk nye aktiviteter
           </QuickActionButton>
+          
+          <QuickActionButton 
+            onClick={syncSelectedPeriod}
+            disabled={isLoading}
+          >
+            Synk valgt periode
+          </QuickActionButton>
+          
+          <DangerButton 
+            onClick={syncAll}
+            disabled={isLoading}
+          >
+            Synk alle
+          </DangerButton>
         </QuickActions>
-      </SyncSection>
-
-      {/* Selected Period Sync */}
-      <SyncSection>
-        <SectionTitle>Synkroniser valgt periode</SectionTitle>
-        <DateContainer>
-          <DateLabel>Fra dato:</DateLabel>
-          <DateInput
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-        </DateContainer>
-        <DateContainer>
-          <DateLabel>Til dato:</DateLabel>
-          <DateInput
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
-        </DateContainer>
-        <QuickActionButton 
-          onClick={syncSelectedPeriod}
-          disabled={isLoading}
-        >
-          Synk valgt periode
-        </QuickActionButton>
-      </SyncSection>
-
-      {/* Sync All */}
-      <SyncSection>
-        <SectionTitle>Full synkronisering</SectionTitle>
-        <DangerButton 
-          onClick={syncAll}
-          disabled={isLoading}
-        >
-          Synk alle
-        </DangerButton>
+        
+        {/* Date inputs for selected period */}
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+          <DateContainer style={{ marginBottom: 0 }}>
+            <DateLabel>Fra dato:</DateLabel>
+            <DateInput
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </DateContainer>
+          <DateContainer style={{ marginBottom: 0 }}>
+            <DateLabel>Til dato:</DateLabel>
+            <DateInput
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </DateContainer>
+        </div>
+        
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
-          ⚠️ Dette vil synkronisere alle data fra de siste 5 årene. Kan ta lang tid.
+          ⚠️ "Synk alle" vil synkronisere alle data fra de siste 5 årene. Kan ta lang tid.
         </p>
       </SyncSection>
 
