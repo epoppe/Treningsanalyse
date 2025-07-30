@@ -49,7 +49,7 @@ const Button = styled.button<{ $active: boolean }>`
   }
 `;
 
-interface VO2MaxChartProps {
+interface PowerPerHeartRateChartProps {
   activities: Activity[];
   title: string;
   timeFilter: string;
@@ -78,7 +78,8 @@ const calculateMovingAverage = (data: any[], period: number) => {
   const result = [];
   for (let i = 0; i < data.length; i++) {
     const start = Math.max(0, i - period + 1);
-    const subset = data.slice(start, i + 1).map(d => d.vo2Max).filter(v => v !== null);
+    const subset = data.slice(start, i + 1).map(d => d.powerPerHR).filter(v => v !== null && isFinite(v));
+
     if (subset.length > 0) {
       const avg = subset.reduce((acc, val) => acc + val, 0) / subset.length;
       result.push({ ...data[i], movingAverage: avg });
@@ -89,11 +90,11 @@ const calculateMovingAverage = (data: any[], period: number) => {
   return result;
 };
 
-export default function VO2MaxChart({
+export default function PowerPerHeartRateChart({
   activities,
   title,
   timeFilter,
-}: VO2MaxChartProps) {
+}: PowerPerHeartRateChartProps) {
   const [showTrend, setShowTrend] = useState(true);
 
   if (activities.length === 0) {
@@ -112,7 +113,7 @@ export default function VO2MaxChart({
         a.activityType.typeKey.includes("running") &&
         !a.activityType.typeKey.includes("treadmill")
     )
-    .filter((a) => a.vO2MaxValue && a.vO2MaxValue > 0)
+    .filter((a) => a.averageHR && a.averagePowerWatts && a.averageHR > 0 && a.averagePowerWatts > 0)
     .sort(
       (a, b) =>
         new Date(a.startTimeLocal).getTime() - new Date(b.startTimeLocal).getTime()
@@ -122,7 +123,7 @@ export default function VO2MaxChart({
     return (
       <ChartContainer>
         <Title>{title}</Title>
-        <p>Ingen VO2Max-data tilgjengelig for denne perioden.</p>
+        <p>Ingen relevante løpedata med power og puls for å kalkulere Power/Puls.</p>
       </ChartContainer>
     );
   }
@@ -131,122 +132,101 @@ export default function VO2MaxChart({
   let groupingTitle;
 
   const processGroup = (activities: Activity[]) => {
-    const vo2MaxValues = activities
-      .map((a) => a.vO2MaxValue!)
-      .filter((v) => v > 0);
+    const powerPerHRValues = activities
+      .map((a) => {
+        if (a.averagePowerWatts && a.averageHR && a.averageHR > 0) {
+          return a.averagePowerWatts / a.averageHR;
+        }
+        return null;
+      })
+      .filter((e) => e !== null && isFinite(e));
 
-    if (vo2MaxValues.length === 0) return null;
-    return vo2MaxValues.reduce((a, b) => a + b, 0) / vo2MaxValues.length;
+    if (powerPerHRValues.length === 0) return null;
+    return powerPerHRValues.reduce((a, b) => a + b, 0) / powerPerHRValues.length;
   };
 
   if (timeFilter === '3m') {
     groupingTitle = '(per aktivitet)';
     chartData = runningActivities.map((a) => {
+      const powerPerHR = a.averagePowerWatts && a.averageHR ? a.averagePowerWatts / a.averageHR : null;
       return {
         date: format(parseISO(a.startTimeLocal), 'dd.MM.yy'),
-        vo2Max: a.vO2MaxValue,
-        name: a.name,
+        powerPerHR: powerPerHR,
+        name: a.activityName,
       };
     });
   } else {
-    const dates = runningActivities.map((a) => parseISO(a.startTimeLocal));
+    // Gruppering per uke eller måned
+    const dates = runningActivities.map(a => parseISO(a.startTimeLocal));
     const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
     const groupByMonth = yearSpan >= 2;
-    groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
-    
-    if (groupByMonth) {
-      const monthlyDataMap = runningActivities.reduce((acc, activity) => {
-        const date = new Date(activity.startTimeLocal);
-        const year = getYear(date);
-        const month = getMonth(date);
-        const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
 
-        if (!acc[monthKey]) {
-          acc[monthKey] = {
-            activities: [],
-            date: format(startOfMonth(date), "MMM yy"),
-            groupKey: monthKey,
-            year: year,
-          };
-        }
-        acc[monthKey].activities.push(activity);
-        return acc;
-      }, {} as Record<string, any>);
-  
-      const allMonths = eachMonthOfInterval({
-        start: Math.min(...dates),
-        end: Math.max(...dates),
-      });
-  
-      chartData = allMonths.map((monthStart) => {
+    if (groupByMonth) {
+      groupingTitle = '(per måned)';
+      const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
+      
+      chartData = allMonths.map(monthStart => {
         const year = getYear(monthStart);
         const month = getMonth(monthStart);
-        const monthKey = `${year}-${String(month + 1).padStart(2, "0")}`;
-        const vo2Max = monthlyDataMap[monthKey]
-          ? processGroup(monthlyDataMap[monthKey].activities)
-          : null;
-  
+        const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+        
+        const monthActivities = runningActivities.filter(a => {
+          const activityDate = parseISO(a.startTimeLocal);
+          return getYear(activityDate) === year && getMonth(activityDate) === month;
+        });
+        
+        const powerPerHR = processGroup(monthActivities);
+        
         return {
           date: format(monthStart, "MMM yy"),
           groupKey: monthKey,
-          vo2Max,
+          year: year,
+          powerPerHR: powerPerHR,
         };
       });
     } else {
-      const weeklyDataMap = runningActivities.reduce((acc, activity) => {
-        const date = new Date(activity.startTimeLocal);
-        const year = getYear(date);
-        const week = getISOWeek(date);
-        const weekKey = `${year}-W${String(week).padStart(2, "0")}`;
-
-        if (!acc[weekKey]) {
-          acc[weekKey] = {
-            activities: [],
-            date: format(startOfISOWeek(date), "dd.MM.yy"),
-            groupKey: weekKey,
-            year: year,
-          };
-        }
-        acc[weekKey].activities.push(activity);
-        return acc;
-      }, {} as Record<string, any>);
-
-      const allWeeks = eachWeekOfInterval({
-        start: Math.min(...dates),
-        end: Math.max(...dates),
-      }, { weekStartsOn: 1 });
-
-      chartData = allWeeks.map((weekStart) => {
+      groupingTitle = '(per uke)';
+      const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });
+      
+      chartData = allWeeks.map(weekStart => {
         const year = getYear(weekStart);
         const week = getISOWeek(weekStart);
-        const weekKey = `${year}-W${String(week).padStart(2, "0")}`;
-        const vo2Max = weeklyDataMap[weekKey]
-          ? processGroup(weeklyDataMap[weekKey].activities)
-          : null;
-
+        const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
+        
+        const weekActivities = runningActivities.filter(a => {
+          const activityDate = parseISO(a.startTimeLocal);
+          const activityWeek = getISOWeek(activityDate);
+          const activityYear = getYear(activityDate);
+          return activityYear === year && activityWeek === week;
+        });
+        
+        const powerPerHR = processGroup(weekActivities);
+        
         return {
           date: format(weekStart, "dd.MM.yy"),
           groupKey: weekKey,
-          vo2Max,
+          year: year,
+          powerPerHR: powerPerHR,
         };
       });
     }
   }
 
-  // Beregn glidende gjennomsnitt
-  const dataWithMovingAverage = calculateMovingAverage(chartData, 4);
+  const movingAveragePeriod = timeFilter === '3m' ? 10 : 24;
+  const dataWithMovingAverage = calculateMovingAverage(chartData, movingAveragePeriod);
 
-  // Beregn y-akse domene
-  const vo2MaxValues = chartData.map(d => d.vo2Max).filter(v => v !== null);
   const yAxisDomain = () => {
-    if (vo2MaxValues.length === 0) return [0, 100];
-    const min = Math.min(...vo2MaxValues);
-    const max = Math.max(...vo2MaxValues);
+    const allValues = dataWithMovingAverage
+      .flatMap(d => [d.powerPerHR, d.movingAverage])
+      .filter(v => v !== null && isFinite(v));
+    
+    if (allValues.length === 0) return [0, 1];
+
+    const min = Math.min(...allValues);
+    const max = Math.max(...allValues);
     const padding = (max - min) * 0.1;
-    return [
-      Math.max(0, min - padding),
-      max + padding
-    ];
+
+    return [Math.max(0, min - padding), max + padding];
   };
 
   return (
@@ -254,57 +234,68 @@ export default function VO2MaxChart({
       <Title>{title} {groupingTitle}</Title>
       <ButtonContainer>
         <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
-          {showTrend ? 'Skjul' : 'Vis'} trendlinje
+          {showTrend ? 'Skjul trendlinje' : 'Vis trendlinje'}
         </Button>
       </ButtonContainer>
-      <ResponsiveContainer width="100%" height="90%">
+      <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis 
-            dataKey="date" 
-            tick={<CustomAxisTick data={dataWithMovingAverage} />}
-            height={60}
-          />
-          <YAxis 
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
+          <YAxis
+            label={{ value: 'Power/Puls (W/bpm)', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
-            label={{ value: 'VO2 Max', angle: -90, position: 'insideLeft' }}
+            tickFormatter={(tick) => tick.toFixed(2)}
           />
           <Tooltip
-            labelFormatter={(value) => `Dato: ${value}`}
-            formatter={(value: any, name: string) => {
-              if (name === 'vo2Max') {
-                return [value ? `${value.toFixed(1)}` : 'N/A', 'VO2 Max'];
+            contentStyle={{ 
+              backgroundColor: 'white', 
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+              color: '#333'
+            }}
+            formatter={(value: number, name: string) => {
+              const formattedName =
+                name === "movingAverage" ? "Gj.snitt" : "Verdi";
+              return [value.toFixed(2), formattedName];
+            }}
+            labelFormatter={(label, payload) => {
+              if (
+                timeFilter === "3m" &&
+                payload &&
+                payload.length > 0 &&
+                payload[0].payload.name
+              ) {
+                return `${label}: ${payload[0].payload.name}`;
               }
-              if (name === 'movingAverage') {
-                return [value ? `${value.toFixed(1)}` : 'N/A', 'Glidende gjennomsnitt (4 perioder)'];
-              }
-              return [value, name];
+              return `Dato: ${label}`;
             }}
           />
-          <Legend />
+          <Legend
+            formatter={(value) =>
+              value === "movingAverage" ? "Gjennomsnitt" : "Power/Puls"
+            }
+          />
           <Line
             type="monotone"
-            dataKey="vo2Max"
+            dataKey="powerPerHR"
             stroke="#e74c3c"
-            strokeWidth={2}
-            dot={{ fill: '#e74c3c', strokeWidth: 2, r: 4 }}
-            connectNulls={false}
-            name="VO2 Max"
+            name="Power/Puls"
+            connectNulls
           />
           {showTrend && (
             <Line
               type="monotone"
               dataKey="movingAverage"
-              stroke="#3498db"
+              stroke="#82ca9d"
+              name="Trend (6mnd snitt)"
               strokeWidth={2}
-              strokeDasharray="5 5"
               dot={false}
-              connectNulls={false}
-              name="Glidende gjennomsnitt (4 perioder)"
+              connectNulls
             />
           )}
         </LineChart>
       </ResponsiveContainer>
     </ChartContainer>
   );
-} 
+}

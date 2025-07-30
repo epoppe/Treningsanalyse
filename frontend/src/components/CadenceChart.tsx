@@ -62,17 +62,16 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   const dateLabel = item.date;
   // Viser ca. 8-10 ticks for å unngå at aksen blir for rotete
   const tickInterval = Math.max(1, Math.floor(data.length / 9));
+  
+  if (payload.index % tickInterval !== 0) return null;
 
-  if (payload.index % tickInterval === 0 || payload.index === data.length - 1) {
-    return (
-      <g transform={`translate(${x},${y})`}>
-        <text x={0} y={0} dy={16} textAnchor="end" fill="#666" transform="rotate(-35)">
-          {dateLabel}
-        </text>
-      </g>
-    );
-  }
-  return null;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={0} y={0} dy={16} textAnchor="middle" fill="#666" fontSize={12}>
+        {dateLabel}
+      </text>
+    </g>
+  );
 };
 
 const calculateMovingAverage = (data: any[], period: number) => {
@@ -131,14 +130,14 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
   if (showPerActivity) {
     chartData = activitiesWithCadence
       .map(activity => ({
-        date: format(new Date(activity.startTimeLocal), 'dd.MM.yy'),
+        date: format(parseISO(activity.startTimeLocal), 'dd.MM.yy'),
         cadence: activity.averageRunningCadenceInStepsPerMinute,
         activityId: activity.activityId
       }))
       .sort((a, b) => (a.activityId && b.activityId) ? a.activityId - b.activityId : 0);
   } else if (groupByMonth) {
     const monthlyDataMap = activitiesWithCadence.reduce((acc, activity) => {
-      const date = new Date(activity.startTimeLocal);
+      const date = parseISO(activity.startTimeLocal);
       const year = getYear(date);
       const month = getMonth(date);
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
@@ -179,7 +178,7 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
     });
   } else {
     const weeklyDataMap = activitiesWithCadence.reduce((acc, activity) => {
-      const date = new Date(activity.startTimeLocal);
+      const date = parseISO(activity.startTimeLocal);
       const week = getISOWeek(date);
       const year = getYear(date);
       const weekKey = `${year}-W${String(week).padStart(2, '0')}`;

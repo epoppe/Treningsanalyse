@@ -62,17 +62,16 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   const dateLabel = item.date;
   // Viser ca. 8-10 ticks for å unngå at aksen blir for rotete
   const tickInterval = Math.max(1, Math.floor(data.length / 9));
+  
+  if (payload.index % tickInterval !== 0) return null;
 
-  if (payload.index % tickInterval === 0 || payload.index === data.length - 1) {
-    return (
-      <g transform={`translate(${x},${y})`}>
-        <text x={0} y={0} dy={16} textAnchor="end" fill="#666" transform="rotate(-35)">
-          {dateLabel}
-        </text>
-      </g>
-    );
-  }
-  return null;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={0} y={0} dy={16} textAnchor="middle" fill="#666" fontSize={12}>
+        {dateLabel}
+      </text>
+    </g>
+  );
 };
 
 const calculateMovingAverage = (data: any[], period: number) => {

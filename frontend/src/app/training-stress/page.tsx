@@ -374,7 +374,7 @@ const TrainingStressPage: React.FC = () => {
 
   const formatDateForChart = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('nb-NO', { month: 'short', day: 'numeric' });
+    return date.toLocaleDateString('nb-NO', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   const getFormColor = (formValue: number) => {
@@ -521,6 +521,17 @@ const TrainingStressPage: React.FC = () => {
                     },
                     tooltip: {
                       callbacks: {
+                        title: function(context) {
+                          const dateIndex = context[0].dataIndex;
+                          const fullDate = data.daily_data[dateIndex].date;
+                          const date = new Date(fullDate);
+                          return date.toLocaleDateString('nb-NO', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          });
+                        },
                         label: function(context) {
                           let label = context.dataset.label || '';
                           if (label) {
@@ -612,6 +623,17 @@ const TrainingStressPage: React.FC = () => {
                     },
                     tooltip: {
                       callbacks: {
+                        title: function(context) {
+                          const dateIndex = context[0].dataIndex;
+                          const fullDate = data.daily_data[dateIndex].date;
+                          const date = new Date(fullDate);
+                          return date.toLocaleDateString('nb-NO', { 
+                            weekday: 'long', 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric' 
+                          });
+                        },
                         label: function(context) {
                           if (context.dataset.label === 'Form') {
                             const value = context.parsed.y;

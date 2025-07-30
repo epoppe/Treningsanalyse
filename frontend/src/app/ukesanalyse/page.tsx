@@ -8,6 +8,7 @@ import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
 import DataSyncPanel from '../../components/DataSyncPanel';
 import RunningEconomyChart from '../../components/RunningEconomyChart';
+import PowerPerHeartRateChart from '../../components/PowerPerHeartRateChart';
 import VO2MaxChart from '../../components/VO2MaxChart';
 import CadenceChart from '../../components/CadenceChart';
 import StrideLengthChart from '../../components/StrideLengthChart';
@@ -119,9 +120,9 @@ export default function RunningEconomyPage() {
             title="Løpsøkonomi"
             timeFilter={timeFilter}
           />
-          <VO2MaxChart
+          <PowerPerHeartRateChart
             activities={runningActivities}
-            title="VO2Max"
+            title="Kraft per hjertefrekvens"
             timeFilter={timeFilter}
           />
           <CadenceChart
@@ -132,6 +133,11 @@ export default function RunningEconomyPage() {
           <StrideLengthChart
             activities={runningActivities}
             title="Skrittlengde"
+            timeFilter={timeFilter}
+          />
+          <VO2MaxChart
+            activities={runningActivities}
+            title="VO2Max"
             timeFilter={timeFilter}
           />
           <RunningEconomyTable activities={runningActivities} />
