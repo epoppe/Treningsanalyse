@@ -243,6 +243,10 @@ export default function SynkroniseringPage() {
     startSync(() => api.syncHealthLast90Days());
   };
 
+  const syncNewActivities = () => {
+    startSync(() => api.syncNewActivities());
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return '#27ae60';
@@ -271,6 +275,12 @@ export default function SynkroniseringPage() {
         <SectionTitle>Hurtig Synkronisering</SectionTitle>
         <QuickActions>
           <QuickActionButton 
+            onClick={syncNewActivities}
+            disabled={isLoading}
+          >
+            Synk nye aktiviteter
+          </QuickActionButton>
+          <QuickActionButton 
             onClick={quickSyncLast7Days}
             disabled={isLoading}
           >
@@ -287,44 +297,6 @@ export default function SynkroniseringPage() {
             disabled={isLoading}
           >
             Siste 90 dager
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={syncRecentActivities}
-            disabled={isLoading}
-          >
-            Nylige aktiviteter
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={syncRecentHealth}
-            disabled={isLoading}
-          >
-            Nylig helsedata
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={() => {
-              const end = new Date();
-              const start = subDays(end, 7);
-              startSync(() => api.fullSync(
-                start.toISOString(),
-                end.toISOString()
-              ));
-            }}
-            disabled={isLoading}
-          >
-            Full synk (7 dager)
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={() => {
-              const end = new Date();
-              const start = subDays(end, 30);
-              startSync(() => api.runCalculations(
-                start.toISOString(),
-                end.toISOString()
-              ));
-            }}
-            disabled={isLoading}
-          >
-            Beregninger (30 dager)
           </QuickActionButton>
         </QuickActions>
       </SyncSection>
@@ -437,7 +409,8 @@ export default function SynkroniseringPage() {
           
           <p><strong>Tips:</strong></p>
           <ul>
-            <li>Bruk "Hurtig Synkronisering" for vanlige oppdateringer</li>
+            <li><strong>"Synk nye aktiviteter"</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
+            <li>Bruk "Siste X dager" hvis du vil synkronisere en spesifikk periode</li>
             <li>Lengre perioder tar mer tid å synkronisere</li>
             <li>Du kan lukke denne siden - synkroniseringen fortsetter i bakgrunnen</li>
             <li>Sjekk status på jobbene nedenfor for å følge fremgangen</li>

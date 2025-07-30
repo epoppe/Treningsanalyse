@@ -292,6 +292,11 @@ export const syncApi = {
     return apiCall('post', '/sync/calculations', { body });
   },
 
+  // --- Nye Aktiviteter ---
+  syncNewActivities: () => {
+    return apiCall('post', '/sync/new-activities');
+  },
+
   // --- Felles ---
   getSyncStatus: async (jobId: string) => {
     try {

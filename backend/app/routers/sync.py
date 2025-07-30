@@ -497,6 +497,79 @@ async def run_calculations_only(job_id: str, storage: DataStorage, start_date: d
         if db_session:
             db_session.close()
 
+async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage):
+    """Kjører synkronisering av nye aktiviteter fra siste lagrede aktivitet."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        sync_jobs[job_id]["message"] = "Finner siste aktivitet..."
+        db_session = SessionLocal()
+        
+        # Finn siste aktivitet i databasen
+        from ..database.models.activity import Activity
+        from sqlalchemy import desc
+        
+        latest_activity = db_session.query(Activity).order_by(desc(Activity.start_time)).first()
+        
+        if not latest_activity:
+            # Ingen aktiviteter i databasen, synkroniser siste 30 dager
+            sync_jobs[job_id]["message"] = "Ingen aktiviteter funnet, synkroniserer siste 30 dager..."
+            end_date = datetime.now(timezone.utc)
+            start_date = end_date - timedelta(days=30)
+        else:
+            # Bruk datoen for siste aktivitet som startdato
+            start_date = latest_activity.start_time
+            end_date = datetime.now(timezone.utc)
+            
+            sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.date()} til {end_date.date()}..."
+        
+        # Kjør full synkronisering for denne perioden
+        sync_service = SyncService(garmin_client, storage, db_session)
+        
+        # 1. Synkroniser aktiviteter med FIT-data
+        sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter..."
+        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date, True, 100)
+        
+        # 2. Synkroniser helsedata
+        sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."
+        await sync_service.sync_health_data(start_date, end_date, True)
+        
+        # 3. Synkroniser Training Effect data
+        sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
+        te_result = await sync_service.sync_training_effect_data(start_date, end_date, True)
+        
+        # 4. Kjør alle beregninger og caching
+        sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
+        calc_result = await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        
+        # Kombiner resultater
+        combined_result = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "activities": activity_result,
+            "health_data": "OK",
+            "training_effect": te_result,
+            "calculations": calc_result,
+            "message": "Synkronisering av nye aktiviteter fullført"
+        }
+        
+        sync_jobs[job_id].update({
+            "status": "completed", 
+            "result": combined_result, 
+            "end_time": datetime.now(timezone.utc)
+        })
+        
+    except Exception as e:
+        logger.critical(f"Feil i synkronisering av nye aktiviteter (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({
+            "status": "failed", 
+            "error": str(e), 
+            "end_time": datetime.now(timezone.utc)
+        })
+    finally:
+        if db_session:
+            db_session.close()
+
 @router.post("/calculations", status_code=202)
 async def trigger_calculations(
     request: SyncRequest,
@@ -516,5 +589,24 @@ async def trigger_calculations(
     
     return {
         "message": f"Beregninger og caching startet for perioden {request.start_date} til {request.end_date}.",
+        "job_id": job_id
+    }
+
+@router.post("/new-activities", status_code=202)
+async def trigger_new_activities_sync(
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """
+    Starter synkronisering av nye aktiviteter fra siste lagrede aktivitet.
+    Dette inkluderer aktiviteter, FIT-data, helsedata, Training Effect data og beregninger.
+    """
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_new_activities_sync, job_id, garmin_client, storage)
+    
+    return {
+        "message": "Synkronisering av nye aktiviteter startet. Dette vil synkronisere fra siste lagrede aktivitet til nå.",
         "job_id": job_id
     }
