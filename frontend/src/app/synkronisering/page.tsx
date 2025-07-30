@@ -140,6 +140,23 @@ const QuickActionButton = styled.button<{ $disabled?: boolean }>`
   }
 `;
 
+const DangerButton = styled.button<{ $disabled?: boolean }>`
+  background-color: ${props => props.$disabled ? '#bdc3c7' : '#e74c3c'};
+  color: white;
+  border: none;
+  padding: 1rem 1.5rem;
+  border-radius: 6px;
+  cursor: ${props => props.$disabled ? 'not-allowed' : 'pointer'};
+  font-size: 1rem;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+  min-width: 200px;
+
+  &:hover {
+    background-color: ${props => props.$disabled ? '#bdc3c7' : '#c0392b'};
+  }
+`;
+
 interface SyncJob {
   status: string;
   message?: string;
@@ -192,68 +209,22 @@ export default function SynkroniseringPage() {
     poll();
   };
 
-  const quickSyncLast7Days = () => {
-    const end = new Date();
-    const start = subDays(end, 7);
-    startSync(() => api.syncActivities(
-      start.toISOString(),
-      end.toISOString()
-    ));
-  };
-
-  const quickSyncLast30Days = () => {
-    const end = new Date();
-    const start = subDays(end, 30);
-    startSync(() => api.syncActivities(
-      start.toISOString(),
-      end.toISOString()
-    ));
-  };
-
-  const quickSyncLast90Days = () => {
-    const end = new Date();
-    const start = subDays(end, 90);
-    startSync(() => api.syncActivities(
-      start.toISOString(),
-      end.toISOString()
-    ));
-  };
-
-  const syncCustomPeriod = () => {
-    startSync(() => api.syncActivities(startDate, endDate));
-  };
-
-  const syncHealthData = () => {
-    startSync(() => api.syncHealthData(startDate, endDate));
-  };
-
-  const fullSync = () => {
-    startSync(() => api.fullSync(startDate, endDate));
-  };
-
-  const runCalculations = () => {
-    startSync(() => api.runCalculations(startDate, endDate));
-  };
-
-  const syncRecentActivities = () => {
-    startSync(() => api.syncRecentActivities());
-  };
-
-  const syncRecentHealth = () => {
-    startSync(() => api.syncHealthLast90Days());
-  };
-
   const syncNewActivities = () => {
     startSync(() => api.syncNewActivities());
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return '#27ae60';
-      case 'failed': return '#e74c3c';
-      case 'processing': return '#f39c12';
-      default: return '#7f8c8d';
-    }
+  const syncSelectedPeriod = () => {
+    startSync(() => api.fullSync(startDate, endDate));
+  };
+
+  const syncAll = () => {
+    // Synkroniser siste 5 år (eller mer hvis nødvendig)
+    const end = new Date();
+    const start = new Date(end.getFullYear() - 5, 0, 1); // 1. januar for 5 år siden
+    startSync(() => api.fullSync(
+      start.toISOString(),
+      end.toISOString()
+    ));
   };
 
   const getStatusText = (status: string) => {
@@ -270,9 +241,9 @@ export default function SynkroniseringPage() {
     <Container>
       <Title>Synkronisering av Data</Title>
 
-      {/* Quick Actions */}
+      {/* Main Sync Actions */}
       <SyncSection>
-        <SectionTitle>Hurtig Synkronisering</SectionTitle>
+        <SectionTitle>Synkronisering</SectionTitle>
         <QuickActions>
           <QuickActionButton 
             onClick={syncNewActivities}
@@ -280,30 +251,12 @@ export default function SynkroniseringPage() {
           >
             Synk nye aktiviteter
           </QuickActionButton>
-          <QuickActionButton 
-            onClick={quickSyncLast7Days}
-            disabled={isLoading}
-          >
-            Siste 7 dager
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={quickSyncLast30Days}
-            disabled={isLoading}
-          >
-            Siste 30 dager
-          </QuickActionButton>
-          <QuickActionButton 
-            onClick={quickSyncLast90Days}
-            disabled={isLoading}
-          >
-            Siste 90 dager
-          </QuickActionButton>
         </QuickActions>
       </SyncSection>
 
-      {/* Custom Period Sync */}
+      {/* Selected Period Sync */}
       <SyncSection>
-        <SectionTitle>Egendefinert Periode</SectionTitle>
+        <SectionTitle>Synkroniser valgt periode</SectionTitle>
         <DateContainer>
           <DateLabel>Fra dato:</DateLabel>
           <DateInput
@@ -320,32 +273,26 @@ export default function SynkroniseringPage() {
             onChange={(e) => setEndDate(e.target.value)}
           />
         </DateContainer>
-        <Button 
-          $primary 
-          onClick={syncCustomPeriod}
+        <QuickActionButton 
+          onClick={syncSelectedPeriod}
           disabled={isLoading}
         >
-          Synkroniser Aktivitet
-        </Button>
-        <Button 
-          onClick={syncHealthData}
+          Synk valgt periode
+        </QuickActionButton>
+      </SyncSection>
+
+      {/* Sync All */}
+      <SyncSection>
+        <SectionTitle>Full synkronisering</SectionTitle>
+        <DangerButton 
+          onClick={syncAll}
           disabled={isLoading}
         >
-          Synkroniser Helsedata
-        </Button>
-        <Button 
-          $primary
-          onClick={fullSync}
-          disabled={isLoading}
-        >
-          Full Synkronisering
-        </Button>
-        <Button 
-          onClick={runCalculations}
-          disabled={isLoading}
-        >
-          Kjør Beregninger
-        </Button>
+          Synk alle
+        </DangerButton>
+        <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
+          ⚠️ Dette vil synkronisere alle data fra de siste 5 årene. Kan ta lang tid.
+        </p>
       </SyncSection>
 
       {/* Active Jobs */}
@@ -400,7 +347,7 @@ export default function SynkroniseringPage() {
             <li><strong>Training Effect:</strong> EPOC, Training Load, og andre treningsmetrics</li>
           </ul>
           
-          <p><strong>Hva beregnes:</strong></p>
+          <p><strong>Hva beregnes og lagres:</strong></p>
           <ul>
             <li><strong>Power:</strong> Løpekraft for alle løpeaktiviteter (lagres i database for raskere henting)</li>
             <li><strong>Training Stress Score:</strong> TSS-beregninger for alle aktiviteter</li>
@@ -410,8 +357,8 @@ export default function SynkroniseringPage() {
           <p><strong>Tips:</strong></p>
           <ul>
             <li><strong>"Synk nye aktiviteter"</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
-            <li>Bruk "Siste X dager" hvis du vil synkronisere en spesifikk periode</li>
-            <li>Lengre perioder tar mer tid å synkronisere</li>
+            <li><strong>"Synk valgt periode"</strong> for å synkronisere en spesifikk tidsperiode</li>
+            <li><strong>"Synk alle"</strong> for full synkronisering av alle historiske data (kan ta lang tid)</li>
             <li>Du kan lukke denne siden - synkroniseringen fortsetter i bakgrunnen</li>
             <li>Sjekk status på jobbene nedenfor for å følge fremgangen</li>
           </ul>
