@@ -322,3 +322,199 @@ def sync_json_to_db_endpoint(db: Session = Depends(get_db)):
     sync_service = SyncService(None, get_data_storage(), db) # GarminClient er ikke nødvendig her
     result = sync_service.sync_json_to_db()
     return result
+
+async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """Kjører full synkronisering av alle data i bakgrunnen."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        sync_jobs[job_id]["message"] = "Starter full synkronisering..."
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        
+        # 1. Synkroniser aktiviteter med FIT-data
+        sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter..."
+        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date, True, 100)
+        
+        # 2. Synkroniser helsedata
+        sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."
+        await sync_service.sync_health_data(start_date, end_date, True)
+        
+        # 3. Synkroniser Training Effect data
+        sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
+        te_result = await sync_service.sync_training_effect_data(start_date, end_date, True)
+        
+        # 4. Kjør alle beregninger og caching
+        sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
+        await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        
+        # Kombiner resultater
+        combined_result = {
+            "activities": activity_result,
+            "health_data": "OK",
+            "training_effect": te_result,
+            "calculations": "OK",
+            "message": "Full synkronisering fullført"
+        }
+        
+        sync_jobs[job_id].update({
+            "status": "completed", 
+            "result": combined_result, 
+            "end_time": datetime.now(timezone.utc)
+        })
+        
+    except Exception as e:
+        logger.critical(f"Feil i full synkronisering (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({
+            "status": "failed", 
+            "error": str(e), 
+            "end_time": datetime.now(timezone.utc)
+        })
+    finally:
+        if db_session:
+            db_session.close()
+
+async def run_calculations_and_caching(job_id: str, db_session: Session, start_date: datetime, end_date: datetime):
+    """Kjører alle nødvendige beregninger og caching for raskere datahenting."""
+    try:
+        from ..services.power_service import PowerService
+        from ..services.training_stress_service import TrainingStressService
+        
+        # 1. Beregn power for alle løpeaktiviteter i perioden
+        sync_jobs[job_id]["message"] = "Beregner power for løpeaktiviteter..."
+        power_service = PowerService()
+        
+        # Hent løpeaktiviteter i perioden som mangler power
+        from sqlalchemy import and_
+        from ..database.models.activity import Activity, ActivityType
+        
+        running_activities = db_session.query(Activity).join(ActivityType).filter(
+            and_(
+                Activity.start_time >= start_date,
+                Activity.start_time <= end_date,
+                ActivityType.type_key == 'running',
+                Activity.average_power.is_(None)
+            )
+        ).all()
+        
+        power_calculated = 0
+        for activity in running_activities:
+            try:
+                result = power_service.calculate_activity_power(int(activity.activity_id), db_session)
+                if result:
+                    power_calculated += 1
+            except Exception as e:
+                logger.warning(f"Kunne ikke beregne power for aktivitet {activity.activity_id}: {e}")
+        
+        # 2. Beregn Training Stress Score for perioden
+        sync_jobs[job_id]["message"] = "Beregner Training Stress Score..."
+        training_stress_service = TrainingStressService()
+        
+        # Hent aktiviteter i perioden som mangler TSS
+        activities_without_tss = db_session.query(Activity).filter(
+            and_(
+                Activity.start_time >= start_date,
+                Activity.start_time <= end_date,
+                Activity.training_stress_score.is_(None)
+            )
+        ).all()
+        
+        tss_calculated = 0
+        for activity in activities_without_tss:
+            try:
+                tss = training_stress_service.calculate_activity_tss(activity, db_session)
+                if tss is not None:
+                    activity.training_stress_score = tss
+                    tss_calculated += 1
+            except Exception as e:
+                logger.warning(f"Kunne ikke beregne TSS for aktivitet {activity.activity_id}: {e}")
+        
+        # 3. Lagre endringer til database
+        if power_calculated > 0 or tss_calculated > 0:
+            db_session.commit()
+            logger.info(f"Beregninger fullført: {power_calculated} power-beregninger, {tss_calculated} TSS-beregninger")
+        
+        # 4. Oppdater cache for raskere datahenting
+        sync_jobs[job_id]["message"] = "Oppdaterer cache..."
+        # Her kan vi legge til mer caching-logikk hvis nødvendig
+        
+        return {
+            "power_calculated": power_calculated,
+            "tss_calculated": tss_calculated
+        }
+        
+    except Exception as e:
+        logger.error(f"Feil under beregninger og caching: {e}")
+        raise
+
+@router.post("/full-sync", status_code=202)
+async def trigger_full_sync(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """
+    Starter full synkronisering av alle data for en gitt periode.
+    Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.
+    """
+    start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
+    
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_full_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    
+    return {
+        "message": f"Full synkronisering startet for perioden {request.start_date} til {request.end_date}. Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.",
+        "job_id": job_id
+    }
+
+async def run_calculations_only(job_id: str, storage: DataStorage, start_date: datetime, end_date: datetime):
+    """Kjører kun beregninger og caching for eksisterende data."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        sync_jobs[job_id]["message"] = "Starter beregninger og caching..."
+        db_session = SessionLocal()
+        
+        result = await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        
+        sync_jobs[job_id].update({
+            "status": "completed", 
+            "result": result, 
+            "end_time": datetime.now(timezone.utc)
+        })
+        
+    except Exception as e:
+        logger.critical(f"Feil i beregninger (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({
+            "status": "failed", 
+            "error": str(e), 
+            "end_time": datetime.now(timezone.utc)
+        })
+    finally:
+        if db_session:
+            db_session.close()
+
+@router.post("/calculations", status_code=202)
+async def trigger_calculations(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage)
+):
+    """
+    Starter beregninger og caching for eksisterende data for en gitt periode.
+    Dette inkluderer power-beregninger og Training Stress Score.
+    """
+    start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
+    
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_calculations_only, job_id, storage, start_datetime, end_datetime)
+    
+    return {
+        "message": f"Beregninger og caching startet for perioden {request.start_date} til {request.end_date}.",
+        "job_id": job_id
+    }

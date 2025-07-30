@@ -274,6 +274,24 @@ export const syncApi = {
     return apiCall('post', '/sync/health/recent');
   },
 
+  // --- Full Synkronisering ---
+  fullSync: (startDate: string, endDate: string) => {
+    const body = {
+      start_date: startDate.split('T')[0],
+      end_date: endDate.split('T')[0],
+    };
+    return apiCall('post', '/sync/full-sync', { body });
+  },
+
+  // --- Beregninger og Caching ---
+  runCalculations: (startDate: string, endDate: string) => {
+    const body = {
+      start_date: startDate.split('T')[0],
+      end_date: endDate.split('T')[0],
+    };
+    return apiCall('post', '/sync/calculations', { body });
+  },
+
   // --- Felles ---
   getSyncStatus: async (jobId: string) => {
     try {

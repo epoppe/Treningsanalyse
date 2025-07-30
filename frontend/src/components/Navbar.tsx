@@ -74,6 +74,9 @@ export default function Navbar() {
           <NavLink href="/training-stress" $active={pathname === '/training-stress'}>
             Training Stress Score
           </NavLink>
+          <NavLink href="/synkronisering" $active={pathname === '/synkronisering'}>
+            Synkronisering
+          </NavLink>
         </NavLinks>
       </NavContainer>
     </Nav>
