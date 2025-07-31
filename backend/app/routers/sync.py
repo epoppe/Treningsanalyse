@@ -346,7 +346,7 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
         
         # 4. Kjør alle beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
-        await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
         # Kombiner resultater
         combined_result = {
@@ -374,7 +374,7 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
         if db_session:
             db_session.close()
 
-async def run_calculations_and_caching(job_id: str, db_session: Session, start_date: datetime, end_date: datetime):
+async def run_calculations_and_caching(job_id: str, db_session: Session, start_date: datetime, end_date: datetime, storage: DataStorage):
     """Kjører alle nødvendige beregninger og caching for raskere datahenting."""
     try:
         from ..services.power_service import PowerService
@@ -478,7 +478,7 @@ async def run_calculations_only(job_id: str, storage: DataStorage, start_date: d
         sync_jobs[job_id]["message"] = "Starter beregninger og caching..."
         db_session = SessionLocal()
         
-        result = await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        result = await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
         sync_jobs[job_id].update({
             "status": "completed", 
@@ -546,7 +546,7 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
         
         # 4. Kjør alle beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
-        calc_result = await run_calculations_and_caching(job_id, db_session, start_date, end_date)
+        calc_result = await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
         # Kombiner resultater
         combined_result = {
