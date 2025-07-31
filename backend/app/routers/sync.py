@@ -408,7 +408,7 @@ async def run_calculations_and_caching(job_id: str, db_session: Session, start_d
         
         # 2. Beregn Training Stress Score for perioden
         sync_jobs[job_id]["message"] = "Beregner Training Stress Score..."
-        training_stress_service = TrainingStressService()
+        training_stress_service = TrainingStressService(db_session)
         
         # Hent aktiviteter i perioden som mangler TSS
         activities_without_tss = db_session.query(Activity).filter(
