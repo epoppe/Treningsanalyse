@@ -7,7 +7,7 @@ import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActiv
 import { selectAllActivities, selectActivitiesStatus, selectActivitiesError, selectActivitiesTotalCount, selectActivitiesLoadedCount } from '../store/slices/activitiesSlice';
 import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
-import DataSyncPanel from '../components/DataSyncPanel';
+import ActivityViewControls from '../components/ActivityViewControls';
 import RunningEconomyTable from '../components/RunningEconomyTable';
 
 const MainContainer = styled.div`
@@ -322,7 +322,7 @@ export default function Home() {
 
   return (
     <MainContainer>
-      <DataSyncPanel 
+      <ActivityViewControls 
         onTimeFilterChange={handleTimeFilterChange}
         currentTimeFilter={timeFilter}
         onRefreshActivities={handleRefreshActivities}
