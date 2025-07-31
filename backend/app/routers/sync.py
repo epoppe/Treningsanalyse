@@ -518,7 +518,13 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             start_date = end_date - timedelta(days=30)
         else:
             # Bruk datoen for siste aktivitet som startdato
-            start_date = latest_activity.start_time
+            # Sørg for at start_date har timezone-informasjon
+            if latest_activity.start_time.tzinfo is None:
+                # Hvis start_time ikke har timezone, anta UTC
+                start_date = latest_activity.start_time.replace(tzinfo=timezone.utc)
+            else:
+                start_date = latest_activity.start_time
+            
             end_date = datetime.now(timezone.utc)
             
             sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.date()} til {end_date.date()}..."
