@@ -516,6 +516,7 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             sync_jobs[job_id]["message"] = "Ingen aktiviteter funnet, synkroniserer siste 30 dager..."
             end_date = datetime.now(timezone.utc)
             start_date = end_date - timedelta(days=30)
+            logger.info(f"Synkroniserer siste 30 dager: {start_date.date()} til {end_date.date()}")
         else:
             # Bruk datoen for siste aktivitet som startdato
             # Sørg for at start_date har timezone-informasjon
@@ -527,6 +528,8 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             
             end_date = datetime.now(timezone.utc)
             
+            logger.info(f"Siste aktivitet funnet: ID={latest_activity.activity_id}, start_time={latest_activity.start_time}, type={latest_activity.activity_type.type_key if latest_activity.activity_type else 'unknown'}")
+            logger.info(f"Synkroniserer fra {start_date.date()} til {end_date.date()}")
             sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.date()} til {end_date.date()}..."
         
         # Kjør full synkronisering for denne perioden
