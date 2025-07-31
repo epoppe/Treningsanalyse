@@ -422,8 +422,8 @@ async def run_calculations_and_caching(job_id: str, db_session: Session, start_d
         tss_calculated = 0
         for activity in activities_without_tss:
             try:
-                tss = training_stress_service.calculate_activity_tss(activity, db_session)
-                if tss is not None:
+                tss = training_stress_service.calculate_tss_for_activity(activity)
+                if tss is not None and tss > 0:
                     activity.training_stress_score = tss
                     tss_calculated += 1
             except Exception as e:
