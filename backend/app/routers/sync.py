@@ -382,7 +382,7 @@ async def run_calculations_and_caching(job_id: str, db_session: Session, start_d
         
         # 1. Beregn power for alle løpeaktiviteter i perioden
         sync_jobs[job_id]["message"] = "Beregner power for løpeaktiviteter..."
-        power_service = PowerService()
+        power_service = PowerService(storage)
         
         # Hent løpeaktiviteter i perioden som mangler power
         from sqlalchemy import and_
