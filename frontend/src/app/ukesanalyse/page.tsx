@@ -1,12 +1,13 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import styled from 'styled-components';
 import { fetchActivities, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
 import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
-import DataSyncPanel from '../../components/DataSyncPanel';
+import { useSyncListener } from '../../hooks/useSyncListener';
+
 import RunningEconomyChart from '../../components/RunningEconomyChart';
 import PowerPerHeartRateChart from '../../components/PowerPerHeartRateChart';
 import VO2MaxChart from '../../components/VO2MaxChart';
@@ -48,6 +49,16 @@ export default function RunningEconomyPage() {
   const activities = useSelector(selectAllActivities);
   const status = useSelector(selectActivitiesStatus);
   const [timeFilter, setTimeFilter] = useState('12m');
+
+  // Callback for å oppdatere data når synkronisering er fullført
+  const handleSyncComplete = useCallback(() => {
+    console.log('[RunningEconomy] Synkronisering fullført, oppdaterer aktiviteter...');
+    // Hent aktiviteter på nytt for å få med nye synkroniserte aktiviteter
+    dispatch(fetchActivities());
+  }, [dispatch]);
+
+  // Lytter etter synkroniseringshendelser
+  useSyncListener(handleSyncComplete);
 
   useEffect(() => {
     if (status === 'idle') {
@@ -100,7 +111,6 @@ export default function RunningEconomyPage() {
   return (
     <PageContainer>
       <Title>Løpsøkonomi</Title>
-      <DataSyncPanel />
       
       <ButtonContainer>
         <Button $active={timeFilter === '3m'} onClick={() => setTimeFilter('3m')}>Siste 3 mnd</Button>

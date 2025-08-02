@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActivities, setLoadedCount, Activity, resetActivitiesState } from '../store/slices/activitiesSlice';
@@ -9,6 +9,7 @@ import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
 import ActivityViewControls from '../components/ActivityViewControls';
 import RunningEconomyTable from '../components/RunningEconomyTable';
+import { useSyncListener } from '../hooks/useSyncListener';
 
 const MainContainer = styled.div`
   max-width: 1200px;
@@ -16,32 +17,7 @@ const MainContainer = styled.div`
   padding: 1rem;
 `;
 
-const ButtonContainer = styled.div`
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 0.25rem;
-  justify-content: center;
-  flex-wrap: wrap;
-`;
 
-const LoadMoreButton = styled.button`
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 14px;
-
-  &:hover {
-    background-color: #0056b3;
-  }
-
-  &:disabled {
-    background-color: #6c757d;
-    cursor: not-allowed;
-  }
-`;
 
 const FiltersContainer = styled.div`
   margin-bottom: 0.25rem;
@@ -135,9 +111,18 @@ export default function Home() {
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
-  const [showLoadMoreButton, setShowLoadMoreButton] = useState(false);
   const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
   const [timeFilter, setTimeFilter] = useState<'all' | '12months' | '3months'>('all');
+
+  // Callback for å oppdatere data når synkronisering er fullført
+  const handleSyncComplete = useCallback(() => {
+    console.log('[Home] Synkronisering fullført, oppdaterer aktiviteter...');
+    // Hent aktiviteter på nytt for å få med nye synkroniserte aktiviteter
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
+  }, [dispatch]);
+
+  // Lytter etter synkroniseringshendelser
+  useSyncListener(handleSyncComplete);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
@@ -207,12 +192,7 @@ export default function Home() {
     }
   }, [dispatch, status, hasRestoredFromStorage]);
 
-  useEffect(() => {
-    // Sjekk om vi skal vise "Last flere" knappen
-    if (totalCount !== null && loadedCount > 0) {
-      setShowLoadMoreButton(loadedCount < totalCount);
-    }
-  }, [loadedCount, totalCount]);
+
 
   useEffect(() => {
     // Sett alle aktivitetstyper som valgt kun første gang når aktiviteter lastes
@@ -278,16 +258,7 @@ export default function Home() {
     dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
   };
 
-  const handleLoadMoreActivities = () => {
-    const offset = loadedCount;
-    dispatch(fetchMoreActivities({ forceRefresh: false, limit: 500, offset }));
-  };
 
-  const handleLoadAllActivities = () => {
-    if (totalCount) {
-      dispatch(fetchAllActivities({ forceRefresh: false, count: totalCount }));
-    }
-  };
 
   const handleTimeFilterChange = (filter: 'all' | '12months' | '3months') => {
     setTimeFilter(filter);
@@ -330,27 +301,7 @@ export default function Home() {
         activityCount={totalCount !== null ? `Viser ${filteredActivities.length} av ${loadedCount} aktiviteter` : undefined}
       />
       
-      <ButtonContainer>
-        {showLoadMoreButton && (
-          <>
-            <LoadMoreButton 
-              onClick={handleLoadMoreActivities}
-              disabled={status === 'loading'}
-            >
-              {status === 'loading' ? 'Laster...' : 'Last flere aktiviteter (500 til)'}
-            </LoadMoreButton>
-            
-            {totalCount && loadedCount < totalCount && (
-              <LoadMoreButton 
-                onClick={handleLoadAllActivities}
-                disabled={status === 'loading'}
-              >
-                {status === 'loading' ? 'Laster...' : `Last alle aktiviteter (${totalCount} totalt)`}
-              </LoadMoreButton>
-            )}
-          </>
-        )}
-             </ButtonContainer>
+      
       
       <FiltersContainer>
         <FilterSection>

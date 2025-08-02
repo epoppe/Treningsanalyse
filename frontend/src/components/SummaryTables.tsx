@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
-import { useSyncListener } from '../hooks/useSyncListener';
 
 // Styled components
 const Container = styled.div`
@@ -39,34 +38,9 @@ const Tab = styled.button<{ $active: boolean }>`
   }
 `;
 
-const ControlsContainer = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  flex-wrap: wrap;
-  gap: 1rem;
-`;
 
-const RefreshButton = styled.button`
-  padding: 0.5rem 1rem;
-  background: #27ae60;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
 
-  &:hover {
-    background: #219a52;
-  }
 
-  &:disabled {
-    background: #bdc3c7;
-    cursor: not-allowed;
-  }
-`;
 
 const StatsInfo = styled.div`
   color: #666;
@@ -274,41 +248,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
     }
   }, []);
 
-  const refreshSummaries = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Først refresh backend-data
-      const response = await fetch('http://localhost:8000/api/analysis/refresh-summaries', {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to refresh summaries');
-      }
-      
-      // Så last inn data på nytt
-      await Promise.all([
-        fetchDailyData(),
-        fetchWeeklyData(),
-        fetchMonthlyData(),
-        fetchStats()
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchDailyData, fetchWeeklyData, fetchMonthlyData, fetchStats]);
 
-  // Callback for å oppdatere data når synkronisering er fullført
-  const handleSyncComplete = useCallback(async () => {
-    console.log('[SummaryTables] Synkronisering fullført, oppdaterer data...');
-    await refreshSummaries();
-  }, [refreshSummaries]);
-
-  // Lytter etter synkroniseringshendelser
-  useSyncListener(handleSyncComplete);
 
   // Load data when component mounts or when selectedActivityTypes changes
   useEffect(() => {
@@ -544,21 +484,11 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
         </Tab>
       </TabContainer>
 
-      <ControlsContainer>
-        <RefreshButton onClick={refreshSummaries} disabled={loading}>
-          {loading ? 'Oppdaterer...' : 'Oppdater sammendrag'}
-        </RefreshButton>
-        
-        {stats && (
-          <StatsInfo>
-            Totalt: {stats.daily?.count || 0} dager, {stats.weekly?.count || 0} uker, {stats.monthly?.count || 0} måneder
-            <br />
-            <span style={{ fontSize: '0.8rem', color: '#27ae60' }}>
-              ✓ Sammendrag filtrerer automatisk ut duplikater basert på activity_id
-            </span>
-          </StatsInfo>
-        )}
-      </ControlsContainer>
+             {stats && (
+         <StatsInfo>
+           Totalt: {stats.daily?.count || 0} dager, {stats.weekly?.count || 0} uker, {stats.monthly?.count || 0} måneder
+         </StatsInfo>
+       )}
 
       {error && <ErrorMessage>{error}</ErrorMessage>}
 
@@ -566,7 +496,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
         <LoadingSpinner />
       ) : getCurrentData().length === 0 ? (
         <EmptyMessage>
-          Ingen data tilgjengelig. Klikk "Oppdater sammendrag" for å generere data.
+          Ingen data tilgjengelig.
         </EmptyMessage>
       ) : (
         getCurrentTable()
