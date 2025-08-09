@@ -13,6 +13,7 @@ from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage, DateTimeEncoder
 from ..database.models.activity import Activity, ActivityType
+from ..database.models.sync_state import SyncState
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +602,7 @@ class SyncService:
         }
 
     async def sync_health_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
-        """Synkroniserer helsedata (HRV, etc.) for en gitt periode."""
+        """Synkroniserer helsedata (HRV, Body Battery) for en gitt periode, inkrementelt."""
         # HRV-data er kun tilgjengelig fra 2023 og fremover
         hrv_start_date = max(start_date, datetime(2023, 1, 1, tzinfo=timezone.utc))
         
@@ -609,7 +610,7 @@ class SyncService:
             logger.info(f"HRV-synkronisering hoppes over - perioden {start_date.date()} til {end_date.date()} er før 2023")
             return
         
-        logger.info(f"Starter synkronisering av helsedata fra {hrv_start_date.date()} til {end_date.date()} (HRV-data kun tilgjengelig fra 2023)")
+        logger.info(f"Starter synkronisering av helsedata fra {hrv_start_date.date()} til {end_date.date()} (HRV fra 2023)")
         
         if not await self.garmin_client.initialize():
             logger.error("Kunne ikke initialisere Garmin-klient for helsedata-synk.")
@@ -636,6 +637,17 @@ class SyncService:
         except Exception as e:
             logger.warning(f"Kunne ikke lese eksisterende HRV-datoer, fortsetter uten duplikatsjekk. Feil: {e}")
             existing_dates = set()
+
+        # Les sist synket dato for HRV for inkrementell henting
+        try:
+            hrv_state = self.db.query(SyncState).filter_by(key="hrv").first()
+            if hrv_state and hrv_state.last_synced_date:
+                # Start neste dag etter sist synket, med mindre force_refresh_recent
+                hrv_start_effective = datetime.combine(hrv_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc)
+                if not force_refresh_recent:
+                    hrv_start_date = max(hrv_start_date, hrv_start_effective + timedelta(days=1))
+        except Exception:
+            pass
 
         current_date = hrv_start_date
         while current_date <= end_date:
@@ -672,8 +684,48 @@ class SyncService:
         if all_hrv_data:
             logger.info(f"Fant {len(all_hrv_data)} nye dager med HRV-data. Lagrer...")
             self.storage.save_hrv_data(all_hrv_data)
+            # Oppdater sync state
+            try:
+                last_date = max(datetime.strptime(d["date"], "%Y-%m-%d").date() for d in all_hrv_data)
+                if not 'hrv_state' in locals():
+                    hrv_state = self.db.query(SyncState).filter_by(key="hrv").first()
+                if not hrv_state:
+                    hrv_state = SyncState(key="hrv")
+                    self.db.add(hrv_state)
+                hrv_state.last_synced_date = last_date
+                hrv_state.last_synced_at = datetime.utcnow()
+                self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere HRV sync state: {e}")
         else:
             logger.info("Ingen nye HRV-data å lagre.") 
+
+        # Body Battery inkrementell synk via database
+        try:
+            from .body_battery_service import BodyBatteryService
+            bb_service = BodyBatteryService(self.garmin_client)
+            # Finn startdato for BB (inkrementell)
+            bb_state = self.db.query(SyncState).filter_by(key="body_battery").first()
+            bb_start_date = hrv_start_date
+            if bb_state and bb_state.last_synced_date:
+                bb_start_date = max(bb_start_date, datetime.combine(bb_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
+            bb_start_str = bb_start_date.strftime('%Y-%m-%d')
+            bb_end_str = end_date.strftime('%Y-%m-%d')
+            logger.info(f"Synkroniserer Body Battery inkrementelt: {bb_start_str} -> {bb_end_str}")
+            bb_result = await bb_service.sync_body_battery_data_to_database(self.db, bb_start_str, bb_end_str)
+            if (bb_result.get("synced_records", 0) + bb_result.get("updated_records", 0)) > 0:
+                # Oppdater sync state
+                try:
+                    if not bb_state:
+                        bb_state = SyncState(key="body_battery")
+                        self.db.add(bb_state)
+                    bb_state.last_synced_date = datetime.strptime(bb_end_str, '%Y-%m-%d').date()
+                    bb_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+                except Exception as e:
+                    logger.warning(f"Kunne ikke oppdatere Body Battery sync state: {e}")
+        except Exception as e:
+            logger.warning(f"Body Battery synk feilet, fortsetter: {e}")
 
     async def _download_and_store_fit_file(self, activity_id: int):
         """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
