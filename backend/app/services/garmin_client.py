@@ -663,11 +663,11 @@ class GarminClient:
             date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter søvndata for {date_str}")
             
-            # Hent søvndata fra Garmin Connect API
+            # Hent søvndata fra Garmin Connect API (pass params som keyword for å unngå dict.upper-feil)
             sleep_data = await asyncio.to_thread(
-                garth.connectapi, 
+                garth.connectapi,
                 f"/usersummary-service/usersummary/daily/{garth.client.username}",
-                {"calendarDate": date_str}
+                params={"calendarDate": date_str}
             )
             
             if isinstance(sleep_data, dict) and 'allMetrics' in sleep_data:
@@ -747,11 +747,11 @@ class GarminClient:
             date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter stressdata for {date_str}")
             
-            # Hent stressdata fra Garmin Connect API
+            # Hent stressdata fra Garmin Connect API (pass params som keyword for å unngå dict.upper-feil)
             stress_data = await asyncio.to_thread(
-                garth.connectapi, 
+                garth.connectapi,
                 f"/usersummary-service/usersummary/daily/{garth.client.username}",
-                {"calendarDate": date_str}
+                params={"calendarDate": date_str}
             )
             
             if isinstance(stress_data, dict) and 'allMetrics' in stress_data:
