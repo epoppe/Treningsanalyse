@@ -220,6 +220,8 @@ const StatistikkPage = () => {
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [historicalActivities, setHistoricalActivities] = useState<Activity[]>([]);
+  const [monthlyComparison, setMonthlyComparison] = useState<any[]>([]);
+  const [loadingMonthlyComparison, setLoadingMonthlyComparison] = useState<boolean>(false);
 
   // Hent unike aktivitetstyper
   const activityTypes = useMemo(() => {
@@ -491,6 +493,34 @@ const StatistikkPage = () => {
   }, [combinedActivities, selectedActivityTypes, trailing24MonthsDate]);
 
   const monthlyStats = getMonthlyStats;
+
+  // Hent serverberegnet månedssammenligning (siste 12 mnd vs samme måned i fjor)
+  useEffect(() => {
+    const fetchMonthlyComparison = async () => {
+      try {
+        setLoadingMonthlyComparison(true);
+        const params = new URLSearchParams();
+        params.append('months', '12');
+        if (selectedActivityTypes.length > 0) {
+          selectedActivityTypes.forEach(t => params.append('activity_types', t));
+        }
+        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${base}/api/analysis/monthly-comparison?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setMonthlyComparison(Array.isArray(data) ? data : []);
+        } else {
+          setMonthlyComparison([]);
+        }
+      } catch (e) {
+        console.warn('[Statistikk] Klarte ikke hente monthly-comparison', e);
+        setMonthlyComparison([]);
+      } finally {
+        setLoadingMonthlyComparison(false);
+      }
+    };
+    fetchMonthlyComparison();
+  }, [selectedActivityTypes]);
   
   // Hjelpefunksjon for å beregne endring i prosent
   const calculatePercentChange = useMemo(() => {
@@ -607,44 +637,50 @@ const StatistikkPage = () => {
           </PeriodSection>
 
           <PeriodSection>
-            <PeriodTitle>Månedlig fordeling</PeriodTitle>
-            <StatsGrid>
-              {Object.entries(monthlyStats.current).map(([month, stats]) => {
-                const lastYearStats = getLastYearMonth(month);
-                const distanceChange = calculatePercentChange(stats.distance, lastYearStats.distance);
-                const timeChange = calculatePercentChange(stats.time, lastYearStats.time);
-                const countChange = calculatePercentChange(stats.count, lastYearStats.count);
-                
-                return (
-                  <StatCard key={month}>
-                    <StatTitle>{month}</StatTitle>
-                    <StatValue style={{ fontSize: '1.2rem' }}>
-                      {stats.distance.toFixed(1)} <StatUnit>km</StatUnit>
-                    </StatValue>
-                    <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
-                      <div>{Math.round(stats.time / 60)} timer</div>
-                      <div>{stats.count} aktiviteter</div>
-                    </div>
-                    
-                    {/* Sammenligning med året før */}
-                    <div style={{ fontSize: '0.8rem', marginTop: '0.5rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
-                      <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#2c3e50' }}>
-                        Vs. {parseInt(month.split('-')[0]) - 1}:
+            <PeriodTitle>Månedlig fordeling (serverberegnet, vs. samme måned i fjor)</PeriodTitle>
+            {loadingMonthlyComparison ? (
+              <div style={{ textAlign: 'center', padding: '1rem' }}>
+                <LoadingSpinner />
+              </div>
+            ) : (
+              <StatsGrid>
+                {monthlyComparison.map((item) => {
+                  const ym = `${item.year}-${String(item.month).padStart(2, '0')}`;
+                  const km = ((item.current?.total_distance || 0) / 1000).toFixed(1);
+                  const hours = Math.round((item.current?.total_duration || 0) / 3600);
+                  const count = item.current?.total_activities || 0;
+                  const dPct = item.deltas ? Math.round(item.deltas.distance_pct) : 0;
+                  const tPct = item.deltas ? Math.round(item.deltas.duration_pct) : 0;
+                  const cPct = item.deltas ? Math.round(item.deltas.activities_pct) : 0;
+                  return (
+                    <StatCard key={ym}>
+                      <StatTitle>{ym}</StatTitle>
+                      <StatValue style={{ fontSize: '1.2rem' }}>
+                        {km} <StatUnit>km</StatUnit>
+                      </StatValue>
+                      <div style={{ fontSize: '0.9rem', color: '#666', marginTop: '0.5rem' }}>
+                        <div>{hours} timer</div>
+                        <div>{count} aktiviteter</div>
                       </div>
-                      <div style={{ color: distanceChange >= 0 ? '#27ae60' : '#e74c3c' }}>
-                        {distanceChange >= 0 ? '+' : ''}{distanceChange.toFixed(0)}% km
+                      <div style={{ fontSize: '0.8rem', marginTop: '0.5rem', borderTop: '1px solid #eee', paddingTop: '0.5rem' }}>
+                        <div style={{ fontWeight: 'bold', marginBottom: '0.25rem', color: '#2c3e50' }}>
+                          Vs. {item.year - 1}:
+                        </div>
+                        <div style={{ color: dPct >= 0 ? '#27ae60' : '#e74c3c' }}>
+                          {dPct >= 0 ? '+' : ''}{dPct}% km
+                        </div>
+                        <div style={{ color: tPct >= 0 ? '#27ae60' : '#e74c3c' }}>
+                          {tPct >= 0 ? '+' : ''}{tPct}% tid
+                        </div>
+                        <div style={{ color: cPct >= 0 ? '#27ae60' : '#e74c3c' }}>
+                          {cPct >= 0 ? '+' : ''}{cPct}% økter
+                        </div>
                       </div>
-                      <div style={{ color: timeChange >= 0 ? '#27ae60' : '#e74c3c' }}>
-                        {timeChange >= 0 ? '+' : ''}{timeChange.toFixed(0)}% tid
-                      </div>
-                      <div style={{ color: countChange >= 0 ? '#27ae60' : '#e74c3c' }}>
-                        {countChange >= 0 ? '+' : ''}{countChange.toFixed(0)}% økter
-                      </div>
-                    </div>
-                  </StatCard>
-                );
-              })}
-            </StatsGrid>
+                    </StatCard>
+                  );
+                })}
+              </StatsGrid>
+            )}
           </PeriodSection>
 
           <SummaryTables selectedActivityTypes={selectedActivityTypes} />
@@ -654,11 +690,15 @@ const StatistikkPage = () => {
               activities={allFilteredActivities} 
               metric="distance"
               title="Månedlig distanse fra 2022 (valgte aktivitetstyper)"
+              useServerSummaries
+              activityTypes={selectedActivityTypes}
             />
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="time"
               title="Månedlig treningstid fra 2022 (valgte aktivitetstyper)"
+              useServerSummaries
+              activityTypes={selectedActivityTypes}
             />
           </ChartsContainer>
         </>

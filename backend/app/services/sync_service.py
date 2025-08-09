@@ -13,6 +13,7 @@ from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage, DateTimeEncoder
 from ..database.models.activity import Activity, ActivityType
+from ..database.models.sync_state import SyncState
 
 logger = logging.getLogger(__name__)
 
@@ -358,11 +359,21 @@ class SyncService:
                 summary["status"] = "Feil: Kunne ikke autentisere mot Garmin"
                 return summary
 
-            # For nå, la oss bare hente hele perioden uten å sjekke dekning
-            # for å sikre at vi får data inn i den nye DB-en.
-            logger.info(f"Henter aktiviteter fra Garmin: {start_date.date()} -> {end_date.date()}")
+            # Inkrementell startdato basert på SyncState
+            effective_start = start_date
+            try:
+                act_state = self.db.query(SyncState).filter_by(key="activities").first()
+                if act_state and act_state.last_synced_date and not force_refresh_recent:
+                    effective_start = max(
+                        effective_start,
+                        datetime.combine(act_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                    )
+            except Exception as e:
+                logger.debug(f"Kunne ikke lese SyncState for activities: {e}")
+
+            logger.info(f"Henter aktiviteter fra Garmin: {effective_start.date()} -> {end_date.date()}")
             
-            activities_raw = await self.garmin_client.get_activities(start_date, end_date)
+            activities_raw = await self.garmin_client.get_activities(effective_start, end_date)
             
             # Filtrer bort duplikater basert på 'activityId'
             existing_ids = self.storage.get_existing_activity_ids(self.db)
@@ -531,6 +542,29 @@ class SyncService:
                 added_count += 1
 
             self.db.commit()
+
+            # Oppdater SyncState for aktiviteter
+            try:
+                if added_count > 0:
+                    # Sett siste synketdato til sluttdatoen vi nettopp ba om, eller siste aktivitet sin dato
+                    last_date = end_date.date()
+                    try:
+                        latest = max(
+                            datetime.fromisoformat(a.get('startTimeGMT')).date()
+                            for a in activities_to_save if a.get('startTimeGMT')
+                        )
+                        last_date = latest
+                    except Exception:
+                        pass
+                    act_state = self.db.query(SyncState).filter_by(key="activities").first()
+                    if not act_state:
+                        act_state = SyncState(key="activities")
+                        self.db.add(act_state)
+                    act_state.last_synced_date = last_date
+                    act_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             
             # Beregn metrics for nye aktiviteter
             logger.info("Starter beregning av metrics for nye aktiviteter...")
@@ -601,7 +635,7 @@ class SyncService:
         }
 
     async def sync_health_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
-        """Synkroniserer helsedata (HRV, etc.) for en gitt periode."""
+        """Synkroniserer helsedata (HRV, Body Battery) for en gitt periode, inkrementelt."""
         # HRV-data er kun tilgjengelig fra 2023 og fremover
         hrv_start_date = max(start_date, datetime(2023, 1, 1, tzinfo=timezone.utc))
         
@@ -609,7 +643,7 @@ class SyncService:
             logger.info(f"HRV-synkronisering hoppes over - perioden {start_date.date()} til {end_date.date()} er før 2023")
             return
         
-        logger.info(f"Starter synkronisering av helsedata fra {hrv_start_date.date()} til {end_date.date()} (HRV-data kun tilgjengelig fra 2023)")
+        logger.info(f"Starter synkronisering av helsedata fra {hrv_start_date.date()} til {end_date.date()} (HRV fra 2023)")
         
         if not await self.garmin_client.initialize():
             logger.error("Kunne ikke initialisere Garmin-klient for helsedata-synk.")
@@ -636,6 +670,17 @@ class SyncService:
         except Exception as e:
             logger.warning(f"Kunne ikke lese eksisterende HRV-datoer, fortsetter uten duplikatsjekk. Feil: {e}")
             existing_dates = set()
+
+        # Les sist synket dato for HRV for inkrementell henting
+        try:
+            hrv_state = self.db.query(SyncState).filter_by(key="hrv").first()
+            if hrv_state and hrv_state.last_synced_date:
+                # Start neste dag etter sist synket, med mindre force_refresh_recent
+                hrv_start_effective = datetime.combine(hrv_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc)
+                if not force_refresh_recent:
+                    hrv_start_date = max(hrv_start_date, hrv_start_effective + timedelta(days=1))
+        except Exception:
+            pass
 
         current_date = hrv_start_date
         while current_date <= end_date:
@@ -672,8 +717,103 @@ class SyncService:
         if all_hrv_data:
             logger.info(f"Fant {len(all_hrv_data)} nye dager med HRV-data. Lagrer...")
             self.storage.save_hrv_data(all_hrv_data)
+            # Oppdater sync state
+            try:
+                last_date = max(datetime.strptime(d["date"], "%Y-%m-%d").date() for d in all_hrv_data)
+                if not 'hrv_state' in locals():
+                    hrv_state = self.db.query(SyncState).filter_by(key="hrv").first()
+                if not hrv_state:
+                    hrv_state = SyncState(key="hrv")
+                    self.db.add(hrv_state)
+                hrv_state.last_synced_date = last_date
+                hrv_state.last_synced_at = datetime.utcnow()
+                self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere HRV sync state: {e}")
         else:
             logger.info("Ingen nye HRV-data å lagre.") 
+
+        # Body Battery inkrementell synk via database
+        try:
+            from .body_battery_service import BodyBatteryService
+            bb_service = BodyBatteryService(self.garmin_client)
+            # Finn startdato for BB (inkrementell)
+            bb_state = self.db.query(SyncState).filter_by(key="body_battery").first()
+            bb_start_date = hrv_start_date
+            if bb_state and bb_state.last_synced_date:
+                bb_start_date = max(bb_start_date, datetime.combine(bb_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
+            bb_start_str = bb_start_date.strftime('%Y-%m-%d')
+            bb_end_str = end_date.strftime('%Y-%m-%d')
+            logger.info(f"Synkroniserer Body Battery inkrementelt: {bb_start_str} -> {bb_end_str}")
+            bb_result = await bb_service.sync_body_battery_data_to_database(self.db, bb_start_str, bb_end_str)
+            if (bb_result.get("synced_records", 0) + bb_result.get("updated_records", 0)) > 0:
+                # Oppdater sync state
+                try:
+                    if not bb_state:
+                        bb_state = SyncState(key="body_battery")
+                        self.db.add(bb_state)
+                    bb_state.last_synced_date = datetime.strptime(bb_end_str, '%Y-%m-%d').date()
+                    bb_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+                except Exception as e:
+                    logger.warning(f"Kunne ikke oppdatere Body Battery sync state: {e}")
+        except Exception as e:
+            logger.warning(f"Body Battery synk feilet, fortsetter: {e}")
+
+        # Søvn inkrementell synk via database
+        try:
+            from ..database.models.sleep import Sleep
+            sleep_state = self.db.query(SyncState).filter_by(key="sleep").first()
+            sleep_start_date = hrv_start_date
+            if sleep_state and sleep_state.last_synced_date:
+                sleep_start_date = max(sleep_start_date, datetime.combine(sleep_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
+
+            logger.info(f"Starter søvn-synk: {sleep_start_date.date()} -> {end_date.date()}")
+            current_date = sleep_start_date
+            saved = 0
+            while current_date <= end_date:
+                try:
+                    data = await self.garmin_client.get_sleep_data(current_date)
+                    if data and any(data.get(k) for k in ["sleep_time","total_sleep","deep_sleep","light_sleep","rem_sleep","sleep_score"]):
+                        # Oppdater/sett i DB
+                        sleep_date = current_date.date()
+                        row = self.db.query(Sleep).filter_by(sleep_date=sleep_date).first()
+                        if not row:
+                            from sqlalchemy.sql import func
+                            from ..database.models.sleep import Sleep as SleepModel
+                            row = SleepModel(sleep_date=sleep_date, created_at=func.now(), updated_at=func.now())
+                            self.db.add(row)
+                        # lagre i sekunder
+                        def to_sec(hours_or_min):
+                            if hours_or_min is None:
+                                return None
+                            # data feltene er i minutter i vår klient; konverter til sekunder
+                            return float(hours_or_min) * 60.0
+                        row.total_sleep_time = to_sec(data.get("sleep_time")) or to_sec(data.get("total_sleep"))
+                        row.deep_sleep_time = to_sec(data.get("deep_sleep"))
+                        row.light_sleep_time = to_sec(data.get("light_sleep"))
+                        row.rem_sleep_time = to_sec(data.get("rem_sleep"))
+                        row.awake_time = to_sec(data.get("awake_time"))
+                        row.sleep_score = data.get("sleep_score")
+                        from sqlalchemy.sql import func
+                        row.updated_at = func.now()
+                        saved += 1
+                except Exception as e:
+                    logger.debug(f"Søvn-dag feilet {current_date.date()}: {e}")
+                current_date += timedelta(days=1)
+
+            if saved > 0:
+                self.db.commit()
+                # oppdater sync state
+                if not sleep_state:
+                    sleep_state = SyncState(key="sleep")
+                    self.db.add(sleep_state)
+                sleep_state.last_synced_date = end_date.date()
+                sleep_state.last_synced_at = datetime.utcnow()
+                self.db.commit()
+                logger.info(f"Søvn-synk lagret {saved} dager")
+        except Exception as e:
+            logger.warning(f"Søvn synk feilet: {e}")
 
     async def _download_and_store_fit_file(self, activity_id: int):
         """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
@@ -924,7 +1064,19 @@ class SyncService:
             end_date: Sluttdato for synkronisering
             force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
         """
-        logger.info(f"Starter Training Effect synkronisering for perioden {start_date.date()} til {end_date.date()}")
+        # Inkrementell startdato basert på SyncState
+        effective_start = start_date
+        try:
+            te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
+            if te_state and te_state.last_synced_date and not force_refresh_recent:
+                effective_start = max(
+                    effective_start,
+                    datetime.combine(te_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                )
+        except Exception as e:
+            logger.debug(f"Kunne ikke lese SyncState for training_effect: {e}")
+
+        logger.info(f"Starter Training Effect synkronisering for perioden {effective_start.date()} til {end_date.date()}")
         
         try:
             if not await self.garmin_client.initialize():
@@ -933,7 +1085,7 @@ class SyncService:
             
             # Hent aktiviteter fra databasen i den gitte perioden
             activities = self.db.query(Activity).filter(
-                Activity.start_time >= start_date,
+                Activity.start_time >= effective_start,
                 Activity.start_time <= end_date
             ).order_by(Activity.start_time.desc()).all()
             
@@ -989,6 +1141,19 @@ class SyncService:
             
             # Lagre endringene til databasen
             self.db.commit()
+
+            # Oppdater SyncState for training_effect
+            try:
+                if updated_count > 0:
+                    te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
+                    if not te_state:
+                        te_state = SyncState(key="training_effect")
+                        self.db.add(te_state)
+                    te_state.last_synced_date = end_date.date()
+                    te_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere SyncState for training_effect: {e}")
             
             result = {
                 "status": "Fullført",

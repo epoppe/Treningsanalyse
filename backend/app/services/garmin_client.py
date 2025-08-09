@@ -14,13 +14,17 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prøv å importere garth's HRV-klasser hvis tilgjengelige
+# Prøv å importere garth's HRV- og Body Battery-klasser hvis tilgjengelige
 try:
     DailyHRV = getattr(garth, 'DailyHRV', None)
     HRVData = getattr(garth, 'HRVData', None)
+    DailyBodyBatteryStress = getattr(garth, 'DailyBodyBatteryStress', None)
+    BodyBatteryDetail = getattr(garth, 'BodyBatteryData', None)
 except ImportError as e:
     DailyHRV = None
     HRVData = None
+    DailyBodyBatteryStress = None
+    BodyBatteryDetail = None
     logger.warning(f"Kunne ikke importere HRV-klasser fra garth: {e} - bruker kun API-kall")
 
 # Pydantic-modeller for HRV-data
@@ -471,7 +475,82 @@ class GarminClient:
                 date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter body battery data for {date_str}")
 
-            # Prøv flere endepunkter, likt som HRV
+            # 0) Prøv garth-objekter hvis tilgjengelig (gir ofte mest stabile svar)
+            if DailyBodyBatteryStress is not None:
+                try:
+                    bb_obj = await asyncio.to_thread(DailyBodyBatteryStress.get, date_str)
+                    # Forsøk å konvertere til dictionary
+                    if bb_obj is None:
+                        logger.debug("DailyBodyBatteryStress.get returnerte None")
+                    else:
+                        if hasattr(bb_obj, 'to_dict'):
+                            bb_data = bb_obj.to_dict()
+                        elif hasattr(bb_obj, 'dict'):
+                            bb_data = bb_obj.dict()
+                        elif isinstance(bb_obj, dict):
+                            bb_data = bb_obj
+                        else:
+                            # Best-effort: hent __dict__
+                            bb_data = getattr(bb_obj, '__dict__', {})
+
+                        # Ekstraher verdier
+                        values_array = bb_data.get('body_battery_values_array') or bb_data.get('values')
+                        raw_max = bb_data.get('max_body_battery')
+                        raw_min = bb_data.get('min_body_battery')
+
+                        def to_num(x):
+                            if isinstance(x, (int, float)):
+                                return x
+                            if isinstance(x, (list, tuple)) and len(x) >= 3 and isinstance(x[2], (int, float)):
+                                return x[2]
+                            return None
+
+                        max_bb = to_num(raw_max)
+                        min_bb = to_num(raw_min)
+                        if (max_bb is None or min_bb is None) and isinstance(values_array, (list, tuple)) and len(values_array) > 0:
+                            try:
+                                nums = [to_num(v) for v in values_array]
+                                nums = [n for n in nums if isinstance(n, (int, float))]
+                                if nums:
+                                    if max_bb is None:
+                                        max_bb = max(nums)
+                                    if min_bb is None:
+                                        min_bb = min(nums)
+                            except Exception:
+                                pass
+
+                        result_from_obj = {
+                            "date": date_str,
+                            # Disse feltene finnes ikke alltid i DailyBodyBatteryStress – settes til None hvis ukjent
+                            "body_battery_charged": bb_data.get('body_battery_charged'),
+                            "body_battery_drained": bb_data.get('body_battery_drained'),
+                            "body_battery_charged_start": bb_data.get('body_battery_charged_start'),
+                            "body_battery_drained_start": bb_data.get('body_battery_drained_start'),
+                            "max_body_battery": max_bb,
+                            "min_body_battery": min_bb,
+                            "net_charge": None,
+                        }
+
+                        # Forsøk kalkulert net_charge hvis mulig
+                        if result_from_obj["body_battery_charged"] is not None and result_from_obj["body_battery_drained"] is not None:
+                            result_from_obj["net_charge"] = (result_from_obj["body_battery_charged"] or 0) - (result_from_obj["body_battery_drained"] or 0)
+
+                        logger.info(f"Hentet body battery via garth.DailyBodyBatteryStress for {date_str}: {result_from_obj}")
+                        return result_from_obj
+                except Exception as e:
+                    logger.debug(f"DailyBodyBatteryStress.get feilet for {date_str}: {e}")
+
+            # 0b) Prøv garth BodyBatteryData for event-detaljer (kan berike men ikke nødvendig for lagring)
+            if BodyBatteryDetail is not None:
+                try:
+                    _bb_detail = await asyncio.to_thread(BodyBatteryDetail.get, date_str)
+                    # Vi bruker ikke event-detaljer i DB-modellen, så vi logger kun tilgjengelighet
+                    if _bb_detail is not None:
+                        logger.debug("BodyBatteryData.get fant event-detaljer for %s", date_str)
+                except Exception:
+                    pass
+
+            # 1) Prøv flere Connect API-endepunkter, likt som HRV
             endpoints = [
                 (f"/usersummary-service/usersummary/daily/{garth.client.username}", {"calendarDate": date_str}),
                 (f"/wellness-service/wellness/dailyBodyBattery/{garth.client.username}", {"date": date_str}),
@@ -584,42 +663,189 @@ class GarminClient:
             date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter søvndata for {date_str}")
             
-            # Hent søvndata fra Garmin Connect API
-            sleep_data = await asyncio.to_thread(
-                garth.connectapi, 
-                f"/usersummary-service/usersummary/daily/{garth.client.username}",
-                {"calendarDate": date_str}
-            )
-            
-            if isinstance(sleep_data, dict) and 'allMetrics' in sleep_data:
-                metrics = sleep_data.get('allMetrics', {}).get('metricsMap', {})
-                
-                # Hent søvn-relaterte metrics
-                sleep_time = metrics.get('SLEEP_TIME', {}).get('value')
-                sleep_goal = metrics.get('SLEEP_GOAL', {}).get('value')
-                sleep_score = metrics.get('SLEEP_SCORE', {}).get('value')
-                deep_sleep = metrics.get('DEEP_SLEEP', {}).get('value')
-                light_sleep = metrics.get('LIGHT_SLEEP', {}).get('value')
-                rem_sleep = metrics.get('REM_SLEEP', {}).get('value')
-                awake_time = metrics.get('AWAKE_TIME', {}).get('value')
-                
-                result = {
-                    "date": date_str,
-                    "sleep_time": sleep_time,
-                    "sleep_goal": sleep_goal,
-                    "sleep_score": sleep_score,
-                    "deep_sleep": deep_sleep,
-                    "light_sleep": light_sleep,
-                    "rem_sleep": rem_sleep,
-                    "awake_time": awake_time,
-                    "total_sleep": (deep_sleep or 0) + (light_sleep or 0) + (rem_sleep or 0)
-                }
-                
-                logger.info(f"Hentet søvndata for {date_str}: {result}")
-                return result
-            else:
-                logger.info(f"Ingen søvndata funnet for {date_str}")
-                return None
+            # 0) Prøv garth.DailySleep (score pr dag, tider som sekunder)
+            try:
+                DailySleep = getattr(garth, 'DailySleep', None)
+                if DailySleep is not None:
+                    ds = await asyncio.to_thread(DailySleep.list, date_str, '1d')
+                    if ds:
+                        payload = ds[0] if isinstance(ds, list) else ds
+                        # Hjelpere
+                        def find_score_from_dict(d: dict):
+                            # Direkte felt
+                            for k in ['sleep_score', 'sleepScore', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            # Nestet under "scores"
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
+                        to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
+                        sleep_time = to_min(payload.get('total_sleep_seconds') or payload.get('totalSleepSeconds'))
+                        deep = to_min(payload.get('deep_sleep_seconds') or payload.get('deepSleepSeconds'))
+                        light = to_min(payload.get('light_sleep_seconds') or payload.get('lightSleepSeconds'))
+                        rem = to_min(payload.get('rem_sleep_seconds') or payload.get('remSleepSeconds'))
+                        awake = to_min(payload.get('awake_seconds') or payload.get('awakeDurationInSeconds'))
+                        score = find_score_from_dict(payload)
+                        result = {
+                            "date": date_str,
+                            "sleep_time": sleep_time,
+                            "sleep_goal": None,
+                            "sleep_score": score,
+                            "deep_sleep": deep,
+                            "light_sleep": light,
+                            "rem_sleep": rem,
+                            "awake_time": awake,
+                            "total_sleep": sleep_time if sleep_time is not None else ((deep or 0) + (light or 0) + (rem or 0))
+                        }
+                        if any(v is not None for k, v in result.items() if k != 'date'):
+                            logger.info(f"Hentet søvndata via garth.DailySleep for {date_str}")
+                            return result
+            except Exception as e:
+                logger.debug(f"DailySleep.list feilet for {date_str}: {e}")
+
+            # 1) Prøv garth.SleepData (detaljer per dag)
+            try:
+                SleepData = getattr(garth, 'SleepData', None)
+                if SleepData is not None:
+                    sd = await asyncio.to_thread(SleepData.get, date_str)
+                    if sd:
+                        sd_dict = sd.to_dict() if hasattr(sd, 'to_dict') else (sd.dict() if hasattr(sd, 'dict') else sd)
+                        def find_num(d: dict, keys: list):
+                            for k in keys:
+                                if k in d and isinstance(d[k], (int, float)):
+                                    return d[k]
+                            return None
+                        def find_score(d: dict):
+                            # Direkte felt
+                            for k in ['sleepScore', 'sleep_score', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            # Nestet under "scores"-struktur
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            # Noen ganger under "summary"
+                            summary = d.get('summary') if isinstance(d.get('summary'), dict) else None
+                            if summary:
+                                for k in ['sleepScore', 'sleep_score', 'overall', 'overallScore']:
+                                    v = summary.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
+                        to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
+                        deep = to_min(find_num(sd_dict, ['deepSleepSeconds','deep_sleep_seconds']))
+                        light = to_min(find_num(sd_dict, ['lightSleepSeconds','light_sleep_seconds']))
+                        rem = to_min(find_num(sd_dict, ['remSleepSeconds','rem_sleep_seconds']))
+                        awake = to_min(find_num(sd_dict, ['awakeSeconds','awake_seconds']))
+                        total = to_min(find_num(sd_dict, ['totalSleepSeconds','total_sleep_seconds']))
+                        score = find_score(sd_dict)
+                        result = {
+                            "date": date_str,
+                            "sleep_time": total,
+                            "sleep_goal": None,
+                            "sleep_score": score,
+                            "deep_sleep": deep,
+                            "light_sleep": light,
+                            "rem_sleep": rem,
+                            "awake_time": awake,
+                            "total_sleep": total if total is not None else ((deep or 0) + (light or 0) + (rem or 0))
+                        }
+                        if any(v is not None for k, v in result.items() if k != 'date'):
+                            logger.info(f"Hentet søvndata via garth.SleepData for {date_str}")
+                            return result
+            except Exception as e:
+                logger.debug(f"SleepData.get feilet for {date_str}: {e}")
+
+            # 2) Prøv usersummary allMetrics
+            try:
+                sleep_data = await asyncio.to_thread(
+                    garth.connectapi,
+                    f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                    params={"calendarDate": date_str}
+                )
+                if isinstance(sleep_data, dict) and 'allMetrics' in sleep_data:
+                    metrics = sleep_data.get('allMetrics', {}).get('metricsMap', {})
+                    sleep_time = metrics.get('SLEEP_TIME', {}).get('value')
+                    sleep_goal = metrics.get('SLEEP_GOAL', {}).get('value')
+                    sleep_score = metrics.get('SLEEP_SCORE', {}).get('value')
+                    deep_sleep = metrics.get('DEEP_SLEEP', {}).get('value')
+                    light_sleep = metrics.get('LIGHT_SLEEP', {}).get('value')
+                    rem_sleep = metrics.get('REM_SLEEP', {}).get('value')
+                    awake_time = metrics.get('AWAKE_TIME', {}).get('value')
+                    result = {
+                        "date": date_str,
+                        "sleep_time": sleep_time,
+                        "sleep_goal": sleep_goal,
+                        "sleep_score": sleep_score,
+                        "deep_sleep": deep_sleep,
+                        "light_sleep": light_sleep,
+                        "rem_sleep": rem_sleep,
+                        "awake_time": awake_time,
+                        "total_sleep": (deep_sleep or 0) + (light_sleep or 0) + (rem_sleep or 0)
+                    }
+                    logger.info(f"Hentet søvndata (usersummary) for {date_str}")
+                    return result
+            except Exception as e:
+                logger.debug(f"usersummary sleep feilet {date_str}: {e}")
+
+            # 3) Prøv wellness-service dailySleepData rå-endepunkt
+            for params in ( {"date": date_str}, {"calendarDate": date_str} ):
+                try:
+                    data = await asyncio.to_thread(
+                        garth.connectapi,
+                        f"/wellness-service/wellness/dailySleepData/{garth.client.username}",
+                        params=params
+                    )
+                    if isinstance(data, dict):
+                        summary = data.get('dailySleepDTO') or data.get('summary') or data
+                        def find_score_summary(d: dict):
+                            for k in ['sleepScore', 'sleep_score', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
+                        to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
+                        total = to_min(summary.get('totalSleepSeconds') or summary.get('total_sleep_seconds'))
+                        deep = to_min(summary.get('deepSleepSeconds') or summary.get('deep_sleep_seconds'))
+                        light = to_min(summary.get('lightSleepSeconds') or summary.get('light_sleep_seconds'))
+                        rem = to_min(summary.get('remSleepSeconds') or summary.get('rem_sleep_seconds'))
+                        awake = to_min(summary.get('awakeSeconds') or summary.get('awake_seconds'))
+                        score = find_score_summary(summary)
+                        result = {
+                            "date": date_str,
+                            "sleep_time": total,
+                            "sleep_goal": None,
+                            "sleep_score": score,
+                            "deep_sleep": deep,
+                            "light_sleep": light,
+                            "rem_sleep": rem,
+                            "awake_time": awake,
+                            "total_sleep": total if total is not None else ((deep or 0) + (light or 0) + (rem or 0))
+                        }
+                        if any(v is not None for k, v in result.items() if k != 'date'):
+                            logger.info(f"Hentet søvndata (wellness dailySleepData) for {date_str}")
+                            return result
+                except Exception as e:
+                    logger.debug(f"wellness dailySleepData feilet {date_str}: {e}")
+
+            logger.info(f"Ingen søvndata funnet for {date_str}")
+            return None
                 
         except GarthHTTPError as e:
             if "404" in str(e) or "not found" in str(e).lower():
@@ -668,11 +894,11 @@ class GarminClient:
             date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter stressdata for {date_str}")
             
-            # Hent stressdata fra Garmin Connect API
+            # Hent stressdata fra Garmin Connect API (pass params som keyword for å unngå dict.upper-feil)
             stress_data = await asyncio.to_thread(
-                garth.connectapi, 
+                garth.connectapi,
                 f"/usersummary-service/usersummary/daily/{garth.client.username}",
-                {"calendarDate": date_str}
+                params={"calendarDate": date_str}
             )
             
             if isinstance(stress_data, dict) and 'allMetrics' in stress_data:

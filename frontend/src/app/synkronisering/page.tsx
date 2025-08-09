@@ -241,17 +241,16 @@ export default function SynkroniseringPage() {
   };
 
   const syncSelectedPeriod = () => {
-    startSync(() => api.fullSync(startDate, endDate));
+    startSync(() => api.fullSyncBody(startDate, endDate));
   };
 
   const syncAll = () => {
     // Synkroniser siste 5 år (eller mer hvis nødvendig)
     const end = new Date();
     const start = new Date(end.getFullYear() - 5, 0, 1); // 1. januar for 5 år siden
-    startSync(() => api.fullSync(
-      start.toISOString(),
-      end.toISOString()
-    ));
+    const startStr = format(start, 'yyyy-MM-dd');
+    const endStr = format(end, 'yyyy-MM-dd');
+    startSync(() => api.fullSyncBody(startStr, endStr));
   };
 
   const syncBodyBattery = () => {

@@ -5,9 +5,11 @@ from typing import List, Optional
 from datetime import datetime, date, timedelta
 from ..database.session import get_db
 from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySummary
+from ..database.models.sync_state import SyncState
 from ..services.analysis_service import AnalysisService
 from ..storage import DataStorage
-from ..dependencies import get_analysis_service, get_db, get_data_storage
+from ..dependencies import get_analysis_service, get_db, get_data_storage, get_garmin_client
+from ..services.garmin_client import GarminClient
 import logging
 from ..database.models.activity import Activity
 import json
@@ -170,6 +172,205 @@ async def get_monthly_summaries(
         logger.error(f"Feil ved henting av månedlige sammendrag: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/sleep/range")
+async def get_sleep_range_from_db(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Server-first søvn: les fra DB, fyll inn manglende dager fra Garmin og persister før retur."""
+    try:
+        from ..database.models.sleep import Sleep
+        from ..database.models.sync_state import SyncState
+
+        # Standardperiode: siste 30 dager
+        today = date.today()
+        if end_date is None:
+            end_date = today
+        if start_date is None:
+            start_date = end_date - timedelta(days=30)
+
+        # Hent eksisterende rader i området
+        q = db.query(Sleep).filter(Sleep.sleep_date >= start_date, Sleep.sleep_date <= end_date)
+        rows = q.order_by(Sleep.sleep_date.asc()).all()
+        existing_by_date = {r.sleep_date: r for r in rows}
+
+        # Finn manglende datoer
+        missing_dates = []
+        cur = start_date
+        while cur <= end_date:
+            if cur not in existing_by_date:
+                missing_dates.append(cur)
+            cur += timedelta(days=1)
+
+        # Hent og persister KUN manglende dager (unngå å hente hele intervallet når mesteparten finnes)
+        if missing_dates:
+            def to_sec(minutes_val: Optional[float]) -> Optional[float]:
+                if minutes_val is None:
+                    return None
+                return float(minutes_val) * 60.0
+
+            saved = 0
+            for missing_day in missing_dates:
+                one = await garmin_client.get_sleep_data(datetime.combine(missing_day, datetime.min.time()))
+                if not one:
+                    continue
+                if not any(one.get(k) for k in [
+                    "sleep_time", "total_sleep", "deep_sleep", "light_sleep", "rem_sleep", "sleep_score"
+                ]):
+                    continue
+
+                d_date = datetime.strptime(one.get("date"), "%Y-%m-%d").date() if one.get("date") else None
+                if d_date is None:
+                    d_date = missing_day
+
+                row = existing_by_date.get(d_date)
+                if row is None:
+                    from sqlalchemy.sql import func as sa_func
+                    row = Sleep(sleep_date=d_date, created_at=sa_func.now(), updated_at=sa_func.now())
+                    db.add(row)
+                    existing_by_date[d_date] = row
+
+                row.total_sleep_time = to_sec(one.get("sleep_time")) or to_sec(one.get("total_sleep"))
+                row.deep_sleep_time = to_sec(one.get("deep_sleep"))
+                row.light_sleep_time = to_sec(one.get("light_sleep"))
+                row.rem_sleep_time = to_sec(one.get("rem_sleep"))
+                row.awake_time = to_sec(one.get("awake_time"))
+                row.sleep_score = one.get("sleep_score")
+
+                from sqlalchemy.sql import func as sa_func
+                row.updated_at = sa_func.now()
+                saved += 1
+
+            if saved > 0:
+                db.commit()
+                # Oppdater SyncState for sleep
+                state = db.query(SyncState).filter_by(key="sleep").first()
+                if not state:
+                    state = SyncState(key="sleep")
+                    db.add(state)
+                state.last_synced_date = end_date
+                state.last_synced_at = datetime.utcnow()
+                db.commit()
+
+        # Returner samlet resultat fra DB
+        rows = db.query(Sleep).filter(Sleep.sleep_date >= start_date, Sleep.sleep_date <= end_date).order_by(Sleep.sleep_date.asc()).all()
+        result = []
+        for r in rows:
+            result.append({
+                "date": r.sleep_date.isoformat(),
+                "sleep_time": (r.total_sleep_time/60.0) if r.total_sleep_time is not None else None,
+                "total_sleep": (r.total_sleep_time/60.0) if r.total_sleep_time is not None else None,
+                "deep_sleep": (r.deep_sleep_time/60.0) if r.deep_sleep_time is not None else None,
+                "light_sleep": (r.light_sleep_time/60.0) if r.light_sleep_time is not None else None,
+                "rem_sleep": (r.rem_sleep_time/60.0) if r.rem_sleep_time is not None else None,
+                "awake_time": (r.awake_time/60.0) if r.awake_time is not None else None,
+                "sleep_score": r.sleep_score,
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Feil ved henting/persist av søvn: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/monthly-comparison")
+async def get_monthly_comparison(
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), default=last day of current month"),
+    months: int = Query(12, ge=1, le=36, description="Antall måneder å sammenligne (nåværende vs samme måned i fjor)"),
+    activity_types: Optional[List[str]] = Query(None, description="Aktivitetstyper å filtrere på"),
+    db: Session = Depends(get_db)
+):
+    """
+    Returnerer server-beregnet månedstabell for de siste N månedene, med sammenligning mot samme måned i fjor.
+    """
+    try:
+        # Sett slutt-dato til siste dag i inneværende måned hvis ikke spesifisert
+        from calendar import monthrange
+        today = date.today()
+        if end_date is None:
+            last_day = monthrange(today.year, today.month)[1]
+            end_date = date(today.year, today.month, last_day)
+
+        # Hjelpere
+        def first_day_of_month(y: int, m: int) -> date:
+            return date(y, m, 1)
+
+        def add_months(d: date, delta: int) -> date:
+            y = d.year + (d.month - 1 + delta) // 12
+            m = (d.month - 1 + delta) % 12 + 1
+            return first_day_of_month(y, m)
+
+        end_month_start = first_day_of_month(end_date.year, end_date.month)
+        start_month_start = add_months(end_month_start, -(months - 1))
+        prev_year_start = add_months(start_month_start, -12)
+
+        # Hent alle relevante månedlige sammendrag i ett spørring (24 måneder)
+        query = db.query(MonthlySummary).filter(
+            MonthlySummary.month_start_date >= prev_year_start,
+            MonthlySummary.month_end_date <= end_date
+        ).order_by(MonthlySummary.month_start_date.asc())
+        summaries: List[MonthlySummary] = query.all()
+
+        # Filtrer på aktivitetstyper om spesifisert
+        if activity_types:
+            summaries = filter_summaries_by_activity_types(summaries, activity_types)
+
+        # Map: YYYY-MM -> summary
+        def ym_key(d: date) -> str:
+            return f"{d.year}-{str(d.month).zfill(2)}"
+
+        by_month = {ym_key(s.month_start_date): s for s in summaries}
+
+        # Bygg resultat for siste N måneder
+        results = []
+        for i in range(months):
+            cur_month_start = add_months(start_month_start, i)
+            cur_key = ym_key(cur_month_start)
+            prev_key = f"{cur_month_start.year - 1}-{str(cur_month_start.month).zfill(2)}"
+
+            cur = by_month.get(cur_key)
+            prev = by_month.get(prev_key)
+
+            def extract_payload(s: MonthlySummary):
+                if not s:
+                    return None
+                return {
+                    "total_activities": s.total_activities,
+                    "total_distance": s.total_distance,
+                    "total_duration": s.total_duration,
+                    "avg_heart_rate": s.avg_heart_rate,
+                    "avg_pace": s.avg_pace,
+                }
+
+            cur_payload = extract_payload(cur)
+            prev_payload = extract_payload(prev)
+
+            def pct(a: float, b: float) -> float:
+                if b in (None, 0):
+                    return 100.0 if (a or 0) > 0 else 0.0
+                return ((a or 0) - (b or 0)) / b * 100.0
+
+            deltas = None
+            if cur_payload and prev_payload:
+                deltas = {
+                    "distance_pct": pct(cur_payload["total_distance"] or 0, prev_payload["total_distance"] or 0),
+                    "duration_pct": pct(cur_payload["total_duration"] or 0, prev_payload["total_duration"] or 0),
+                    "activities_pct": pct(cur_payload["total_activities"] or 0, prev_payload["total_activities"] or 0),
+                }
+
+            results.append({
+                "year": cur_month_start.year,
+                "month": cur_month_start.month,
+                "current": cur_payload,
+                "previous": prev_payload,
+                "deltas": deltas,
+            })
+
+        return results
+    except Exception as e:
+        logger.error(f"Feil ved henting av monthly comparison: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/refresh-summaries")
 async def refresh_summaries():
     """Oppdater alle sammendragstabeller basert på aktiviteter i databasen"""
@@ -193,6 +394,43 @@ async def refresh_summaries():
         }
     except Exception as e:
         logger.error(f"Feil ved oppdatering av sammendrag: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sync-state")
+async def get_sync_state(db: Session = Depends(get_db)):
+    """Admin: Hent SyncState for alle nøkler."""
+    try:
+        states = db.query(SyncState).all()
+        return [
+            {
+                "key": s.key,
+                "last_synced_date": s.last_synced_date,
+                "last_synced_at": s.last_synced_at,
+                "meta": s.meta,
+            }
+            for s in states
+        ]
+    except Exception as e:
+        logger.error(f"Feil ved henting av sync-state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-state/reset/{key}")
+async def reset_sync_state(key: str, db: Session = Depends(get_db)):
+    """Admin: Nullstill SyncState for en gitt nøkkel."""
+    try:
+        state = db.query(SyncState).filter_by(key=key).first()
+        if not state:
+            state = SyncState(key=key)
+            db.add(state)
+        state.last_synced_date = None
+        state.last_synced_at = None
+        state.meta = None
+        db.commit()
+        return {"message": f"SyncState '{key}' er nullstilt."}
+    except Exception as e:
+        logger.error(f"Feil ved nullstilling av sync-state: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

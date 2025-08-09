@@ -12,12 +12,16 @@ const apiClient = axios.create({
 
 async function apiCall<T>(method: string, url: string, options: any = {}): Promise<T> {
   try {
-    const response = await apiClient({
-      url,
-      method,
-      data: options.body,
-      params: options.params,
-    });
+    const lower = method.toLowerCase();
+    const hasExplicitBody = options && Object.prototype.hasOwnProperty.call(options, 'body');
+    const data = hasExplicitBody
+      ? options.body
+      : (lower === 'post' || lower === 'put' || lower === 'patch')
+        ? (Object.keys(options || {}).length > 0 && !options.params ? options : undefined)
+        : undefined;
+    const params = options?.params;
+
+    const response = await apiClient({ url, method, data, params });
     return response.data;
   } catch (error: any) {
     // For HRV endepunkter, er 404 forventet når det ikke finnes HRV-data
@@ -304,6 +308,10 @@ export const syncApi = {
   syncNewActivities: () => apiCall('post', '/sync/new-activities'),
   syncAllActivities: () => apiCall('post', '/sync/full-sync'),
   fullSync: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate }),
+  // Bruk eksplisitt body for kompatibilitet med apiCall
+  // NB: backend forventer JSON med start_date og end_date
+  // (se FastAPI SyncRequest-modell)
+  fullSyncBody: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { body: { start_date: startDate, end_date: endDate } }),
   
   // --- HRV ---
   syncHrvData: (startDate?: string, endDate?: string) => {
