@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import styled from 'styled-components';
 import { Activity } from '../store/slices/activitiesSlice';
+import { useEffect, useMemo, useState } from 'react';
 
 const ChartContainer = styled.div`
   background: white;
@@ -31,6 +32,8 @@ interface MonthlyComparisonChartProps {
   activities: Activity[];
   metric: 'distance' | 'time';
   title: string;
+  useServerSummaries?: boolean;
+  activityTypes?: string[];
 }
 
 const monthNames = [
@@ -38,8 +41,45 @@ const monthNames = [
   'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Des'
 ];
 
-export default function MonthlyComparisonChart({ activities, metric, title }: MonthlyComparisonChartProps) {
-  if (activities.length === 0) {
+export default function MonthlyComparisonChart({ activities, metric, title, useServerSummaries = true, activityTypes = [] }: MonthlyComparisonChartProps) {
+  const [serverData, setServerData] = useState<any[] | null>(null);
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // Hent månedlige sammendrag fra server (2022 -> nå)
+  useEffect(() => {
+    const fetchSummaries = async () => {
+      if (!useServerSummaries) {
+        setServerData(null);
+        return;
+      }
+      setLoading(true);
+      try {
+        const start = '2022-01-01';
+        const now = new Date();
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        const params = new URLSearchParams();
+        params.append('start_date', start);
+        params.append('end_date', end);
+        params.append('limit', '60');
+        activityTypes.forEach(t => params.append('activity_types', t));
+        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${base}/api/analysis/monthly-summaries?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setServerData(data);
+        } else {
+          setServerData(null);
+        }
+      } catch {
+        setServerData(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchSummaries();
+  }, [useServerSummaries, JSON.stringify(activityTypes)]);
+
+  if (!useServerSummaries && activities.length === 0) {
     return (
       <ChartContainer>
         <Title>{title}</Title>
@@ -55,47 +95,51 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
     years.push(year);
   }
   
-  // Grupper data per måned og år
-  const monthlyData: { [key: string]: { [year: number]: number } } = {};
-  
-  // Initialiser alle måneder
-  for (let month = 0; month < 12; month++) {
-    const monthKey = monthNames[month];
-    monthlyData[monthKey] = {};
-    years.forEach(year => {
-      monthlyData[monthKey][year] = 0;
-    });
-  }
-
-  // Filtrer aktiviteter til 2022-2024
-  const earliestDate = new Date(2022, 0, 1); // 1. januar 2022
-
-  const relevantActivities = activities.filter(activity => {
-    const activityDate = new Date(activity.startTimeLocal);
-    return activityDate >= earliestDate;
-  });
-
-  // Grupper aktiviteter per måned og år
-  relevantActivities.forEach(activity => {
-    const date = new Date(activity.startTimeLocal);
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const monthKey = monthNames[month];
-    
-    if (years.includes(year)) {
-      let value = 0;
-      if (metric === 'distance') {
-        value = (activity.distance || 0) / 1000; // Konverter til km
-      } else if (metric === 'time') {
-        value = (activity.duration || 0) / 60; // Konverter til minutter
-      }
-      
-      monthlyData[monthKey][year] += value;
+  // Bygg datastruktur enten fra server-sammendrag eller fra aktiviteter
+  const monthlyData: { [key: string]: { [year: number]: number } } = useMemo(() => {
+    const base: { [key: string]: { [year: number]: number } } = {};
+    for (let month = 0; month < 12; month++) {
+      const monthKey = monthNames[month];
+      base[monthKey] = {} as any;
+      years.forEach(year => {
+        base[monthKey][year] = 0;
+      });
     }
-  });
 
-  // Debug logging - kun grunnleggende info
-  console.log(`[MonthlyComparisonChart] ${title}: ${activities.length} aktiviteter, ${relevantActivities.length} relevante aktiviteter (2022-${currentYear})`);
+    if (useServerSummaries && serverData && serverData.length > 0) {
+      serverData.forEach((m: any) => {
+        const startDate = new Date(m.month_start_date);
+        const y = startDate.getFullYear();
+        const monthKey = monthNames[startDate.getMonth()];
+        if (years.includes(y)) {
+          let value = 0;
+          if (metric === 'distance') value = (m.total_distance || 0) / 1000;
+          else if (metric === 'time') value = (m.total_duration || 0) / 60; // minutter
+          base[monthKey][y] += value;
+        }
+      });
+    } else {
+      const earliestDate = new Date(2022, 0, 1);
+      const relevantActivities = activities.filter(activity => new Date(activity.startTimeLocal) >= earliestDate);
+      relevantActivities.forEach(activity => {
+        const date = new Date(activity.startTimeLocal);
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        const monthKey = monthNames[month];
+        if (years.includes(year)) {
+          let value = 0;
+          if (metric === 'distance') value = (activity.distance || 0) / 1000;
+          else if (metric === 'time') value = (activity.duration || 0) / 60;
+          base[monthKey][year] += value;
+        }
+      });
+    }
+
+    return base;
+  }, [useServerSummaries, JSON.stringify(serverData), JSON.stringify(activities), metric]);
+
+  // Debug logging
+  console.log(`[MonthlyComparisonChart] ${title}: source=${useServerSummaries && serverData ? 'server' : 'client'}, years=${years.length}`);
 
   // Konverter til format som Recharts kan bruke
   const chartData = monthNames.map(month => {
@@ -135,6 +179,7 @@ export default function MonthlyComparisonChart({ activities, metric, title }: Mo
   return (
     <ChartContainer>
       <Title>{title}</Title>
+      {loading && <p>Henter serverdata...</p>}
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" />

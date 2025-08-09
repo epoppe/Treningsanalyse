@@ -359,11 +359,21 @@ class SyncService:
                 summary["status"] = "Feil: Kunne ikke autentisere mot Garmin"
                 return summary
 
-            # For nå, la oss bare hente hele perioden uten å sjekke dekning
-            # for å sikre at vi får data inn i den nye DB-en.
-            logger.info(f"Henter aktiviteter fra Garmin: {start_date.date()} -> {end_date.date()}")
+            # Inkrementell startdato basert på SyncState
+            effective_start = start_date
+            try:
+                act_state = self.db.query(SyncState).filter_by(key="activities").first()
+                if act_state and act_state.last_synced_date and not force_refresh_recent:
+                    effective_start = max(
+                        effective_start,
+                        datetime.combine(act_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                    )
+            except Exception as e:
+                logger.debug(f"Kunne ikke lese SyncState for activities: {e}")
+
+            logger.info(f"Henter aktiviteter fra Garmin: {effective_start.date()} -> {end_date.date()}")
             
-            activities_raw = await self.garmin_client.get_activities(start_date, end_date)
+            activities_raw = await self.garmin_client.get_activities(effective_start, end_date)
             
             # Filtrer bort duplikater basert på 'activityId'
             existing_ids = self.storage.get_existing_activity_ids(self.db)
@@ -532,6 +542,29 @@ class SyncService:
                 added_count += 1
 
             self.db.commit()
+
+            # Oppdater SyncState for aktiviteter
+            try:
+                if added_count > 0:
+                    # Sett siste synketdato til sluttdatoen vi nettopp ba om, eller siste aktivitet sin dato
+                    last_date = end_date.date()
+                    try:
+                        latest = max(
+                            datetime.fromisoformat(a.get('startTimeGMT')).date()
+                            for a in activities_to_save if a.get('startTimeGMT')
+                        )
+                        last_date = latest
+                    except Exception:
+                        pass
+                    act_state = self.db.query(SyncState).filter_by(key="activities").first()
+                    if not act_state:
+                        act_state = SyncState(key="activities")
+                        self.db.add(act_state)
+                    act_state.last_synced_date = last_date
+                    act_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             
             # Beregn metrics for nye aktiviteter
             logger.info("Starter beregning av metrics for nye aktiviteter...")
@@ -976,7 +1009,19 @@ class SyncService:
             end_date: Sluttdato for synkronisering
             force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
         """
-        logger.info(f"Starter Training Effect synkronisering for perioden {start_date.date()} til {end_date.date()}")
+        # Inkrementell startdato basert på SyncState
+        effective_start = start_date
+        try:
+            te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
+            if te_state and te_state.last_synced_date and not force_refresh_recent:
+                effective_start = max(
+                    effective_start,
+                    datetime.combine(te_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                )
+        except Exception as e:
+            logger.debug(f"Kunne ikke lese SyncState for training_effect: {e}")
+
+        logger.info(f"Starter Training Effect synkronisering for perioden {effective_start.date()} til {end_date.date()}")
         
         try:
             if not await self.garmin_client.initialize():
@@ -985,7 +1030,7 @@ class SyncService:
             
             # Hent aktiviteter fra databasen i den gitte perioden
             activities = self.db.query(Activity).filter(
-                Activity.start_time >= start_date,
+                Activity.start_time >= effective_start,
                 Activity.start_time <= end_date
             ).order_by(Activity.start_time.desc()).all()
             
@@ -1041,6 +1086,19 @@ class SyncService:
             
             # Lagre endringene til databasen
             self.db.commit()
+
+            # Oppdater SyncState for training_effect
+            try:
+                if updated_count > 0:
+                    te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
+                    if not te_state:
+                        te_state = SyncState(key="training_effect")
+                        self.db.add(te_state)
+                    te_state.last_synced_date = end_date.date()
+                    te_state.last_synced_at = datetime.utcnow()
+                    self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere SyncState for training_effect: {e}")
             
             result = {
                 "status": "Fullført",

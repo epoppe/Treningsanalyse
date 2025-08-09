@@ -5,6 +5,7 @@ from typing import List, Optional
 from datetime import datetime, date, timedelta
 from ..database.session import get_db
 from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySummary
+from ..database.models.sync_state import SyncState
 from ..services.analysis_service import AnalysisService
 from ..storage import DataStorage
 from ..dependencies import get_analysis_service, get_db, get_data_storage
@@ -193,6 +194,43 @@ async def refresh_summaries():
         }
     except Exception as e:
         logger.error(f"Feil ved oppdatering av sammendrag: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sync-state")
+async def get_sync_state(db: Session = Depends(get_db)):
+    """Admin: Hent SyncState for alle nøkler."""
+    try:
+        states = db.query(SyncState).all()
+        return [
+            {
+                "key": s.key,
+                "last_synced_date": s.last_synced_date,
+                "last_synced_at": s.last_synced_at,
+                "meta": s.meta,
+            }
+            for s in states
+        ]
+    except Exception as e:
+        logger.error(f"Feil ved henting av sync-state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-state/reset/{key}")
+async def reset_sync_state(key: str, db: Session = Depends(get_db)):
+    """Admin: Nullstill SyncState for en gitt nøkkel."""
+    try:
+        state = db.query(SyncState).filter_by(key=key).first()
+        if not state:
+            state = SyncState(key=key)
+            db.add(state)
+        state.last_synced_date = None
+        state.last_synced_at = None
+        state.meta = None
+        db.commit()
+        return {"message": f"SyncState '{key}' er nullstilt."}
+    except Exception as e:
+        logger.error(f"Feil ved nullstilling av sync-state: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
