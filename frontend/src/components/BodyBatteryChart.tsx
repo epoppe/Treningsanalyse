@@ -26,6 +26,9 @@ interface BodyBatteryData {
 interface BodyBatteryChartProps {
   data: BodyBatteryData[];
   title: string;
+  movingAverageDays?: number;
+  showMovingAverageOnly?: boolean;
+  hideDots?: boolean;
 }
 
 const CustomAxisTick = ({ x, y, payload }: any) => (
@@ -64,7 +67,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
+const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title, movingAverageDays, showMovingAverageOnly = false, hideDots = false }) => {
   // Filtrer ut dager uten data
   const filteredData = data.filter(item => 
     item.max_body_battery !== null || 
@@ -73,7 +76,44 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
     item.body_battery_drained_start !== null
   );
 
-  if (filteredData.length === 0) {
+  // Sorter kronologisk for glidende snitt
+  const sortedData = [...filteredData].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // Beregn glidende snitt pr. felt
+  const calcMovingAverage = (days: number) => {
+    const keys: (keyof BodyBatteryData)[] = [
+      'max_body_battery',
+      'min_body_battery',
+      'body_battery_charged_start',
+      'body_battery_drained_start',
+    ];
+    const result: BodyBatteryData[] = [] as any;
+    for (let i = 0; i < sortedData.length; i += 1) {
+      const windowStart = Math.max(0, i - (days - 1));
+      const point: any = { date: sortedData[i].date };
+      for (const key of keys) {
+        let sum = 0;
+        let count = 0;
+        for (let j = windowStart; j <= i; j += 1) {
+          const val = sortedData[j][key];
+          if (typeof val === 'number') {
+            sum += val;
+            count += 1;
+          }
+        }
+        point[key] = count > 0 ? sum / count : null;
+      }
+      point.net_charge = null;
+      result.push(point as BodyBatteryData);
+    }
+    return result;
+  };
+
+  const dataForChart = movingAverageDays && showMovingAverageOnly
+    ? calcMovingAverage(movingAverageDays)
+    : sortedData;
+
+  if (dataForChart.length === 0) {
     return (
       <div style={{
         background: 'white',
@@ -99,7 +139,7 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
     }}>
       <h3 style={{ margin: '0 0 1rem 0', color: '#2c3e50' }}>{title}</h3>
       <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={filteredData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+        <LineChart data={dataForChart} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
           <XAxis 
             dataKey="date" 
@@ -120,7 +160,7 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
             dataKey="max_body_battery"
             stroke="#27ae60"
             strokeWidth={2}
-            dot={{ fill: '#27ae60', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: '#27ae60', strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Høyeste Body Battery"
             connectNulls={false}
@@ -132,7 +172,7 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
             dataKey="min_body_battery"
             stroke="#e74c3c"
             strokeWidth={2}
-            dot={{ fill: '#e74c3c', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: '#e74c3c', strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Laveste Body Battery"
             connectNulls={false}
@@ -144,7 +184,7 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
             dataKey="body_battery_charged_start"
             stroke="#3498db"
             strokeWidth={2}
-            dot={{ fill: '#3498db', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: '#3498db', strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Start (Oppladet)"
             connectNulls={false}
@@ -156,7 +196,7 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title }) => {
             dataKey="body_battery_drained_start"
             stroke="#f39c12"
             strokeWidth={2}
-            dot={{ fill: '#f39c12', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: '#f39c12', strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Start (Utladet)"
             connectNulls={false}

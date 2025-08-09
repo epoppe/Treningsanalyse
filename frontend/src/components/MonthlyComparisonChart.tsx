@@ -97,6 +97,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
   
   // Bygg datastruktur enten fra server-sammendrag eller fra aktiviteter
   const monthlyData: { [key: string]: { [year: number]: number } } = useMemo(() => {
+    // 1) Start med klient-beregnet fallback fra aktiviteter
     const base: { [key: string]: { [year: number]: number } } = {};
     for (let month = 0; month < 12; month++) {
       const monthKey = monthNames[month];
@@ -106,6 +107,22 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
       });
     }
 
+    const earliestDate = new Date(2022, 0, 1);
+    const relevantActivities = activities.filter(activity => new Date(activity.startTimeLocal) >= earliestDate);
+    relevantActivities.forEach(activity => {
+      const date = new Date(activity.startTimeLocal);
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const monthKey = monthNames[month];
+      if (years.includes(year)) {
+        let value = 0;
+        if (metric === 'distance') value = (activity.distance || 0) / 1000;
+        else if (metric === 'time') value = (activity.duration || 0) / 60;
+        base[monthKey][year] += value;
+      }
+    });
+
+    // 2) Overstyr med server-summaries der de finnes
     if (useServerSummaries && serverData && serverData.length > 0) {
       serverData.forEach((m: any) => {
         const startDate = new Date(m.month_start_date);
@@ -115,22 +132,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
           let value = 0;
           if (metric === 'distance') value = (m.total_distance || 0) / 1000;
           else if (metric === 'time') value = (m.total_duration || 0) / 60; // minutter
-          base[monthKey][y] += value;
-        }
-      });
-    } else {
-      const earliestDate = new Date(2022, 0, 1);
-      const relevantActivities = activities.filter(activity => new Date(activity.startTimeLocal) >= earliestDate);
-      relevantActivities.forEach(activity => {
-        const date = new Date(activity.startTimeLocal);
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        const monthKey = monthNames[month];
-        if (years.includes(year)) {
-          let value = 0;
-          if (metric === 'distance') value = (activity.distance || 0) / 1000;
-          else if (metric === 'time') value = (activity.duration || 0) / 60;
-          base[monthKey][year] += value;
+          base[monthKey][y] = value; // overstyr
         }
       });
     }

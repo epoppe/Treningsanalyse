@@ -348,9 +348,19 @@ const BodyBatteryPage: React.FC = () => {
         </LoadingContainer>
       ) : (
         <>
+          {/* Rå daglig serie */}
           <BodyBatteryChart
             data={data}
-            title="Body Battery over tid"
+            title="Body Battery (daglig)"
+          />
+
+          {/* 7-dagers glidende snitt uten punktmarkeringer */}
+          <BodyBatteryChart
+            data={data}
+            title="Body Battery (7-dagers snitt)"
+            movingAverageDays={7}
+            showMovingAverageOnly
+            hideDots
           />
         </>
       )}
