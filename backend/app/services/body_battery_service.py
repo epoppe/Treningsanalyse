@@ -47,24 +47,52 @@ class BodyBatteryService:
                         BodyBattery.date == data_date
                     ).first()
                     
-                    # Beregn høyeste og laveste verdier
-                    max_body_battery = None
-                    min_body_battery = None
-                    
-                    if day_data.get('body_battery_charged_start') is not None:
+                    # Beregn høyeste og laveste verdier med flere mulige kilder
+                    max_body_battery = day_data.get('max_body_battery')
+                    min_body_battery = day_data.get('min_body_battery')
+
+                    # Fallback fra starts
+                    if max_body_battery is None and day_data.get('body_battery_charged_start') is not None:
                         max_body_battery = day_data['body_battery_charged_start']
+                    if min_body_battery is None and day_data.get('body_battery_charged_start') is not None:
                         min_body_battery = day_data['body_battery_charged_start']
-                    
                     if day_data.get('body_battery_drained_start') is not None:
                         if max_body_battery is None or day_data['body_battery_drained_start'] > max_body_battery:
                             max_body_battery = day_data['body_battery_drained_start']
                         if min_body_battery is None or day_data['body_battery_drained_start'] < min_body_battery:
                             min_body_battery = day_data['body_battery_drained_start']
+
+                    # Fallback fra arrays (garth DailyBodyBatteryStress eller raw bodyBattery)
+                    values_array = day_data.get('body_battery_values_array') or day_data.get('values')
+                    if (max_body_battery is None or min_body_battery is None) and isinstance(values_array, (list, tuple)) and len(values_array) > 0:
+                        try:
+                            numeric_vals = [v for v in values_array if isinstance(v, (int, float))]
+                            if numeric_vals:
+                                if max_body_battery is None:
+                                    max_body_battery = max(numeric_vals)
+                                if min_body_battery is None:
+                                    min_body_battery = min(numeric_vals)
+                        except Exception:
+                            pass
                     
                     # Beregn netto opplading
                     net_charge = None
                     if day_data.get('body_battery_charged') is not None and day_data.get('body_battery_drained') is not None:
                         net_charge = (day_data['body_battery_charged'] or 0) - (day_data['body_battery_drained'] or 0)
+
+                    # Hvis absolutt ingen nyttige verdier, hopp over lagring
+                    has_any_value = any([
+                        day_data.get('body_battery_charged') is not None,
+                        day_data.get('body_battery_drained') is not None,
+                        day_data.get('body_battery_charged_start') is not None,
+                        day_data.get('body_battery_drained_start') is not None,
+                        max_body_battery is not None,
+                        min_body_battery is not None,
+                        net_charge is not None,
+                    ])
+                    if not has_any_value:
+                        logger.info(f"Hopper over Body Battery {data_date} (ingen nyttige verdier fra Garmin)")
+                        continue
                     
                     if existing_record:
                         # Oppdater eksisterende record

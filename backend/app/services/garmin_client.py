@@ -14,13 +14,17 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prøv å importere garth's HRV-klasser hvis tilgjengelige
+# Prøv å importere garth's HRV- og Body Battery-klasser hvis tilgjengelige
 try:
     DailyHRV = getattr(garth, 'DailyHRV', None)
     HRVData = getattr(garth, 'HRVData', None)
+    DailyBodyBatteryStress = getattr(garth, 'DailyBodyBatteryStress', None)
+    BodyBatteryDetail = getattr(garth, 'BodyBatteryData', None)
 except ImportError as e:
     DailyHRV = None
     HRVData = None
+    DailyBodyBatteryStress = None
+    BodyBatteryDetail = None
     logger.warning(f"Kunne ikke importere HRV-klasser fra garth: {e} - bruker kun API-kall")
 
 # Pydantic-modeller for HRV-data
@@ -471,7 +475,67 @@ class GarminClient:
                 date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter body battery data for {date_str}")
 
-            # Prøv flere endepunkter, likt som HRV
+            # 0) Prøv garth-objekter hvis tilgjengelig (gir ofte mest stabile svar)
+            if DailyBodyBatteryStress is not None:
+                try:
+                    bb_obj = await asyncio.to_thread(DailyBodyBatteryStress.get, date_str)
+                    # Forsøk å konvertere til dictionary
+                    if bb_obj is None:
+                        logger.debug("DailyBodyBatteryStress.get returnerte None")
+                    else:
+                        if hasattr(bb_obj, 'to_dict'):
+                            bb_data = bb_obj.to_dict()
+                        elif hasattr(bb_obj, 'dict'):
+                            bb_data = bb_obj.dict()
+                        elif isinstance(bb_obj, dict):
+                            bb_data = bb_obj
+                        else:
+                            # Best-effort: hent __dict__
+                            bb_data = getattr(bb_obj, '__dict__', {})
+
+                        # Ekstraher verdier
+                        values_array = bb_data.get('body_battery_values_array') or bb_data.get('values')
+                        max_bb = bb_data.get('max_body_battery')
+                        min_bb = bb_data.get('min_body_battery')
+                        if (max_bb is None or min_bb is None) and isinstance(values_array, (list, tuple)) and len(values_array) > 0:
+                            try:
+                                max_bb = max(v for v in values_array if v is not None)
+                                min_bb = min(v for v in values_array if v is not None)
+                            except Exception:
+                                pass
+
+                        result_from_obj = {
+                            "date": date_str,
+                            # Disse feltene finnes ikke alltid i DailyBodyBatteryStress – settes til None hvis ukjent
+                            "body_battery_charged": bb_data.get('body_battery_charged'),
+                            "body_battery_drained": bb_data.get('body_battery_drained'),
+                            "body_battery_charged_start": bb_data.get('body_battery_charged_start'),
+                            "body_battery_drained_start": bb_data.get('body_battery_drained_start'),
+                            "max_body_battery": max_bb,
+                            "min_body_battery": min_bb,
+                            "net_charge": None,
+                        }
+
+                        # Forsøk kalkulert net_charge hvis mulig
+                        if result_from_obj["body_battery_charged"] is not None and result_from_obj["body_battery_drained"] is not None:
+                            result_from_obj["net_charge"] = (result_from_obj["body_battery_charged"] or 0) - (result_from_obj["body_battery_drained"] or 0)
+
+                        logger.info(f"Hentet body battery via garth.DailyBodyBatteryStress for {date_str}: {result_from_obj}")
+                        return result_from_obj
+                except Exception as e:
+                    logger.debug(f"DailyBodyBatteryStress.get feilet for {date_str}: {e}")
+
+            # 0b) Prøv garth BodyBatteryData for event-detaljer (kan berike men ikke nødvendig for lagring)
+            if BodyBatteryDetail is not None:
+                try:
+                    _bb_detail = await asyncio.to_thread(BodyBatteryDetail.get, date_str)
+                    # Vi bruker ikke event-detaljer i DB-modellen, så vi logger kun tilgjengelighet
+                    if _bb_detail is not None:
+                        logger.debug("BodyBatteryData.get fant event-detaljer for %s", date_str)
+                except Exception:
+                    pass
+
+            # 1) Prøv flere Connect API-endepunkter, likt som HRV
             endpoints = [
                 (f"/usersummary-service/usersummary/daily/{garth.client.username}", {"calendarDate": date_str}),
                 (f"/wellness-service/wellness/dailyBodyBattery/{garth.client.username}", {"date": date_str}),
