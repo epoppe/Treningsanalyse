@@ -8,7 +8,8 @@ from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySumm
 from ..database.models.sync_state import SyncState
 from ..services.analysis_service import AnalysisService
 from ..storage import DataStorage
-from ..dependencies import get_analysis_service, get_db, get_data_storage
+from ..dependencies import get_analysis_service, get_db, get_data_storage, get_garmin_client
+from ..services.garmin_client import GarminClient
 import logging
 from ..database.models.activity import Activity
 import json
@@ -169,6 +170,107 @@ async def get_monthly_summaries(
         return summaries
     except Exception as e:
         logger.error(f"Feil ved henting av månedlige sammendrag: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sleep/range")
+async def get_sleep_range_from_db(
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Server-first søvn: les fra DB, fyll inn manglende dager fra Garmin og persister før retur."""
+    try:
+        from ..database.models.sleep import Sleep
+        from ..database.models.sync_state import SyncState
+
+        # Standardperiode: siste 30 dager
+        today = date.today()
+        if end_date is None:
+            end_date = today
+        if start_date is None:
+            start_date = end_date - timedelta(days=30)
+
+        # Hent eksisterende rader i området
+        q = db.query(Sleep).filter(Sleep.sleep_date >= start_date, Sleep.sleep_date <= end_date)
+        rows = q.order_by(Sleep.sleep_date.asc()).all()
+        existing_by_date = {r.sleep_date: r for r in rows}
+
+        # Finn manglende datoer
+        missing_dates = []
+        cur = start_date
+        while cur <= end_date:
+            if cur not in existing_by_date:
+                missing_dates.append(cur)
+            cur += timedelta(days=1)
+
+        # Hent og persister KUN manglende dager (unngå å hente hele intervallet når mesteparten finnes)
+        if missing_dates:
+            def to_sec(minutes_val: Optional[float]) -> Optional[float]:
+                if minutes_val is None:
+                    return None
+                return float(minutes_val) * 60.0
+
+            saved = 0
+            for missing_day in missing_dates:
+                one = await garmin_client.get_sleep_data(datetime.combine(missing_day, datetime.min.time()))
+                if not one:
+                    continue
+                if not any(one.get(k) for k in [
+                    "sleep_time", "total_sleep", "deep_sleep", "light_sleep", "rem_sleep", "sleep_score"
+                ]):
+                    continue
+
+                d_date = datetime.strptime(one.get("date"), "%Y-%m-%d").date() if one.get("date") else None
+                if d_date is None:
+                    d_date = missing_day
+
+                row = existing_by_date.get(d_date)
+                if row is None:
+                    from sqlalchemy.sql import func as sa_func
+                    row = Sleep(sleep_date=d_date, created_at=sa_func.now(), updated_at=sa_func.now())
+                    db.add(row)
+                    existing_by_date[d_date] = row
+
+                row.total_sleep_time = to_sec(one.get("sleep_time")) or to_sec(one.get("total_sleep"))
+                row.deep_sleep_time = to_sec(one.get("deep_sleep"))
+                row.light_sleep_time = to_sec(one.get("light_sleep"))
+                row.rem_sleep_time = to_sec(one.get("rem_sleep"))
+                row.awake_time = to_sec(one.get("awake_time"))
+                row.sleep_score = one.get("sleep_score")
+
+                from sqlalchemy.sql import func as sa_func
+                row.updated_at = sa_func.now()
+                saved += 1
+
+            if saved > 0:
+                db.commit()
+                # Oppdater SyncState for sleep
+                state = db.query(SyncState).filter_by(key="sleep").first()
+                if not state:
+                    state = SyncState(key="sleep")
+                    db.add(state)
+                state.last_synced_date = end_date
+                state.last_synced_at = datetime.utcnow()
+                db.commit()
+
+        # Returner samlet resultat fra DB
+        rows = db.query(Sleep).filter(Sleep.sleep_date >= start_date, Sleep.sleep_date <= end_date).order_by(Sleep.sleep_date.asc()).all()
+        result = []
+        for r in rows:
+            result.append({
+                "date": r.sleep_date.isoformat(),
+                "sleep_time": (r.total_sleep_time/60.0) if r.total_sleep_time is not None else None,
+                "total_sleep": (r.total_sleep_time/60.0) if r.total_sleep_time is not None else None,
+                "deep_sleep": (r.deep_sleep_time/60.0) if r.deep_sleep_time is not None else None,
+                "light_sleep": (r.light_sleep_time/60.0) if r.light_sleep_time is not None else None,
+                "rem_sleep": (r.rem_sleep_time/60.0) if r.rem_sleep_time is not None else None,
+                "awake_time": (r.awake_time/60.0) if r.awake_time is not None else None,
+                "sleep_score": r.sleep_score,
+            })
+        return result
+    except Exception as e:
+        logger.error(f"Feil ved henting/persist av søvn: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/monthly-comparison")

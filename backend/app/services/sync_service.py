@@ -760,6 +760,61 @@ class SyncService:
         except Exception as e:
             logger.warning(f"Body Battery synk feilet, fortsetter: {e}")
 
+        # Søvn inkrementell synk via database
+        try:
+            from ..database.models.sleep import Sleep
+            sleep_state = self.db.query(SyncState).filter_by(key="sleep").first()
+            sleep_start_date = hrv_start_date
+            if sleep_state and sleep_state.last_synced_date:
+                sleep_start_date = max(sleep_start_date, datetime.combine(sleep_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
+
+            logger.info(f"Starter søvn-synk: {sleep_start_date.date()} -> {end_date.date()}")
+            current_date = sleep_start_date
+            saved = 0
+            while current_date <= end_date:
+                try:
+                    data = await self.garmin_client.get_sleep_data(current_date)
+                    if data and any(data.get(k) for k in ["sleep_time","total_sleep","deep_sleep","light_sleep","rem_sleep","sleep_score"]):
+                        # Oppdater/sett i DB
+                        sleep_date = current_date.date()
+                        row = self.db.query(Sleep).filter_by(sleep_date=sleep_date).first()
+                        if not row:
+                            from sqlalchemy.sql import func
+                            from ..database.models.sleep import Sleep as SleepModel
+                            row = SleepModel(sleep_date=sleep_date, created_at=func.now(), updated_at=func.now())
+                            self.db.add(row)
+                        # lagre i sekunder
+                        def to_sec(hours_or_min):
+                            if hours_or_min is None:
+                                return None
+                            # data feltene er i minutter i vår klient; konverter til sekunder
+                            return float(hours_or_min) * 60.0
+                        row.total_sleep_time = to_sec(data.get("sleep_time")) or to_sec(data.get("total_sleep"))
+                        row.deep_sleep_time = to_sec(data.get("deep_sleep"))
+                        row.light_sleep_time = to_sec(data.get("light_sleep"))
+                        row.rem_sleep_time = to_sec(data.get("rem_sleep"))
+                        row.awake_time = to_sec(data.get("awake_time"))
+                        row.sleep_score = data.get("sleep_score")
+                        from sqlalchemy.sql import func
+                        row.updated_at = func.now()
+                        saved += 1
+                except Exception as e:
+                    logger.debug(f"Søvn-dag feilet {current_date.date()}: {e}")
+                current_date += timedelta(days=1)
+
+            if saved > 0:
+                self.db.commit()
+                # oppdater sync state
+                if not sleep_state:
+                    sleep_state = SyncState(key="sleep")
+                    self.db.add(sleep_state)
+                sleep_state.last_synced_date = end_date.date()
+                sleep_state.last_synced_at = datetime.utcnow()
+                self.db.commit()
+                logger.info(f"Søvn-synk lagret {saved} dager")
+        except Exception as e:
+            logger.warning(f"Søvn synk feilet: {e}")
+
     async def _download_and_store_fit_file(self, activity_id: int):
         """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
         try:

@@ -156,8 +156,13 @@ export default function SovnPage() {
       setLoading(true);
       setError(null);
       try {
-        const data = await api.getSleepRange(startDate, endDate) as any[];
-        // Sorter kronologisk
+        // Hent fra backend-DB (server-first). Endepunktet vil automatisk persistere manglende dager.
+        let data: any[] = [];
+        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const res = await fetch(`${base}/api/analysis/sleep/range?start_date=${startDate}&end_date=${endDate}`);
+        if (res.ok) {
+          data = await res.json();
+        }
         const sorted = (data || []).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
         setDays(sorted);
       } catch (e: any) {
@@ -184,17 +189,43 @@ export default function SovnPage() {
 
   // Mapp for grafer: konverter minutter til timer for faser og søvntid
   const chartData = useMemo(() => {
-    return days.map(d => ({
-      date: d.date,
-      sleep_hours: d.sleep_time ? d.sleep_time / 60 : null,
-      sleep_goal_hours: d.sleep_goal ? d.sleep_goal / 60 : null,
-      total_sleep_hours: d.total_sleep ? d.total_sleep / 60 : null,
-      deep_hours: d.deep_sleep ? d.deep_sleep / 60 : 0,
-      light_hours: d.light_sleep ? d.light_sleep / 60 : 0,
-      rem_hours: d.rem_sleep ? d.rem_sleep / 60 : 0,
-      awake_hours: d.awake_time ? d.awake_time / 60 : 0,
-      score: d.sleep_score ?? null,
-    }));
+    return days.map(d => {
+      const sleep_hours_raw = d.sleep_time != null ? d.sleep_time / 60 : null;
+      const total_sleep_hours_raw = d.total_sleep != null ? d.total_sleep / 60 : null;
+
+      // Rå verdier for faser (i timer). 0 timer regnes som "mangler" for linjegrafen.
+      const deep_val = d.deep_sleep != null ? d.deep_sleep / 60 : null;
+      const light_val = d.light_sleep != null ? d.light_sleep / 60 : null;
+      const rem_val = d.rem_sleep != null ? d.rem_sleep / 60 : null;
+
+      const phase_sum_raw = (deep_val || 0) + (light_val || 0) + (rem_val || 0);
+
+      // Gyldige verdier for linjegrafen: > 0
+      const sleep_hours_valid = sleep_hours_raw && sleep_hours_raw > 0 ? sleep_hours_raw : null;
+      const total_sleep_hours_valid = total_sleep_hours_raw && total_sleep_hours_raw > 0 ? total_sleep_hours_raw : null;
+      const phase_sum_valid = phase_sum_raw > 0 ? phase_sum_raw : null;
+
+      const merged = (sleep_hours_valid ?? total_sleep_hours_valid ?? phase_sum_valid) ?? null;
+
+      // Bar-grafene: behold 0 for å vise "ingen data" eksplisitt i stacken,
+      // men dette påvirker ikke linjen (som bruker merged)
+      const deep_hours = deep_val ?? 0;
+      const light_hours = light_val ?? 0;
+      const rem_hours = rem_val ?? 0;
+
+      return {
+        date: d.date,
+        sleep_hours: sleep_hours_raw,
+        sleep_goal_hours: d.sleep_goal != null ? d.sleep_goal / 60 : null,
+        total_sleep_hours: total_sleep_hours_raw,
+        sleep_hours_merged: merged,
+        deep_hours,
+        light_hours,
+        rem_hours,
+        awake_hours: d.awake_time != null ? d.awake_time / 60 : 0,
+        score: d.sleep_score ?? null,
+      };
+    });
   }, [days]);
 
   return (
@@ -234,7 +265,7 @@ export default function SovnPage() {
                 <YAxis yAxisId="left" label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
                 <Tooltip formatter={(v: any, n: any) => [n?.toLowerCase().includes('score') ? v : `${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
                 <Legend />
-                <Line yAxisId="left" type="monotone" dataKey="sleep_hours" name="Søvntid" stroke="#3498db" dot={false} strokeWidth={2} />
+                <Line yAxisId="left" type="monotone" dataKey="sleep_hours_merged" name="Søvntid" stroke="#3498db" dot={false} strokeWidth={2} connectNulls />
                 <Line yAxisId="left" type="monotone" dataKey="sleep_goal_hours" name="Mål" stroke="#95a5a6" dot={false} strokeDasharray="5 5" />
               </LineChart>
             </ResponsiveContainer>
@@ -258,20 +289,7 @@ export default function SovnPage() {
             </ResponsiveContainer>
           </ChartCard>
 
-          {/* Søvnscore */}
-          <ChartCard>
-            <ChartTitle>Søvnscore</ChartTitle>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={formatDateShort} />
-                <YAxis yAxisId="left" domain={[0, 100]} label={{ value: 'Score', angle: -90, position: 'insideLeft' }} />
-                <Tooltip formatter={(v: any, n: any) => [v, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
-                <Legend />
-                <Line yAxisId="left" type="monotone" dataKey="score" name="Score" stroke="#f39c12" dot={false} strokeWidth={2} />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+          
         </>
       )}
     </Container>

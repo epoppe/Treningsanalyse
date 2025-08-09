@@ -670,13 +670,28 @@ class GarminClient:
                     ds = await asyncio.to_thread(DailySleep.list, date_str, '1d')
                     if ds:
                         payload = ds[0] if isinstance(ds, list) else ds
+                        # Hjelpere
+                        def find_score_from_dict(d: dict):
+                            # Direkte felt
+                            for k in ['sleep_score', 'sleepScore', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            # Nestet under "scores"
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
                         to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
                         sleep_time = to_min(payload.get('total_sleep_seconds') or payload.get('totalSleepSeconds'))
                         deep = to_min(payload.get('deep_sleep_seconds') or payload.get('deepSleepSeconds'))
                         light = to_min(payload.get('light_sleep_seconds') or payload.get('lightSleepSeconds'))
                         rem = to_min(payload.get('rem_sleep_seconds') or payload.get('remSleepSeconds'))
                         awake = to_min(payload.get('awake_seconds') or payload.get('awakeDurationInSeconds'))
-                        score = payload.get('sleep_score') or payload.get('sleepScore')
+                        score = find_score_from_dict(payload)
                         result = {
                             "date": date_str,
                             "sleep_time": sleep_time,
@@ -706,13 +721,34 @@ class GarminClient:
                                 if k in d and isinstance(d[k], (int, float)):
                                     return d[k]
                             return None
+                        def find_score(d: dict):
+                            # Direkte felt
+                            for k in ['sleepScore', 'sleep_score', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            # Nestet under "scores"-struktur
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            # Noen ganger under "summary"
+                            summary = d.get('summary') if isinstance(d.get('summary'), dict) else None
+                            if summary:
+                                for k in ['sleepScore', 'sleep_score', 'overall', 'overallScore']:
+                                    v = summary.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
                         to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
                         deep = to_min(find_num(sd_dict, ['deepSleepSeconds','deep_sleep_seconds']))
                         light = to_min(find_num(sd_dict, ['lightSleepSeconds','light_sleep_seconds']))
                         rem = to_min(find_num(sd_dict, ['remSleepSeconds','rem_sleep_seconds']))
                         awake = to_min(find_num(sd_dict, ['awakeSeconds','awake_seconds']))
                         total = to_min(find_num(sd_dict, ['totalSleepSeconds','total_sleep_seconds']))
-                        score = sd_dict.get('sleepScore') or sd_dict.get('sleep_score')
+                        score = find_score(sd_dict)
                         result = {
                             "date": date_str,
                             "sleep_time": total,
@@ -772,13 +808,25 @@ class GarminClient:
                     )
                     if isinstance(data, dict):
                         summary = data.get('dailySleepDTO') or data.get('summary') or data
+                        def find_score_summary(d: dict):
+                            for k in ['sleepScore', 'sleep_score', 'overallScore', 'overall_score', 'score']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                    v = scores.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
                         to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
                         total = to_min(summary.get('totalSleepSeconds') or summary.get('total_sleep_seconds'))
                         deep = to_min(summary.get('deepSleepSeconds') or summary.get('deep_sleep_seconds'))
                         light = to_min(summary.get('lightSleepSeconds') or summary.get('light_sleep_seconds'))
                         rem = to_min(summary.get('remSleepSeconds') or summary.get('rem_sleep_seconds'))
                         awake = to_min(summary.get('awakeSeconds') or summary.get('awake_seconds'))
-                        score = summary.get('sleepScore') or summary.get('sleep_score')
+                        score = find_score_summary(summary)
                         result = {
                             "date": date_str,
                             "sleep_time": total,
