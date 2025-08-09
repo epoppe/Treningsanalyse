@@ -654,11 +654,15 @@ const StatistikkPage = () => {
               activities={allFilteredActivities} 
               metric="distance"
               title="Månedlig distanse fra 2022 (valgte aktivitetstyper)"
+              useServerSummaries
+              activityTypes={selectedActivityTypes}
             />
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
               metric="time"
               title="Månedlig treningstid fra 2022 (valgte aktivitetstyper)"
+              useServerSummaries
+              activityTypes={selectedActivityTypes}
             />
           </ChartsContainer>
         </>

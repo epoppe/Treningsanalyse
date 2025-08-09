@@ -171,6 +171,104 @@ async def get_monthly_summaries(
         logger.error(f"Feil ved henting av månedlige sammendrag: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/monthly-comparison")
+async def get_monthly_comparison(
+    end_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD), default=last day of current month"),
+    months: int = Query(12, ge=1, le=36, description="Antall måneder å sammenligne (nåværende vs samme måned i fjor)"),
+    activity_types: Optional[List[str]] = Query(None, description="Aktivitetstyper å filtrere på"),
+    db: Session = Depends(get_db)
+):
+    """
+    Returnerer server-beregnet månedstabell for de siste N månedene, med sammenligning mot samme måned i fjor.
+    """
+    try:
+        # Sett slutt-dato til siste dag i inneværende måned hvis ikke spesifisert
+        from calendar import monthrange
+        today = date.today()
+        if end_date is None:
+            last_day = monthrange(today.year, today.month)[1]
+            end_date = date(today.year, today.month, last_day)
+
+        # Hjelpere
+        def first_day_of_month(y: int, m: int) -> date:
+            return date(y, m, 1)
+
+        def add_months(d: date, delta: int) -> date:
+            y = d.year + (d.month - 1 + delta) // 12
+            m = (d.month - 1 + delta) % 12 + 1
+            return first_day_of_month(y, m)
+
+        end_month_start = first_day_of_month(end_date.year, end_date.month)
+        start_month_start = add_months(end_month_start, -(months - 1))
+        prev_year_start = add_months(start_month_start, -12)
+
+        # Hent alle relevante månedlige sammendrag i ett spørring (24 måneder)
+        query = db.query(MonthlySummary).filter(
+            MonthlySummary.month_start_date >= prev_year_start,
+            MonthlySummary.month_end_date <= end_date
+        ).order_by(MonthlySummary.month_start_date.asc())
+        summaries: List[MonthlySummary] = query.all()
+
+        # Filtrer på aktivitetstyper om spesifisert
+        if activity_types:
+            summaries = filter_summaries_by_activity_types(summaries, activity_types)
+
+        # Map: YYYY-MM -> summary
+        def ym_key(d: date) -> str:
+            return f"{d.year}-{str(d.month).zfill(2)}"
+
+        by_month = {ym_key(s.month_start_date): s for s in summaries}
+
+        # Bygg resultat for siste N måneder
+        results = []
+        for i in range(months):
+            cur_month_start = add_months(start_month_start, i)
+            cur_key = ym_key(cur_month_start)
+            prev_key = f"{cur_month_start.year - 1}-{str(cur_month_start.month).zfill(2)}"
+
+            cur = by_month.get(cur_key)
+            prev = by_month.get(prev_key)
+
+            def extract_payload(s: MonthlySummary):
+                if not s:
+                    return None
+                return {
+                    "total_activities": s.total_activities,
+                    "total_distance": s.total_distance,
+                    "total_duration": s.total_duration,
+                    "avg_heart_rate": s.avg_heart_rate,
+                    "avg_pace": s.avg_pace,
+                }
+
+            cur_payload = extract_payload(cur)
+            prev_payload = extract_payload(prev)
+
+            def pct(a: float, b: float) -> float:
+                if b in (None, 0):
+                    return 100.0 if (a or 0) > 0 else 0.0
+                return ((a or 0) - (b or 0)) / b * 100.0
+
+            deltas = None
+            if cur_payload and prev_payload:
+                deltas = {
+                    "distance_pct": pct(cur_payload["total_distance"] or 0, prev_payload["total_distance"] or 0),
+                    "duration_pct": pct(cur_payload["total_duration"] or 0, prev_payload["total_duration"] or 0),
+                    "activities_pct": pct(cur_payload["total_activities"] or 0, prev_payload["total_activities"] or 0),
+                }
+
+            results.append({
+                "year": cur_month_start.year,
+                "month": cur_month_start.month,
+                "current": cur_payload,
+                "previous": prev_payload,
+                "deltas": deltas,
+            })
+
+        return results
+    except Exception as e:
+        logger.error(f"Feil ved henting av monthly comparison: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/refresh-summaries")
 async def refresh_summaries():
     """Oppdater alle sammendragstabeller basert på aktiviteter i databasen"""
