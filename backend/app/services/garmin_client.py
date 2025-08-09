@@ -495,12 +495,27 @@ class GarminClient:
 
                         # Ekstraher verdier
                         values_array = bb_data.get('body_battery_values_array') or bb_data.get('values')
-                        max_bb = bb_data.get('max_body_battery')
-                        min_bb = bb_data.get('min_body_battery')
+                        raw_max = bb_data.get('max_body_battery')
+                        raw_min = bb_data.get('min_body_battery')
+
+                        def to_num(x):
+                            if isinstance(x, (int, float)):
+                                return x
+                            if isinstance(x, (list, tuple)) and len(x) >= 3 and isinstance(x[2], (int, float)):
+                                return x[2]
+                            return None
+
+                        max_bb = to_num(raw_max)
+                        min_bb = to_num(raw_min)
                         if (max_bb is None or min_bb is None) and isinstance(values_array, (list, tuple)) and len(values_array) > 0:
                             try:
-                                max_bb = max(v for v in values_array if v is not None)
-                                min_bb = min(v for v in values_array if v is not None)
+                                nums = [to_num(v) for v in values_array]
+                                nums = [n for n in nums if isinstance(n, (int, float))]
+                                if nums:
+                                    if max_bb is None:
+                                        max_bb = max(nums)
+                                    if min_bb is None:
+                                        min_bb = min(nums)
                             except Exception:
                                 pass
 
