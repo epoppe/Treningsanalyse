@@ -70,7 +70,10 @@ async def get_sleep_range_endpoint(
     """Henter søvndata for en datoperiode."""
     logger.info(f"Mottok forespørsel om søvndata fra {start_date} til {end_date}")
     try:
-        sleep_data = await garmin_client.get_sleep_range(start_date, end_date)
+        # Konverter til datetime for robust håndtering i klienten
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.min.time())
+        sleep_data = await garmin_client.get_sleep_range(start_dt, end_dt)
         return sleep_data
     except Exception as e:
         logger.error(f"Feil ved henting av søvndata: {e}", exc_info=True)
