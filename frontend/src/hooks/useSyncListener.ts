@@ -14,10 +14,17 @@ export const useSyncListener = (onSyncComplete: () => void) => {
     const isNowIdle = status === 'idle';
 
     // Trigger callback hvis:
-    // 1. Vi har nye aktiviteter OG
-    // 2. Status har endret fra loading til idle (synkronisering fullført)
-    if (hasNewActivities && wasLoading && isNowIdle) {
-      console.log('[useSyncListener] Synkronisering fullført, oppdaterer statistikk...');
+    // 1. Vi har nye aktiviteter OG status har endret fra loading til idle
+    // ELLER
+    // 2. Status har endret fra loading til idle (kan være at sync fullført men ingen nye aktiviteter)
+    if ((hasNewActivities && wasLoading && isNowIdle) || (wasLoading && isNowIdle)) {
+      console.log('[useSyncListener] Synkronisering fullført, oppdaterer aktiviteter...', {
+        hasNewActivities,
+        wasLoading,
+        isNowIdle,
+        currentActivityCount,
+        previousActivityCount: previousActivityCount.current
+      });
       onSyncComplete();
     }
 
@@ -25,4 +32,18 @@ export const useSyncListener = (onSyncComplete: () => void) => {
     previousActivityCount.current = currentActivityCount;
     previousStatus.current = status;
   }, [activities.length, status, onSyncComplete]);
+
+  // Lytter etter custom syncCompleted event
+  useEffect(() => {
+    const handleSyncCompleted = (event: CustomEvent) => {
+      console.log('[useSyncListener] Mottok syncCompleted event:', event.detail);
+      onSyncComplete();
+    };
+
+    window.addEventListener('syncCompleted', handleSyncCompleted as EventListener);
+
+    return () => {
+      window.removeEventListener('syncCompleted', handleSyncCompleted as EventListener);
+    };
+  }, [onSyncComplete]);
 }; 

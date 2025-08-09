@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import styled from 'styled-components';
-import { fetchActivities, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
+import { fetchActivities, fetchNewActivities, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
 import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
 import { useSyncListener } from '../../hooks/useSyncListener';
@@ -53,12 +53,63 @@ export default function RunningEconomyPage() {
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(() => {
     console.log('[RunningEconomy] Synkronisering fullført, oppdaterer aktiviteter...');
-    // Hent aktiviteter på nytt for å få med nye synkroniserte aktiviteter
-    dispatch(fetchActivities());
-  }, [dispatch]);
+    
+    // Hent datoen for siste aktivitet hvis vi har noen
+    if (activities.length > 0) {
+      // Finn den nyeste aktiviteten
+      const latestActivity = activities.reduce((latest, current) => {
+        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
+      });
+      
+      const latestDate = new Date(latestActivity.startTimeLocal);
+      const sinceDate = latestDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      
+      console.log('[RunningEconomy] Henter nye aktiviteter siden', sinceDate);
+                dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
+    } else {
+      // Hvis vi ikke har noen aktiviteter, hent de siste 100
+      console.log('[RunningEconomy] Ingen eksisterende aktiviteter, henter siste 100');
+      dispatch(fetchActivities());
+    }
+  }, [dispatch, activities]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
+
+  // Automatisk sjekk for nye aktiviteter når siden lastes
+  useEffect(() => {
+    const checkForNewActivities = () => {
+      console.log('[RunningEconomy] Sjekker for nye aktiviteter ved sideinnlasting...');
+      
+      if (activities.length > 0) {
+        // Finn den nyeste aktiviteten
+        const latestActivity = activities.reduce((latest, current) => {
+          return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
+        });
+        
+        const latestDate = new Date(latestActivity.startTimeLocal);
+        const sinceDate = latestDate.toISOString().split('T')[0];
+        
+        console.log('[RunningEconomy] Henter nye aktiviteter siden', sinceDate);
+        dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
+      } else {
+        console.log('[RunningEconomy] Ingen eksisterende aktiviteter, henter siste 100');
+        dispatch(fetchActivities());
+      }
+    };
+
+    // Sjekk for nye aktiviteter når komponenten mountes
+    checkForNewActivities();
+
+    // Sjekk også når siden får fokus (bruker kommer tilbake til siden)
+    const handleFocus = () => {
+      console.log('[RunningEconomy] Side fikk fokus, sjekker for nye aktiviteter...');
+      checkForNewActivities();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [dispatch, activities.length]);
 
   useEffect(() => {
     if (status === 'idle') {

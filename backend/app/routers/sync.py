@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from pydantic import BaseModel
 from datetime import date, datetime, timezone, timedelta
 import logging
@@ -7,15 +7,18 @@ import pytz
 import asyncio
 from fastapi import status
 import uuid
-from typing import Dict
+from typing import Dict, Optional, Any
 
 from ..services.garmin_client import GarminClient
 from ..storage import DataStorage
 from ..services.sync_service import SyncService
 from ..dependencies import get_garmin_client, get_data_storage, get_db
 from ..database.session import SessionLocal
+from ..database.models.activity import Activity
 from garth.exc import GarthException
 from ..config import settings
+from ..services.hrv_service import HRVService
+from ..services.body_battery_service import BodyBatteryService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -329,31 +332,49 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
     try:
         sync_jobs[job_id]["status"] = "processing"
         sync_jobs[job_id]["message"] = "Starter full synkronisering..."
+        
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         
         # 1. Synkroniser aktiviteter med FIT-data
-        sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter..."
-        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date, True, 100)
+        sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter og FIT-data..."
+        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date)
         
         # 2. Synkroniser helsedata
         sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."
-        await sync_service.sync_health_data(start_date, end_date, True)
+        await sync_service.sync_health_data(start_date, end_date)
         
         # 3. Synkroniser Training Effect data
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
-        te_result = await sync_service.sync_training_effect_data(start_date, end_date, True)
+        await sync_service.sync_training_effect_data(start_date, end_date)
         
-        # 4. Kjør alle beregninger og caching
+        # 4. Synkroniser HRV-data til database
+        sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
+        hrv_service = HRVService(storage)
+        hrv_result = hrv_service.sync_hrv_data_to_database(
+            db_session, 
+            start_date.strftime('%Y-%m-%d'), 
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # 5. Synkroniser Body Battery-data til database
+        sync_jobs[job_id]["message"] = "Synkroniserer Body Battery-data til database..."
+        body_battery_service = BodyBatteryService(garmin_client)
+        body_battery_result = await body_battery_service.sync_body_battery_data_to_database(
+            db_session,
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # 6. Kjør beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
         await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
-        # Kombiner resultater
+        # Sammenslå resultater
         combined_result = {
             "activities": activity_result,
-            "health_data": "OK",
-            "training_effect": te_result,
-            "calculations": "OK",
+            "hrv_sync": hrv_result,
+            "body_battery_sync": body_battery_result,
             "message": "Full synkronisering fullført"
         }
         
@@ -362,6 +383,8 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
             "result": combined_result, 
             "end_time": datetime.now(timezone.utc)
         })
+        
+        logger.info(f"Full synkronisering fullført for jobb {job_id}")
         
     except Exception as e:
         logger.critical(f"Feil i full synkronisering (jobb {job_id}): {e}", exc_info=True)
@@ -498,67 +521,78 @@ async def run_calculations_only(job_id: str, storage: DataStorage, start_date: d
             db_session.close()
 
 async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage):
-    """Kjører synkronisering av nye aktiviteter fra siste lagrede aktivitet."""
+    """Kjører synkronisering av nye aktiviteter i bakgrunnen."""
     db_session = None
     try:
         sync_jobs[job_id]["status"] = "processing"
         sync_jobs[job_id]["message"] = "Finner siste aktivitet..."
+        
         db_session = SessionLocal()
         
         # Finn siste aktivitet i databasen
-        from ..database.models.activity import Activity
-        from sqlalchemy import desc
+        latest_activity = db_session.query(Activity).order_by(Activity.start_time.desc()).first()
         
-        latest_activity = db_session.query(Activity).order_by(desc(Activity.start_time)).first()
-        
-        if not latest_activity:
-            # Ingen aktiviteter i databasen, synkroniser siste 30 dager
-            sync_jobs[job_id]["message"] = "Ingen aktiviteter funnet, synkroniserer siste 30 dager..."
-            end_date = datetime.now(timezone.utc)
-            start_date = end_date - timedelta(days=30)
-            logger.info(f"Synkroniserer siste 30 dager: {start_date.date()} til {end_date.date()}")
+        if latest_activity:
+            # Bruk siste aktivitets start_time som startdato
+            start_date = latest_activity.start_time
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
+            
+            sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.strftime('%Y-%m-%d %H:%M')} til nå..."
+            logger.info(f"Starter synkronisering av nye aktiviteter fra {start_date} til nå")
         else:
-            # Bruk datoen for siste aktivitet som startdato
-            # Sørg for at start_date har timezone-informasjon
-            if latest_activity.start_time.tzinfo is None:
-                # Hvis start_time ikke har timezone, anta UTC
-                start_date = latest_activity.start_time.replace(tzinfo=timezone.utc)
-            else:
-                start_date = latest_activity.start_time
-            
-            end_date = datetime.now(timezone.utc)
-            
-            logger.info(f"Siste aktivitet funnet: ID={latest_activity.activity_id}, start_time={latest_activity.start_time}, type={latest_activity.activity_type.type_key if latest_activity.activity_type else 'unknown'}")
-            logger.info(f"Synkroniserer fra {start_date.date()} til {end_date.date()}")
-            sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.date()} til {end_date.date()}..."
+            # Hvis ingen aktiviteter finnes, synkroniser siste 30 dager
+            start_date = datetime.now(timezone.utc) - timedelta(days=30)
+            sync_jobs[job_id]["message"] = f"Ingen eksisterende aktiviteter, synkroniserer siste 30 dager..."
+            logger.info(f"Ingen eksisterende aktiviteter, starter synkronisering av siste 30 dager")
         
-        # Kjør full synkronisering for denne perioden
+        end_date = datetime.now(timezone.utc)
+        
         sync_service = SyncService(garmin_client, storage, db_session)
         
         # 1. Synkroniser aktiviteter med FIT-data
-        sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter..."
-        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date, True, 100)
+        sync_jobs[job_id]["message"] = "Synkroniserer nye aktiviteter og FIT-data..."
+        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date)
         
         # 2. Synkroniser helsedata
         sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."
-        await sync_service.sync_health_data(start_date, end_date, True)
+        await sync_service.sync_health_data(start_date, end_date)
         
         # 3. Synkroniser Training Effect data
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
-        te_result = await sync_service.sync_training_effect_data(start_date, end_date, True)
+        await sync_service.sync_training_effect_data(start_date, end_date)
         
-        # 4. Kjør alle beregninger og caching
+        # 4. Synkroniser HRV-data til database
+        sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
+        hrv_service = HRVService(storage)
+        hrv_result = hrv_service.sync_hrv_data_to_database(
+            db_session, 
+            start_date.strftime('%Y-%m-%d'), 
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # 5. Synkroniser Body Battery-data til database
+        sync_jobs[job_id]["message"] = "Synkroniserer Body Battery-data til database..."
+        body_battery_service = BodyBatteryService(garmin_client)
+        body_battery_result = await body_battery_service.sync_body_battery_data_to_database(
+            db_session,
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # 6. Kjør beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
-        calc_result = await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
+        await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
-        # Kombiner resultater
+        # Sammenslå resultater
         combined_result = {
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
             "activities": activity_result,
-            "health_data": "OK",
-            "training_effect": te_result,
-            "calculations": calc_result,
+            "hrv_sync": hrv_result,
+            "body_battery_sync": body_battery_result,
+            "period": {
+                "start": start_date.strftime('%Y-%m-%d %H:%M'),
+                "end": end_date.strftime('%Y-%m-%d %H:%M')
+            },
             "message": "Synkronisering av nye aktiviteter fullført"
         }
         
@@ -567,6 +601,8 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             "result": combined_result, 
             "end_time": datetime.now(timezone.utc)
         })
+        
+        logger.info(f"Synkronisering av nye aktiviteter fullført for jobb {job_id}")
         
     except Exception as e:
         logger.critical(f"Feil i synkronisering av nye aktiviteter (jobb {job_id}): {e}", exc_info=True)
@@ -619,3 +655,203 @@ async def trigger_new_activities_sync(
         "message": "Synkronisering av nye aktiviteter startet. Dette vil synkronisere fra siste lagrede aktivitet til nå.",
         "job_id": job_id
     }
+
+def run_hrv_sync(start_date: Optional[str] = None, end_date: Optional[str] = None, db_session: Session = None) -> Dict[str, Any]:
+    """Synkroniserer HRV-data fra parquet-filer til databasen."""
+    try:
+        storage = DataStorage()
+        hrv_service = HRVService(storage)
+        
+        result = hrv_service.sync_hrv_data_to_database(db_session, start_date, end_date)
+        
+        if result["success"]:
+            return {
+                "status": "completed",
+                "message": result["message"],
+                "synced_records": result["synced_records"],
+                "skipped_records": result["skipped_records"],
+                "total_records": result.get("total_records", 0)
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": result["message"]
+            }
+            
+    except Exception as e:
+        logger.error(f"Feil ved HRV-synkronisering: {e}")
+        return {
+            "status": "failed",
+            "message": f"Feil ved HRV-synkronisering: {str(e)}"
+        }
+
+@router.post("/hrv-sync")
+async def sync_hrv_data(
+    start_date: Optional[str] = Query(None, description="Startdato for HRV-synkronisering (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Sluttdato for HRV-synkronisering (YYYY-MM-DD)"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
+    """Synkroniserer HRV-data fra parquet-filer til databasen for raskere tilgang."""
+    try:
+        job_id = str(uuid.uuid4())
+        
+        # Start synkronisering som bakgrunnsjobb
+        background_tasks.add_task(
+            run_hrv_sync_task,
+            job_id=job_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        sync_jobs[job_id] = {
+            "status": "processing",
+            "message": "Starter HRV-synkronisering...",
+            "start_time": datetime.utcnow(),
+            "job_type": "hrv_sync"
+        }
+        
+        logger.info(f"HRV-synkronisering startet med jobb-ID: {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "message": "HRV-synkronisering startet",
+            "status": "processing"
+        }
+        
+    except Exception as e:
+        logger.error(f"Feil ved start av HRV-synkronisering: {e}")
+        raise HTTPException(status_code=500, detail=f"Feil ved start av HRV-synkronisering: {str(e)}")
+
+def run_hrv_sync_task(job_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """Bakgrunnsjobb for HRV-synkronisering."""
+    try:
+        # Opprett ny database session for bakgrunnsjobb
+        db = SessionLocal()
+        try:
+            result = run_hrv_sync(start_date, end_date, db)
+            
+            # Oppdater jobb-status
+            sync_jobs[job_id].update({
+                "status": result["status"],
+                "message": result["message"],
+                "result": result,
+                "end_time": datetime.utcnow()
+            })
+            
+            logger.info(f"HRV-synkronisering fullført for jobb {job_id}: {result['message']}")
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Feil i HRV-synkroniseringsjobb {job_id}: {e}")
+        sync_jobs[job_id].update({
+            "status": "failed",
+            "message": f"Feil ved HRV-synkronisering: {str(e)}",
+            "error": str(e),
+            "end_time": datetime.utcnow()
+        })
+
+async def run_body_battery_sync(start_date: Optional[str] = None, end_date: Optional[str] = None, db_session: Session = None) -> Dict[str, Any]:
+    """Synkroniserer Body Battery-data fra Garmin til databasen."""
+    try:
+        garmin_client = GarminClient(
+            email=settings.GARMIN_EMAIL,
+            password=settings.GARMIN_PASSWORD,
+            token_dir=settings.TOKEN_DIR
+        )
+        body_battery_service = BodyBatteryService(garmin_client)
+        
+        # Bruk standard tidsperiode hvis ikke spesifisert
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        result = await body_battery_service.sync_body_battery_data_to_database(db_session, start_date, end_date)
+        
+        return {
+            "status": "completed",
+            "message": result["message"],
+            "synced_records": result["synced_records"],
+            "updated_records": result.get("updated_records", 0),
+            "total_processed": result.get("total_processed", 0)
+        }
+            
+    except Exception as e:
+        logger.error(f"Feil ved Body Battery-synkronisering: {e}")
+        return {
+            "status": "failed",
+            "message": f"Feil ved Body Battery-synkronisering: {str(e)}"
+        }
+
+@router.post("/body-battery-sync")
+async def sync_body_battery_data(
+    start_date: Optional[str] = Query(None, description="Startdato for Body Battery-synkronisering (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="Sluttdato for Body Battery-synkronisering (YYYY-MM-DD)"),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    db: Session = Depends(get_db)
+):
+    """Synkroniserer Body Battery-data fra Garmin til databasen."""
+    try:
+        job_id = str(uuid.uuid4())
+        
+        # Start synkronisering som bakgrunnsjobb
+        background_tasks.add_task(
+            run_body_battery_sync_task,
+            job_id=job_id,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        sync_jobs[job_id] = {
+            "status": "processing",
+            "message": "Starter Body Battery-synkronisering...",
+            "start_time": datetime.utcnow(),
+            "job_type": "body_battery_sync"
+        }
+        
+        logger.info(f"Body Battery-synkronisering startet med jobb-ID: {job_id}")
+        
+        return {
+            "job_id": job_id,
+            "message": "Body Battery-synkronisering startet",
+            "status": "processing"
+        }
+        
+    except Exception as e:
+        logger.error(f"Feil ved start av Body Battery-synkronisering: {e}")
+        raise HTTPException(status_code=500, detail=f"Feil ved start av Body Battery-synkronisering: {str(e)}")
+
+def run_body_battery_sync_task(job_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
+    """Bakgrunnsjobb for Body Battery-synkronisering."""
+    try:
+        # Opprett ny database session for bakgrunnsjobb
+        db = SessionLocal()
+        try:
+            # Kjør async funksjon i en event loop
+            import asyncio
+            result = asyncio.run(run_body_battery_sync(start_date, end_date, db))
+            
+            # Oppdater jobb-status
+            sync_jobs[job_id].update({
+                "status": result["status"],
+                "message": result["message"],
+                "result": result,
+                "end_time": datetime.utcnow()
+            })
+            
+            logger.info(f"Body Battery-synkronisering fullført for jobb {job_id}: {result['message']}")
+            
+        finally:
+            db.close()
+            
+    except Exception as e:
+        logger.error(f"Feil i Body Battery-synkroniseringsjobb {job_id}: {e}")
+        sync_jobs[job_id].update({
+            "status": "failed",
+            "message": f"Feil ved Body Battery-synkronisering: {str(e)}",
+            "error": str(e),
+            "end_time": datetime.utcnow()
+        })

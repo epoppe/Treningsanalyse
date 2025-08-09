@@ -98,10 +98,48 @@ export const activitiesApi = {
       console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return response.data;
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities med høyere limit:', error);
+      console.error('[API] Feil ved GET /activities med limit/offset:', error);
       console.error('[API] Error response:', error.response?.data);
       console.error('[API] Error status:', error.response?.status);
       console.error('[API] Error message:', error.message);
+      throw error;
+    }
+  },
+
+  // Hent kun nye aktiviteter siden en gitt dato
+  getNewActivities: async (since: string, forceRefresh: boolean = false) => {
+    console.log('[API] Sender GET request til /activities/new for å hente nye aktiviteter siden', since);
+    try {
+      const params = new URLSearchParams();
+      params.append('since', since);
+      if (forceRefresh) params.append('force_refresh', 'true');
+      
+      const queryString = params.toString();
+      const url = `/activities/new?${queryString}`;
+      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
+      
+      const response = await apiClient.get<Activity[]>(url);
+      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'nye aktiviteter');
+      return response.data;
+    } catch (error: any) {
+      console.error('[API] Feil ved GET /activities/new:', error);
+      console.error('[API] Error response:', error.response?.data);
+      console.error('[API] Error status:', error.response?.status);
+      console.error('[API] Error message:', error.message);
+      throw error;
+    }
+  },
+  
+  // New function to get HRV data for multiple activities
+  getHrvForMultipleActivities: async (activityIds: string[]) => {
+    console.log('[API] Henter HRV-data for', activityIds.length, 'aktiviteter');
+    try {
+      const activityIdsParam = activityIds.join(',');
+      const response = await apiClient.get(`/analysis/hrv/by-activities?activity_ids=${activityIdsParam}`);
+      console.log('[API] HRV-data hentet for', response.data.activities_with_hrv, 'av', response.data.total_activities, 'aktiviteter');
+      return response.data;
+    } catch (error: any) {
+      console.error('[API] Feil ved henting av HRV-data for flere aktiviteter:', error);
       throw error;
     }
   },
@@ -247,57 +285,47 @@ export const analysisApi = {
   getHrvByActivity: (activityId: number): Promise<HrvByActivityResponse> => apiCall<HrvByActivityResponse>('get', `/analysis/hrv/by-activity/${activityId}`),
   getStrideLengthData: (activityId: number) => apiCall('get', `/analysis/stride-length/${activityId}`),
   getBodyBatteryByActivity: (activityId: number): Promise<BodyBatteryByActivityResponse> => apiCall<BodyBatteryByActivityResponse>('get', `/analysis/body-battery/by-activity/${activityId}`),
+  
+  // Body Battery fra database
+  getBodyBatteryData: (startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const queryString = params.toString();
+    const url = `/analysis/body-battery${queryString ? `?${queryString}` : ''}`;
+    return apiCall('get', url);
+  },
+  getBodyBatteryStatistics: () => apiCall('get', '/analysis/body-battery/statistics'),
 };
 
 export const syncApi = {
   // --- Aktiviteter ---
-  syncActivities: (startDate: string, endDate: string) => {
-    const body = {
-      start_date: startDate.split('T')[0],
-      end_date: endDate.split('T')[0],
-    };
-    return apiCall('post', '/sync/activities', { body });
-  },
-  syncRecentActivities: () => {
-    return apiCall('post', '/sync/activities/recent');
+  syncActivities: (startDate: string, endDate: string) => apiCall('post', '/sync/activities', { start_date: startDate, end_date: endDate }),
+  syncNewActivities: () => apiCall('post', '/sync/new-activities'),
+  syncAllActivities: () => apiCall('post', '/sync/full-sync'),
+  fullSync: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate }),
+  
+  // --- HRV ---
+  syncHrvData: (startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const queryString = params.toString();
+    const url = `/sync/hrv-sync${queryString ? `?${queryString}` : ''}`;
+    return apiCall('post', url);
   },
   
-  // --- Helsedata ---
-  syncHealthData: (startDate: string, endDate: string) => {
-    const body = {
-      start_date: startDate.split('T')[0],
-      end_date: endDate.split('T')[0],
-    };
-    return apiCall('post', '/sync/health', { body });
+  // --- Body Battery ---
+  syncBodyBatteryData: (startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    const queryString = params.toString();
+    const url = `/sync/body-battery-sync${queryString ? `?${queryString}` : ''}`;
+    return apiCall('post', url);
   },
-  syncHealthLast90Days: () => {
-    return apiCall('post', '/sync/health/recent');
-  },
-
-  // --- Full Synkronisering ---
-  fullSync: (startDate: string, endDate: string) => {
-    const body = {
-      start_date: startDate.split('T')[0],
-      end_date: endDate.split('T')[0],
-    };
-    return apiCall('post', '/sync/full-sync', { body });
-  },
-
-  // --- Beregninger og Caching ---
-  runCalculations: (startDate: string, endDate: string) => {
-    const body = {
-      start_date: startDate.split('T')[0],
-      end_date: endDate.split('T')[0],
-    };
-    return apiCall('post', '/sync/calculations', { body });
-  },
-
-  // --- Nye Aktiviteter ---
-  syncNewActivities: () => {
-    return apiCall('post', '/sync/new-activities');
-  },
-
-  // --- Felles ---
+  
+  // --- Jobb-status ---
   getSyncStatus: async (jobId: string) => {
     try {
       const response = await apiClient.get<any>(`/sync/status/${jobId}`);
@@ -313,7 +341,7 @@ export const syncApi = {
       }
       throw error;
     }
-  }
+  },
 };
 
 export const api = {

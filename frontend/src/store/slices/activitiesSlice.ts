@@ -129,6 +129,22 @@ export const fetchAllActivities = createAsyncThunk<Activity[], { forceRefresh?: 
   }
 );
 
+export const fetchNewActivities = createAsyncThunk<Activity[], { since: string; forceRefresh?: boolean }, { rejectValue: string }>(
+  'activities/fetchNewActivities',
+  async ({ since, forceRefresh = false }, { rejectWithValue }) => {
+    try {
+      console.log('[fetchNewActivities] Starter API-kall for å hente nye aktiviteter siden', since);
+      const response = await activitiesApi.getNewActivities(since, forceRefresh);
+      console.log('[fetchNewActivities] Hentet response:', response?.length || 0, 'nye aktiviteter');
+      return response;
+    } catch (error) {
+      console.error('[fetchNewActivities] Feil ved henting av nye aktiviteter:', error);
+      const errorInfo = errorHandler(error);
+      return rejectWithValue(errorInfo.error);
+    }
+  }
+);
+
 // Slice
 const activitiesSlice = createSlice({
   name: 'activities',
@@ -209,32 +225,29 @@ const activitiesSlice = createSlice({
         state.status = 'failed';
         state.error = action.payload as string || 'Kunne ikke hente alle aktiviteter';
       })
-      // fetchActivitiesByDateRange
-      .addCase(fetchActivitiesByDateRange.pending, (state) => {
+      // fetchNewActivities
+      .addCase(fetchNewActivities.pending, (state) => {
         state.status = 'loading';
         state.error = null;
       })
-      .addCase(fetchActivitiesByDateRange.fulfilled, (state, action) => {
+      .addCase(fetchNewActivities.fulfilled, (state, action: PayloadAction<Activity[]>) => {
         state.status = 'succeeded';
-        state.items = action.payload;
-        state.loadedCount = action.payload.length;
-      })
-      .addCase(fetchActivitiesByDateRange.rejected, (state, action) => {
-        state.status = 'failed';
-        state.error = action.payload as string || 'Kunne ikke hente aktiviteter for perioden';
-      })
-      // syncHistoricalData
-      .addCase(syncHistoricalData.pending, (state) => {
-        state.status = 'loading';
-        state.error = null;
-      })
-      .addCase(syncHistoricalData.fulfilled, (state) => {
-        state.status = 'succeeded';
+        // Legg til nye aktiviteter til eksisterende liste og fjern duplikater
+        const newActivities = action.payload;
+        const existingIds = new Set(state.items.map(item => item.activityId));
+        const uniqueNewActivities = newActivities.filter(activity => !existingIds.has(activity.activityId));
+        
+        // Kombiner eksisterende og nye aktiviteter, sortert etter dato (nyeste først)
+        const combinedActivities = [...state.items, ...uniqueNewActivities];
+        combinedActivities.sort((a, b) => new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime());
+        
+        state.items = combinedActivities;
+        state.loadedCount = combinedActivities.length;
         state.lastSync = new Date().toISOString();
       })
-      .addCase(syncHistoricalData.rejected, (state, action) => {
+      .addCase(fetchNewActivities.rejected, (state, action) => {
         state.status = 'failed';
-        state.error = action.payload as string || 'Kunne ikke synkronisere historiske data';
+        state.error = action.payload as string || 'Kunne ikke hente nye aktiviteter';
       });
   },
 });

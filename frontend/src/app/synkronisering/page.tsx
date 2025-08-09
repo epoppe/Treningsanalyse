@@ -157,6 +157,27 @@ const DangerButton = styled.button<{ $disabled?: boolean }>`
   }
 `;
 
+const ButtonContainer = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  margin-top: 1rem;
+`;
+
+const DateRangeContainer = styled.div`
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+`;
+
+const SyncButton = styled(Button)`
+  width: 100%;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  min-width: 200px;
+`;
+
 interface SyncJob {
   status: string;
   message?: string;
@@ -201,6 +222,12 @@ export default function SynkroniseringPage() {
 
         if (status.status === 'processing') {
           setTimeout(poll, 2000); // Poll hver 2. sekund
+        } else if (status.status === 'completed') {
+          console.log('[Synkronisering] Synkronisering fullført, triggerer oppdatering av aktiviteter...');
+          // Trigger oppdatering av aktiviteter på alle sider ved å sende en custom event
+          window.dispatchEvent(new CustomEvent('syncCompleted', { 
+            detail: { jobId, status } 
+          }));
         }
       } catch (error) {
         console.error('Feil ved polling av jobb-status:', error);
@@ -225,6 +252,10 @@ export default function SynkroniseringPage() {
       start.toISOString(),
       end.toISOString()
     ));
+  };
+
+  const syncBodyBattery = () => {
+    startSync(() => api.syncBodyBatteryData(startDate, endDate));
   };
 
   const getStatusText = (status: string) => {
@@ -257,6 +288,13 @@ export default function SynkroniseringPage() {
             disabled={isLoading}
           >
             Synk valgt periode
+          </QuickActionButton>
+          
+          <QuickActionButton 
+            onClick={syncBodyBattery}
+            disabled={isLoading}
+          >
+            Synk Body Battery
           </QuickActionButton>
           
           <DangerButton 
@@ -342,6 +380,7 @@ export default function SynkroniseringPage() {
             <li><strong>FIT-data:</strong> Detaljerte aktivitetsdata for løpeaktiviteter (hastighet, hjertefrekvens, kadens, etc.)</li>
             <li><strong>Helsedata:</strong> HRV-data, kroppsbatteri, og andre helsemetrics</li>
             <li><strong>Training Effect:</strong> EPOC, Training Load, og andre treningsmetrics</li>
+            <li><strong>HRV Database:</strong> HRV-data synkroniseres automatisk til database for raskere tilgang</li>
           </ul>
           
           <p><strong>Hva beregnes og lagres:</strong></p>

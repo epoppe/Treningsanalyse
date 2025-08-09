@@ -3,6 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { api } from '../../utils/api';
+import BodyBatteryChart from '../../components/BodyBatteryChart';
+import { format, subDays, subWeeks, subMonths, startOfDay, endOfDay } from 'date-fns';
+import { nb } from 'date-fns/locale';
 
 // Styled components
 const Container = styled.div`
@@ -18,301 +21,338 @@ const Title = styled.h1`
   font-size: 2.5rem;
 `;
 
-const DateSelector = styled.div`
-  display: flex;
-  justify-content: center;
-  gap: 1rem;
+const FilterContainer = styled.div`
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   margin-bottom: 2rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
   align-items: center;
 `;
 
-const DateInput = styled.input`
+const FilterGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+`;
+
+const Label = styled.label`
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.9rem;
+`;
+
+const Input = styled.input`
   padding: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid #d1d5db;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  
+  &:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 1px #3b82f6;
+  }
 `;
 
 const Button = styled.button`
-  padding: 0.5rem 1rem;
-  background: #3498db;
+  background-color: #3b82f6;
   color: white;
+  padding: 0.5rem 1rem;
   border: none;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.3s ease;
-
+  font-size: 0.9rem;
+  height: fit-content;
+  margin-top: 1.5rem;
+  
   &:hover {
-    background: #2980b9;
+    background-color: #2563eb;
   }
-
+  
   &:disabled {
-    background: #bdc3c7;
+    background-color: #9ca3af;
     cursor: not-allowed;
   }
 `;
 
-const MetricsGrid = styled.div`
+const QuickFilterButton = styled.button<{ $active?: boolean }>`
+  background-color: ${props => props.$active ? '#2563eb' : '#f3f4f6'};
+  color: ${props => props.$active ? 'white' : '#374151'};
+  padding: 0.5rem 1rem;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s;
+  
+  &:hover {
+    background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'};
+  }
+`;
+
+const LoadingContainer = styled.div`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 200px;
+  font-size: 1.2rem;
+  color: #666;
+`;
+
+const ErrorContainer = styled.div`
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+  text-align: center;
+`;
+
+const StatsContainer = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
   margin-bottom: 2rem;
 `;
 
-const MetricCard = styled.div`
+const StatCard = styled.div`
   background: white;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  border-left: 4px solid #3498db;
+  text-align: center;
 `;
 
-const MetricTitle = styled.h3`
-  color: #2c3e50;
-  margin-bottom: 1rem;
-  font-size: 1.2rem;
-`;
-
-const MetricValue = styled.div`
-  font-size: 2rem;
+const StatValue = styled.div`
+  font-size: 1.5rem;
   font-weight: bold;
-  color: #3498db;
+  color: #3b82f6;
   margin-bottom: 0.5rem;
 `;
 
-const MetricLabel = styled.div`
+const StatLabel = styled.div`
   color: #666;
   font-size: 0.9rem;
 `;
 
-const ChartContainer = styled.div`
-  background: white;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
-`;
-
-const LoadingSpinner = styled.div`
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
-  border-radius: 50%;
-  width: 40px;
-  height: 40px;
-  animation: spin 1s linear infinite;
-  margin: 2rem auto;
-
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-`;
-
-const ErrorMessage = styled.div`
-  color: #e74c3c;
-  text-align: center;
-  padding: 2rem;
-  background: #fdf2f2;
-  border-radius: 8px;
-  margin: 1rem 0;
-`;
-
-const EmptyMessage = styled.div`
-  color: #666;
-  text-align: center;
-  padding: 2rem;
-  font-style: italic;
-`;
-
-// Types
 interface BodyBatteryData {
   date: string;
-  body_battery_charged: number;
-  body_battery_drained: number;
-  body_battery_charged_start: number;
-  body_battery_drained_start: number;
-  net_charge: number;
+  max_body_battery: number | null;
+  min_body_battery: number | null;
+  body_battery_charged: number | null;
+  body_battery_drained: number | null;
+  body_battery_charged_start: number | null;
+  body_battery_drained_start: number | null;
+  net_charge: number | null;
+}
+
+interface BodyBatteryResponse {
+  body_battery_data: BodyBatteryData[];
+  total_records: number;
+}
+
+interface BodyBatteryStatistics {
+  total_records: number;
+  average_max_body_battery: number | null;
+  average_min_body_battery: number | null;
+  highest_body_battery_ever: number | null;
+  lowest_body_battery_ever: number | null;
 }
 
 const BodyBatteryPage: React.FC = () => {
-  const [selectedDate, setSelectedDate] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-  const [bodyBatteryData, setBodyBatteryData] = useState<BodyBatteryData | null>(null);
+  const [data, setData] = useState<BodyBatteryData[]>([]);
+  const [statistics, setStatistics] = useState<BodyBatteryStatistics | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+  const [activeFilter, setActiveFilter] = useState<string>('');
 
-  const fetchBodyBatteryData = async (date: string) => {
+  useEffect(() => {
+    // Sett standard tidsperiode (siste 30 dager)
+    const end = new Date();
+    const start = subDays(end, 30);
+    setStartDate(format(start, 'yyyy-MM-dd'));
+    setEndDate(format(end, 'yyyy-MM-dd'));
+    setActiveFilter('30d');
+  }, []);
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      fetchBodyBatteryData();
+      fetchStatistics();
+    }
+  }, [startDate, endDate]);
+
+  const fetchBodyBatteryData = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      const data = await api.getBodyBattery(date);
-      setBodyBatteryData(data);
+      const response = await api.getBodyBatteryData(startDate, endDate);
+      setData(response.body_battery_data || []);
     } catch (err: any) {
-      if (err.response?.status === 404) {
-        setError('Ingen body battery data tilgjengelig for valgt dato.');
-      } else {
-        setError(err.message || 'En feil oppstod ved henting av data.');
-      }
+      setError(err.message || 'Feil ved henting av Body Battery-data');
+      console.error('Feil ved henting av Body Battery-data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchBodyBatteryData(selectedDate);
-  }, [selectedDate]);
-
-  const handleDateChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSelectedDate(event.target.value);
+  const fetchStatistics = async () => {
+    try {
+      const response = await api.getBodyBatteryStatistics();
+      setStatistics(response);
+    } catch (err: any) {
+      console.error('Feil ved henting av Body Battery-statistikk:', err);
+    }
   };
 
-  const formatBatteryLevel = (level: number) => {
-    if (level === null || level === undefined) return 'N/A';
-    return `${level}%`;
+  const handleFilterSubmit = () => {
+    if (startDate && endDate) {
+      setActiveFilter('custom');
+      fetchBodyBatteryData();
+      fetchStatistics();
+    }
   };
 
-  const getBatteryColor = (level: number) => {
-    if (level >= 80) return '#27ae60'; // Grønn
-    if (level >= 60) return '#f39c12'; // Oransje
-    if (level >= 40) return '#e67e22'; // Mørk oransje
-    return '#e74c3c'; // Rød
+  const handleQuickFilter = (days: number, filterName: string) => {
+    const end = new Date();
+    const start = subDays(end, days);
+    setStartDate(format(start, 'yyyy-MM-dd'));
+    setEndDate(format(end, 'yyyy-MM-dd'));
+    setActiveFilter(filterName);
   };
 
-  const getBatteryStatus = (level: number) => {
-    if (level >= 80) return 'Høy';
-    if (level >= 60) return 'Moderat';
-    if (level >= 40) return 'Lav';
-    return 'Kritisk';
+  const handleLoadAll = () => {
+    const end = new Date();
+    const start = subMonths(end, 12); // Siste 12 måneder
+    setStartDate(format(start, 'yyyy-MM-dd'));
+    setEndDate(format(end, 'yyyy-MM-dd'));
+    setActiveFilter('all');
   };
 
   return (
     <Container>
-      <Title>🔋 Body Battery</Title>
-      
-      <DateSelector>
-        <label htmlFor="date-selector">Velg dato:</label>
-        <DateInput
-          id="date-selector"
-          type="date"
-          value={selectedDate}
-          onChange={handleDateChange}
-          max={new Date().toISOString().split('T')[0]}
-        />
-        <Button onClick={() => fetchBodyBatteryData(selectedDate)} disabled={loading}>
-          {loading ? 'Henter...' : 'Oppdater'}
-        </Button>
-      </DateSelector>
+      <Title>Body Battery</Title>
 
-      {error && <ErrorMessage>{error}</ErrorMessage>}
+      <FilterContainer>
+        <FilterGroup>
+          <Label>Fra dato:</Label>
+          <Input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </FilterGroup>
+
+        <FilterGroup>
+          <Label>Til dato:</Label>
+          <Input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </FilterGroup>
+
+        <Button onClick={handleFilterSubmit} disabled={loading}>
+          {loading ? 'Laster...' : 'Hent data'}
+        </Button>
+
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
+          <QuickFilterButton
+            $active={activeFilter === '7d'}
+            onClick={() => handleQuickFilter(7, '7d')}
+          >
+            7 dager
+          </QuickFilterButton>
+          <QuickFilterButton
+            $active={activeFilter === '30d'}
+            onClick={() => handleQuickFilter(30, '30d')}
+          >
+            30 dager
+          </QuickFilterButton>
+          <QuickFilterButton
+            $active={activeFilter === '90d'}
+            onClick={() => handleQuickFilter(90, '90d')}
+          >
+            90 dager
+          </QuickFilterButton>
+          <QuickFilterButton
+            $active={activeFilter === 'all'}
+            onClick={handleLoadAll}
+          >
+            Alle data
+          </QuickFilterButton>
+        </div>
+      </FilterContainer>
+
+      {error && (
+        <ErrorContainer>
+          {error}
+        </ErrorContainer>
+      )}
+
+      {statistics && (
+        <StatsContainer>
+          <StatCard>
+            <StatValue>{statistics.total_records}</StatValue>
+            <StatLabel>Totalt antall dager</StatLabel>
+          </StatCard>
+          <StatCard>
+            <StatValue>
+              {statistics.average_max_body_battery !== null 
+                ? `${statistics.average_max_body_battery.toFixed(1)}%`
+                : 'N/A'
+              }
+            </StatValue>
+            <StatLabel>Gjennomsnitt høyeste</StatLabel>
+          </StatCard>
+          <StatCard>
+            <StatValue>
+              {statistics.average_min_body_battery !== null 
+                ? `${statistics.average_min_body_battery.toFixed(1)}%`
+                : 'N/A'
+              }
+            </StatValue>
+            <StatLabel>Gjennomsnitt laveste</StatLabel>
+          </StatCard>
+          <StatCard>
+            <StatValue>
+              {statistics.highest_body_battery_ever !== null 
+                ? `${statistics.highest_body_battery_ever}%`
+                : 'N/A'
+              }
+            </StatValue>
+            <StatLabel>Høyeste noensinne</StatLabel>
+          </StatCard>
+          <StatCard>
+            <StatValue>
+              {statistics.lowest_body_battery_ever !== null 
+                ? `${statistics.lowest_body_battery_ever}%`
+                : 'N/A'
+              }
+            </StatValue>
+            <StatLabel>Laveste noensinne</StatLabel>
+          </StatCard>
+        </StatsContainer>
+      )}
 
       {loading ? (
-        <LoadingSpinner />
-      ) : bodyBatteryData ? (
-        <>
-          <MetricsGrid>
-            <MetricCard>
-              <MetricTitle>Startnivå (Oppladet)</MetricTitle>
-              <MetricValue style={{ color: getBatteryColor(bodyBatteryData.body_battery_charged_start || 0) }}>
-                {formatBatteryLevel(bodyBatteryData.body_battery_charged_start)}
-              </MetricValue>
-              <MetricLabel>
-                Status: {getBatteryStatus(bodyBatteryData.body_battery_charged_start || 0)}
-              </MetricLabel>
-            </MetricCard>
-
-            <MetricCard>
-              <MetricTitle>Startnivå (Utladet)</MetricTitle>
-              <MetricValue style={{ color: getBatteryColor(bodyBatteryData.body_battery_drained_start || 0) }}>
-                {formatBatteryLevel(bodyBatteryData.body_battery_drained_start)}
-              </MetricValue>
-              <MetricLabel>
-                Status: {getBatteryStatus(bodyBatteryData.body_battery_drained_start || 0)}
-              </MetricLabel>
-            </MetricCard>
-
-            <MetricCard>
-              <MetricTitle>Total Oppladning</MetricTitle>
-              <MetricValue style={{ color: '#27ae60' }}>
-                {bodyBatteryData.body_battery_charged || 0}%
-              </MetricValue>
-              <MetricLabel>Oppladet gjennom dagen</MetricLabel>
-            </MetricCard>
-
-            <MetricCard>
-              <MetricTitle>Total Utladning</MetricTitle>
-              <MetricValue style={{ color: '#e74c3c' }}>
-                {bodyBatteryData.body_battery_drained || 0}%
-              </MetricValue>
-              <MetricLabel>Utladet gjennom dagen</MetricLabel>
-            </MetricCard>
-
-            <MetricCard>
-              <MetricTitle>Netto Lading</MetricTitle>
-              <MetricValue style={{ 
-                color: bodyBatteryData.net_charge >= 0 ? '#27ae60' : '#e74c3c' 
-              }}>
-                {bodyBatteryData.net_charge >= 0 ? '+' : ''}{bodyBatteryData.net_charge}%
-              </MetricValue>
-              <MetricLabel>
-                {bodyBatteryData.net_charge >= 0 ? 'Positiv netto lading' : 'Negativ netto lading'}
-              </MetricLabel>
-            </MetricCard>
-          </MetricsGrid>
-
-          <ChartContainer>
-            <MetricTitle>Body Battery Oversikt</MetricTitle>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center',
-              marginTop: '1rem'
-            }}>
-              <div>
-                <strong>Dato:</strong> {new Date(bodyBatteryData.date).toLocaleDateString('nb-NO')}
-              </div>
-              <div>
-                <strong>Netto endring:</strong> {bodyBatteryData.net_charge}%
-              </div>
-            </div>
-            
-            {/* Enkel visualisering av body battery */}
-            <div style={{ 
-              marginTop: '1rem',
-              padding: '1rem',
-              backgroundColor: '#f8f9fa',
-              borderRadius: '4px'
-            }}>
-              <div style={{ marginBottom: '0.5rem' }}>
-                <strong>Body Battery Status:</strong>
-              </div>
-              <div style={{ 
-                display: 'flex', 
-                gap: '1rem',
-                flexWrap: 'wrap'
-              }}>
-                <div>
-                  <span style={{ color: '#27ae60' }}>●</span> Start (Oppladet): {formatBatteryLevel(bodyBatteryData.body_battery_charged_start)}
-                </div>
-                <div>
-                  <span style={{ color: '#e74c3c' }}>●</span> Start (Utladet): {formatBatteryLevel(bodyBatteryData.body_battery_drained_start)}
-                </div>
-                <div>
-                  <span style={{ color: '#3498db' }}>●</span> Oppladet: {bodyBatteryData.body_battery_charged || 0}%
-                </div>
-                <div>
-                  <span style={{ color: '#e67e22' }}>●</span> Utladet: {bodyBatteryData.body_battery_drained || 0}%
-                </div>
-              </div>
-            </div>
-          </ChartContainer>
-        </>
+        <LoadingContainer>
+          Laster Body Battery-data...
+        </LoadingContainer>
       ) : (
-        <EmptyMessage>
-          Ingen body battery data tilgjengelig for valgt dato.
-        </EmptyMessage>
+        <>
+          <BodyBatteryChart
+            data={data}
+            title="Body Battery over tid"
+          />
+        </>
       )}
     </Container>
   );

@@ -144,35 +144,64 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
       }
       setIsLoadingHrv(true);
 
-      const hrvResults: {[activityId: string]: number | null} = {};
-      
-      const promises = activities.map(async (activity) => {
-        const activityDate = new Date(activity.startTimeLocal);
-        if (activityDate.getFullYear() < 2023) {
-          hrvResults[activity.activityId] = null;
+      try {
+        // Filtrer aktiviteter som trenger HRV-data (fra 2023 og fremover)
+        const activitiesNeedingHrv = activities.filter(activity => {
+          const activityDate = new Date(activity.startTimeLocal);
+          return activityDate.getFullYear() >= 2023;
+        });
+
+        console.log(`[HRV] Starter henting av HRV-data for ${activitiesNeedingHrv.length} aktiviteter (av ${activities.length} totalt)`);
+
+        if (activitiesNeedingHrv.length === 0) {
+          // Ingen aktiviteter som trenger HRV-data
+          const hrvResults: {[activityId: string]: number | null} = {};
+          activities.forEach(activity => {
+            hrvResults[activity.activityId] = null;
+          });
+          setHrvData(hrvResults);
+          setIsLoadingHrv(false);
           return;
         }
-        try {
-          const data = await api.getHrvByActivity(parseInt(activity.activityId));
-          // Backend returnerer et objekt med last_night_avg property, ikke hrv
-          console.log(`[HRV] Data for activity ${activity.activityId}:`, data);
-          hrvResults[activity.activityId] = data?.last_night_avg ?? null;
-        } catch (error: any) {
-          // 404-feil er forventet for datoer uten HRV-data
-          if (error?.response?.status === 404) {
-            hrvResults[activity.activityId] = null;
+
+        // Hent HRV-data for alle aktiviteter på en gang
+        const activityIds = activitiesNeedingHrv.map(activity => activity.activityId);
+        const hrvResponse = await activitiesApi.getHrvForMultipleActivities(activityIds);
+        
+        // Bygg resultat-objekt
+        const hrvResults: {[activityId: string]: number | null} = {};
+        
+        // Sett HRV-data for aktiviteter som har data
+        Object.entries(hrvResponse.hrv_data).forEach(([activityId, hrvData]) => {
+          if (hrvData && typeof hrvData === 'object' && 'last_night_avg' in hrvData) {
+            hrvResults[activityId] = hrvData.last_night_avg;
           } else {
-            // Log bare uventede feil
-            console.error(`Uventet feil ved henting av HRV for aktivitet ${activity.activityId}:`, error);
+            hrvResults[activityId] = null;
+          }
+        });
+        
+        // Sett HRV-data til null for aktiviteter før 2023
+        activities.forEach(activity => {
+          const activityDate = new Date(activity.startTimeLocal);
+          if (activityDate.getFullYear() < 2023) {
             hrvResults[activity.activityId] = null;
           }
-        }
-      });
+        });
 
-      await Promise.all(promises);
-
-      setHrvData(hrvResults);
-      setIsLoadingHrv(false);
+        console.log(`[HRV] Ferdig med henting av HRV-data for alle aktiviteter`);
+        setHrvData(hrvResults);
+        
+      } catch (error) {
+        console.error('[HRV] Feil ved henting av HRV-data:', error);
+        // Sett alle HRV-verdier til null ved feil
+        const hrvResults: {[activityId: string]: number | null} = {};
+        activities.forEach(activity => {
+          hrvResults[activity.activityId] = null;
+        });
+        setHrvData(hrvResults);
+      } finally {
+        setIsLoadingHrv(false);
+      }
     };
 
     fetchHrvDataForActivities();

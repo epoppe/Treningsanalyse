@@ -59,7 +59,9 @@ async def get_body_battery_data_endpoint(
     """Henter body battery data for en spesifikk dato."""
     logger.info(f"Mottok forespørsel om body battery data for {request_date}")
     try:
-        body_battery_data = await garmin_client.get_body_battery_data(request_date)
+        # Konverter date til datetime
+        request_datetime = datetime.combine(request_date, datetime.min.time())
+        body_battery_data = await garmin_client.get_body_battery_data(request_datetime)
         if body_battery_data is None:
             raise HTTPException(status_code=404, detail="Body battery data ikke funnet.")
         return body_battery_data
@@ -76,7 +78,10 @@ async def get_body_battery_range_endpoint(
     """Henter body battery data for en datoperiode."""
     logger.info(f"Mottok forespørsel om body battery data fra {start_date} til {end_date}")
     try:
-        body_battery_data = await garmin_client.get_body_battery_range(start_date, end_date)
+        # Konverter date til datetime
+        start_datetime = datetime.combine(start_date, datetime.min.time())
+        end_datetime = datetime.combine(end_date, datetime.min.time())
+        body_battery_data = await garmin_client.get_body_battery_range(start_datetime, end_datetime)
         return body_battery_data
     except Exception as e:
         logger.error(f"Feil ved henting av body battery data: {e}", exc_info=True)

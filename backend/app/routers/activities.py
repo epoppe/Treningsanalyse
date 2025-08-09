@@ -50,6 +50,7 @@ class ActivityResponse(BaseModel):
 def get_activities_by_date_range(
     start_date: str = Query(..., description="Startdato (YYYY-MM-DD)"),
     end_date: str = Query(..., description="Sluttdato (YYYY-MM-DD)"),
+    force_refresh: Optional[str] = Query(None, description="Force refresh of power calculations"),
     db: Session = Depends(get_db)
 ):
     """Hent aktiviteter for en spesifikk datoperiode."""
@@ -92,8 +93,8 @@ def get_activities_by_date_range(
                 # Bruk lagret power fra database hvis tilgjengelig
                 if act.average_power is not None:
                     average_power_watts = act.average_power
-                else:
-                    # Beregn power hvis ikke lagret
+                elif force_refresh == 'true':
+                    # Beregn power kun hvis force_refresh er true og power ikke er lagret
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)
                         if power_result:
@@ -135,19 +136,39 @@ def get_activities_by_date_range(
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 @router.get("/activities", response_model=List[ActivityResponse])
-def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_db)):
+def get_activities(
+    limit: int = 100, 
+    offset: int = 0, 
+    since: Optional[str] = Query(None, description="Hent aktiviteter etter denne datoen (YYYY-MM-DD)"),
+    force_refresh: Optional[str] = Query(None, description="Force refresh of power calculations"),
+    db: Session = Depends(get_db)
+):
     """
     Retrieve activities from the database with pagination, and format them for the API response.
+    Optimized with caching to reduce power calculations.
     """
     try:
-        logger.info(f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset})...")
-        # Eager load the related activity_type to avoid N+1 query problem
-        activities = db.query(Activity).options(joinedload(Activity.activity_type)).order_by(Activity.start_time.desc()).limit(limit).offset(offset).all()
+        logger.info(f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset}, since: {since})...")
+        
+        # Bygg query
+        query = db.query(Activity).options(joinedload(Activity.activity_type))
+        
+        # Legg til since filter hvis gitt
+        if since:
+            try:
+                since_date = datetime.strptime(since, "%Y-%m-%d")
+                query = query.filter(Activity.start_time >= since_date)
+                logger.info(f"Filtrerer aktiviteter etter {since_date}")
+            except ValueError:
+                logger.warning(f"Ugyldig since dato format: {since}")
+        
+        # Hent aktiviteter sortert etter starttid (nyeste først)
+        activities = query.order_by(Activity.start_time.desc()).limit(limit).offset(offset).all()
         logger.info(f"Hentet {len(activities)} aktiviteter fra databasen")
         
-        # Initialiser PowerService for power-beregning
-        storage = DataStorage()
-        power_service = PowerService(storage)
+        # Initialiser PowerService kun hvis vi trenger å beregne power
+        storage = None
+        power_service = None
         
         response_data = []
         for act in activities:
@@ -167,14 +188,17 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
                 # Stride length (m/step) = (m/min) / (steps/min)
                 avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
 
-            # Hent power for løpeaktiviteter
+            # Hent power for løpeaktiviteter - kun hvis ikke allerede lagret
             average_power_watts = None
             if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
                 # Bruk lagret power fra database hvis tilgjengelig
                 if act.average_power is not None:
                     average_power_watts = act.average_power
-                else:
-                    # Beregn power hvis ikke lagret
+                elif force_refresh == 'true':
+                    # Beregn power kun hvis force_refresh er true og power ikke er lagret
+                    if storage is None:
+                        storage = DataStorage()
+                        power_service = PowerService(storage)
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)
                         if power_result:
@@ -213,6 +237,96 @@ def get_activities(limit: int = 100, offset: int = 0, db: Session = Depends(get_
     except Exception as e:
         import traceback
         traceback.print_exc() # This will print the error to the backend console
+        raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
+
+@router.get("/activities/new", response_model=List[ActivityResponse])
+def get_new_activities(
+    since: str = Query(..., description="Hent aktiviteter etter denne datoen (YYYY-MM-DD)"),
+    force_refresh: Optional[str] = Query(None, description="Force refresh of power calculations"),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve only new activities since a given date.
+    This is optimized for incremental updates.
+    """
+    try:
+        logger.info(f"Henter nye aktiviteter siden {since}...")
+        
+        # Konverter since til datetime
+        since_date = datetime.strptime(since, "%Y-%m-%d")
+        
+        # Hent kun nye aktiviteter
+        activities = db.query(Activity).options(joinedload(Activity.activity_type)).filter(
+            Activity.start_time >= since_date
+        ).order_by(Activity.start_time.desc()).all()
+        
+        logger.info(f"Hentet {len(activities)} nye aktiviteter siden {since_date}")
+        
+        # Initialiser PowerService for power-beregning
+        storage = DataStorage()
+        power_service = PowerService(storage)
+        
+        response_data = []
+        for act in activities:
+            # Construct the nested activity type object
+            act_type_data = None
+            if act.activity_type:
+                act_type_data = {
+                    "typeKey": act.activity_type.type_key,
+                    "parentTypeKey": act.activity_type.parent_type_key
+                }
+
+            # Calculate average stride length
+            avg_stride_length = None
+            if act.average_speed and act.average_running_cadence and act.average_running_cadence > 0:
+                avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
+
+            # Hent power for løpeaktiviteter
+            average_power_watts = None
+            if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
+                # Bruk lagret power fra database hvis tilgjengelig
+                if act.average_power is not None:
+                    average_power_watts = act.average_power
+                elif force_refresh == 'true':
+                    # Beregn power kun hvis force_refresh er true og power ikke er lagret
+                    try:
+                        power_result = power_service.calculate_activity_power(int(act.activity_id), db)
+                        if power_result:
+                            average_power_watts = power_result['average_power_watts']
+                    except Exception as e:
+                        logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
+
+            # Manually construct the dictionary for the response
+            response_data.append({
+                "activityId": act.activity_id,
+                "activityName": act.activity_name,
+                "startTimeLocal": act.start_time,
+                "distance": act.distance,
+                "duration": act.duration,
+                "calories": act.calories,
+                "averageHR": act.average_heart_rate,
+                "averageSpeed": act.average_speed,
+                "averagePace": act.average_pace,
+                "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
+                "vO2MaxValue": act.vo2_max,
+                "activityType": act_type_data,
+                "avgStrideLength": avg_stride_length,
+                "negativeSplitPercent": act.negative_split_percent,
+                "decouplingPercent": act.decoupling_percent,
+                "trainingReadinessScore": act.training_readiness_score,
+                "totalTrainingEffect": act.total_training_effect,
+                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
+                "epoc": act.epoc,
+                "averagePowerWatts": average_power_watts,
+                "lactateThresholdSpeed": act.lactate_threshold_speed,
+                "details": act.detailed_metrics
+            })
+            
+        logger.info(f"Returnerer {len(response_data)} nye aktiviteter til frontend")
+        return response_data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An internal error occurred: {e}")
 
 @router.get("/activities/count")

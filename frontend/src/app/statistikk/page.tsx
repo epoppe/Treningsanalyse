@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { fetchAllActivities, Activity } from '../../store/slices/activitiesSlice';
+import { fetchAllActivities, fetchNewActivities, Activity } from '../../store/slices/activitiesSlice';
 import styled from 'styled-components';
 import ActivityChart from '../../components/ActivityChart';
 import MonthlyComparisonChart from '../../components/MonthlyComparisonChart';
 import SummaryTables from '../../components/SummaryTables';
 import { useSyncListener } from '../../hooks/useSyncListener';
+import { api } from '../../utils/api';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -218,6 +219,7 @@ const StatistikkPage = () => {
   const dispatch = useAppDispatch();
   const { items: activities, status, error } = useAppSelector((state) => state.activities);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
+  const [historicalActivities, setHistoricalActivities] = useState<Activity[]>([]);
 
   // Hent unike aktivitetstyper
   const activityTypes = useMemo(() => {
@@ -250,9 +252,39 @@ const StatistikkPage = () => {
   const startOf2022Date = useMemo(() => {
     return new Date('2022-01-01');
   }, []);
+
+  // Hent eksplisitt aktiviteter for de siste 3 årene (i tillegg til det som allerede er lastet)
+  useEffect(() => {
+    const loadHistorical = async () => {
+      try {
+        const now = new Date();
+        const start = new Date(now.getFullYear() - 3, 0, 1); // 1. jan for tre år siden
+        const startStr = start.toISOString().split('T')[0];
+        const endStr = now.toISOString().split('T')[0];
+        const res = await api.getActivitiesByDateRange(startStr, endStr, false);
+        const extra = (res as any)?.activities || [];
+        setHistoricalActivities(extra as Activity[]);
+      } catch (e) {
+        // stille feil – vi bruker uansett det vi allerede har
+        console.warn('[Statistikk] Klarte ikke hente historiske aktiviteter for 3 år', e);
+      }
+    };
+    loadHistorical();
+  }, []);
+
+  // Kombiner eksisterende aktiviteter med eksplisitt hentede historiske (fjern duplikater)
+  const combinedActivities = useMemo(() => {
+    const byId = new Map<string, Activity>();
+    [...activities, ...historicalActivities].forEach(a => {
+      if (a && a.activityId) {
+        byId.set(a.activityId, a);
+      }
+    });
+    return Array.from(byId.values());
+  }, [activities, historicalActivities]);
   // Filtrer aktiviteter basert på valgte typer og siste 12 måneder
   const filteredActivities = useMemo(() => {
-    let tempActivities = activities.filter(activity => {
+    let tempActivities = combinedActivities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= trailing12MonthsDate;
     });
@@ -264,11 +296,11 @@ const StatistikkPage = () => {
     }
 
     return tempActivities;
-  }, [activities, selectedActivityTypes, trailing12MonthsDate]);
+  }, [combinedActivities, selectedActivityTypes, trailing12MonthsDate]);
 
   // Filtrer aktiviteter basert på valgte typer for 2022-2024 (for grafene)
   const allFilteredActivities = useMemo(() => {
-    let tempActivities = activities.filter(activity => {
+    let tempActivities = combinedActivities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= startOf2022Date;
     });
@@ -280,17 +312,17 @@ const StatistikkPage = () => {
     }
 
     return tempActivities;
-  }, [activities, selectedActivityTypes, startOf2022Date]);
+  }, [combinedActivities, selectedActivityTypes, startOf2022Date]);
 
   // Alle aktiviteter for siste 4 år (for grafene - ufiltrert)
   const allActivitiesForCharts = useMemo(() => {
-    const tempActivities = activities.filter(activity => {
+    const tempActivities = combinedActivities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= trailing48MonthsDate;
     });
 
     return tempActivities;
-  }, [activities, trailing48MonthsDate]);
+  }, [combinedActivities, trailing48MonthsDate]);
 
   // Initialiser med alle aktivitetstyper valgt kun første gang
   const [hasInitialized, setHasInitialized] = useState(false);
@@ -305,8 +337,25 @@ const StatistikkPage = () => {
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(async () => {
     console.log('[Statistikk] Synkronisering fullført, oppdaterer data...');
-    // Hent aktiviteter på nytt for å få med nye synkroniserte aktiviteter
-    dispatch(fetchAllActivities({ count: 1000 }));
+    
+    // Hent datoen for siste aktivitet hvis vi har noen
+    if (activities.length > 0) {
+      // Finn den nyeste aktiviteten
+      const latestActivity = activities.reduce((latest, current) => {
+        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
+      });
+      
+      const latestDate = new Date(latestActivity.startTimeLocal);
+      const sinceDate = latestDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      
+      console.log('[Statistikk] Henter nye aktiviteter siden', sinceDate);
+                dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
+    } else {
+      // Hvis vi ikke har noen aktiviteter, hent de siste 100
+      console.log('[Statistikk] Ingen eksisterende aktiviteter, henter siste 100');
+      dispatch(fetchAllActivities({ count: 100 }));
+    }
+    
     // Oppdater sammendragstabeller i backend
     try {
       const response = await fetch('http://localhost:8000/api/analysis/refresh-summaries', {
@@ -318,10 +367,45 @@ const StatistikkPage = () => {
     } catch (error) {
       console.error('[Statistikk] Feil ved oppdatering av sammendragstabeller:', error);
     }
-  }, [dispatch]);
+  }, [dispatch, activities]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
+
+  // Automatisk sjekk for nye aktiviteter når siden lastes
+  useEffect(() => {
+    const checkForNewActivities = () => {
+      console.log('[Statistikk] Sjekker for nye aktiviteter ved sideinnlasting...');
+      
+      if (activities.length > 0) {
+        // Finn den nyeste aktiviteten
+        const latestActivity = activities.reduce((latest, current) => {
+          return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
+        });
+        
+        const latestDate = new Date(latestActivity.startTimeLocal);
+        const sinceDate = latestDate.toISOString().split('T')[0];
+        
+        console.log('[Statistikk] Henter nye aktiviteter siden', sinceDate);
+        dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
+      } else {
+        console.log('[Statistikk] Ingen eksisterende aktiviteter, henter siste 100');
+        dispatch(fetchAllActivities({ count: 100 }));
+      }
+    };
+
+    // Sjekk for nye aktiviteter når komponenten mountes
+    checkForNewActivities();
+
+    // Sjekk også når siden får fokus (bruker kommer tilbake til siden)
+    const handleFocus = () => {
+      console.log('[Statistikk] Side fikk fokus, sjekker for nye aktiviteter...');
+      checkForNewActivities();
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [dispatch, activities.length]);
 
   useEffect(() => {
     if (status === 'idle') {
@@ -382,7 +466,7 @@ const StatistikkPage = () => {
     }
 
     // Hent alle aktiviteter for de siste 24 månedene for sammenligning
-    const allActivitiesFor24Months = activities.filter(activity => {
+    const allActivitiesFor24Months = combinedActivities.filter(activity => {
       const activityDate = new Date(activity.startTimeLocal);
       return activityDate >= trailing24MonthsDate && 
              (selectedActivityTypes.length === 0 || selectedActivityTypes.includes(activity.activityType?.typeKey || ''));
@@ -404,7 +488,7 @@ const StatistikkPage = () => {
     });
 
     return { current: monthlyData, lastYear: monthlyDataLastYear };
-  }, [activities, selectedActivityTypes, trailing24MonthsDate]);
+  }, [combinedActivities, selectedActivityTypes, trailing24MonthsDate]);
 
   const monthlyStats = getMonthlyStats;
   

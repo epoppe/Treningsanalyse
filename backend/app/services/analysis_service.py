@@ -3,15 +3,19 @@ import numpy as np
 import logging
 from fastapi import HTTPException
 from ..storage import DataStorage
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
-from ..database.models.activity import Activity
+from ..database.models import Activity
+from .hrv_service import HRVService
+from .body_battery_service import BodyBatteryService
 
 logger = logging.getLogger(__name__)
 
 class AnalysisService:
     def __init__(self, storage: DataStorage):
         self.storage = storage
+        self.hrv_service = HRVService(storage)
+        self.body_battery_service = None  # Vil bli initialisert når nødvendig
 
     def calculate_negative_split(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
         """
@@ -266,45 +270,8 @@ class AnalysisService:
     def get_hrv_for_activity_date(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
         """Henter HRV-data for datoen en spesifikk aktivitet ble utført."""
         try:
-            # 1. Hent aktiviteten fra databasen for å finne datoen
-            activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
-            if not activity:
-                raise HTTPException(status_code=404, detail="Aktivitet ikke funnet")
-            
-            activity_date = activity.start_time.date()
-
-            # 2. Sjekk om datoen er før 2023 [[memory:3033754]]
-            if activity_date.year < 2023:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"HRV-data er ikke tilgjengelig for datoen {activity_date} (før 2023)."
-                )
-
-            # 3. Hent all HRV-data
-            hrv_df = self.storage.get_hrv_data()
-            
-            if hrv_df is None or hrv_df.empty:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Ingen HRV-data funnet i systemet."
-                )
-            
-            # 4. Filtrer på aktivitetsdatoen
-            activity_date_pd = pd.to_datetime(activity_date).tz_localize(hrv_df.index.tz)
-            daily_hrv_df = hrv_df[hrv_df.index.date == activity_date]
-            
-            if daily_hrv_df.empty:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Ingen HRV-data funnet for datoen {activity_date}."
-                )
-            
-            # 5. Konverter til dict og returner
-            hrv_data = daily_hrv_df.iloc[0].to_dict()
-            # Legg til datoen som en verdi i responsen
-            hrv_data['date'] = activity_date.strftime('%Y-%m-%d')
-            
-            return hrv_data
+            # Bruk HRVService for å hente data fra databasen
+            return self.hrv_service.get_hrv_for_activity_date(activity_id, db)
 
         except HTTPException:
             raise
@@ -315,6 +282,9 @@ class AnalysisService:
     def get_hrv_over_time(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
         """Henter HRV-data over tid med valgfri datofiltrering."""
         try:
+            # Bruk HRVService for å hente data fra databasen
+            # Vi trenger en database session, så vi må håndtere dette annerledes
+            # For nå, fallback til parquet-filer hvis database ikke er tilgjengelig
             hrv_df = self.storage.get_hrv_data()
             
             if hrv_df is None or hrv_df.empty:

@@ -458,70 +458,108 @@ class GarminClient:
 
     # Nye metoder basert på Garmy metrics
 
-    async def get_body_battery_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+    async def get_body_battery_data(self, date) -> Optional[Dict[str, Any]]:
         """Henter body battery data for en spesifikk dato."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente body battery data.")
             return None
-        
+
         try:
-            date_str = date.strftime("%Y-%m-%d")
-            logger.info(f"Henter body battery data for {date_str}")
-            
-            # Hent body battery data fra Garmin Connect API
-            body_battery_data = await asyncio.to_thread(
-                garth.connectapi, 
-                f"/usersummary-service/usersummary/daily/{garth.client.username}",
-                {"calendarDate": date_str}
-            )
-            
-            if isinstance(body_battery_data, dict) and 'allMetrics' in body_battery_data:
-                metrics = body_battery_data.get('allMetrics', {}).get('metricsMap', {})
-                
-                # Hent body battery metrics
-                body_battery_charged = metrics.get('BODY_BATTERY_CHARGED', {}).get('value')
-                body_battery_drained = metrics.get('BODY_BATTERY_DRAINED', {}).get('value')
-                body_battery_charged_start = metrics.get('BODY_BATTERY_CHARGED_START', {}).get('value')
-                body_battery_drained_start = metrics.get('BODY_BATTERY_DRAINED_START', {}).get('value')
-                
-                result = {
-                    "date": date_str,
-                    "body_battery_charged": body_battery_charged,
-                    "body_battery_drained": body_battery_drained,
-                    "body_battery_charged_start": body_battery_charged_start,
-                    "body_battery_drained_start": body_battery_drained_start,
-                    "net_charge": (body_battery_charged or 0) - (body_battery_drained or 0)
-                }
-                
-                logger.info(f"Hentet body battery data for {date_str}: {result}")
-                return result
+            if hasattr(date, 'date'):
+                date_str = date.date().strftime("%Y-%m-%d")
             else:
+                date_str = date.strftime("%Y-%m-%d")
+            logger.info(f"Henter body battery data for {date_str}")
+
+            # Prøv flere endepunkter, likt som HRV
+            endpoints = [
+                (f"/usersummary-service/usersummary/daily/{garth.client.username}", {"calendarDate": date_str}),
+                (f"/wellness-service/wellness/dailyBodyBattery/{garth.client.username}", {"date": date_str}),
+            ]
+
+            body_battery_data = None
+            for endpoint, params in endpoints:
+                try:
+                    logger.info(f"Prøver body battery-endepunkt: {endpoint} med params: {params}")
+                    data = await asyncio.to_thread(garth.connectapi, endpoint, params=params)
+                    logger.debug(f"Body battery-endepunkt {endpoint} returnerte: {data}")
+
+                    # Håndter ulike responsformater
+                    if isinstance(data, dict):
+                        if 'allMetrics' in data:
+                            metrics = data.get('allMetrics', {}).get('metricsMap', {})
+                            result = {
+                                "date": date_str,
+                                "body_battery_charged": metrics.get('BODY_BATTERY_CHARGED', {}).get('value'),
+                                "body_battery_drained": metrics.get('BODY_BATTERY_DRAINED', {}).get('value'),
+                                "body_battery_charged_start": metrics.get('BODY_BATTERY_CHARGED_START', {}).get('value'),
+                                "body_battery_drained_start": metrics.get('BODY_BATTERY_DRAINED_START', {}).get('value'),
+                                "net_charge": (
+                                    (metrics.get('BODY_BATTERY_CHARGED', {}).get('value') or 0)
+                                    - (metrics.get('BODY_BATTERY_DRAINED', {}).get('value') or 0)
+                                ),
+                            }
+                            logger.info(f"Hentet body battery data fra allMetrics for {date_str}: {result}")
+                            body_battery_data = result
+                            break
+                        elif 'bodyBattery' in data:
+                            result = data['bodyBattery']
+                            logger.info(f"Hentet body battery data fra bodyBattery for {date_str}: {result}")
+                            body_battery_data = result
+                            break
+                    # Legg til flere formater hvis nødvendig
+
+                except Exception as e:
+                    logger.debug(f"Body battery-endepunkt {endpoint} feilet: {e}")
+                    continue
+
+            if not body_battery_data:
                 logger.info(f"Ingen body battery data funnet for {date_str}")
                 return None
-                
+
+            return body_battery_data
+
         except GarthHTTPError as e:
-            if "404" in str(e) or "not found" in str(e).lower():
+            e_str = str(e)
+            if isinstance(e_str, str) and ("404" in e_str or "not found" in e_str.lower()):
                 logger.info(f"Ingen body battery data funnet for {date_str}")
                 return None
-            logger.error(f"HTTP-feil ved henting av body battery data for {date_str}: {e}")
+            logger.error(f"HTTP-feil ved henting av body battery data for {date_str}: {e_str}")
             return None
         except Exception as e:
             logger.error(f"Feil ved henting av body battery data for {date_str}: {e}")
             return None
 
-    async def get_body_battery_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+    async def get_body_battery_range(self, start_date, end_date) -> List[Dict[str, Any]]:
         """Henter body battery data for en datoperiode."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente body battery data.")
             return []
         
         try:
-            logger.info(f"Henter body battery data fra {start_date.date()} til {end_date.date()}")
+            # Konverter til datetime hvis det er date objekter
+            if hasattr(start_date, 'date'):
+                start_date_str = start_date.date().strftime("%Y-%m-%d")
+            else:
+                start_date_str = start_date.strftime("%Y-%m-%d")
+                
+            if hasattr(end_date, 'date'):
+                end_date_str = end_date.date().strftime("%Y-%m-%d")
+            else:
+                end_date_str = end_date.strftime("%Y-%m-%d")
+                
+            logger.info(f"Henter body battery data fra {start_date_str} til {end_date_str}")
             
             all_data = []
-            current_date = start_date
+            # Konverter til datetime for å kunne bruke timedelta
+            if hasattr(start_date, 'date'):
+                current_date = datetime.combine(start_date.date(), datetime.min.time())
+                end_datetime = datetime.combine(end_date.date(), datetime.min.time())
+            else:
+                current_date = start_date
+                end_datetime = end_date
             
-            while current_date <= end_date:
+            while current_date <= end_datetime:
                 data = await self.get_body_battery_data(current_date)
                 if data:
                     all_data.append(data)

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from ..database.session import get_db
 from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySummary
 from ..services.analysis_service import AnalysisService
@@ -251,7 +251,8 @@ async def get_summary_stats(db: Session = Depends(get_db)):
 async def get_hrv_data(
     start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
-    storage: DataStorage = Depends(get_data_storage)
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
 ):
     """Hent HRV-data over tid med valgfri datofiltrering. HRV-data er kun tilgjengelig fra 2023 og fremover."""
     try:
@@ -262,11 +263,28 @@ async def get_hrv_data(
                 start_date = "2023-01-01"
                 logger.info(f"HRV-startdato justert fra {start_date} til 2023-01-01 (HRV-data kun tilgjengelig fra 2023)")
         
-        analysis_service = AnalysisService(storage)
-        hrv_data = analysis_service.get_hrv_over_time(start_date, end_date)
+        # Bruk HRVService for å hente data fra databasen
+        from ..services.hrv_service import HRVService
+        hrv_service = HRVService(storage)
+        hrv_data = hrv_service.get_hrv_over_time(db, start_date, end_date)
         return hrv_data
     except Exception as e:
         logger.error(f"Feil ved henting av HRV-data: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/hrv/statistics")
+async def get_hrv_statistics(
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """Hent statistikk over HRV-data i databasen."""
+    try:
+        from ..services.hrv_service import HRVService
+        hrv_service = HRVService(storage)
+        statistics = hrv_service.get_hrv_statistics(db)
+        return statistics
+    except Exception as e:
+        logger.error(f"Feil ved henting av HRV-statistikk: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/hrv/by-activity/{activity_id}", response_model=dict)
@@ -280,6 +298,8 @@ def get_hrv_for_activity(
     """
     try:
         hrv_data = analysis_service.get_hrv_for_activity_date(activity_id, db)
+        if hrv_data is None:
+            raise HTTPException(status_code=404, detail="Ingen HRV-data funnet for denne aktiviteten")
         return hrv_data
     except HTTPException as e:
         # Re-raise kjente HTTP-feil
@@ -287,6 +307,47 @@ def get_hrv_for_activity(
     except Exception as e:
         logger.error(f"Error fetching HRV data for activity {activity_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/hrv/by-activities")
+async def get_hrv_for_multiple_activities(
+    activity_ids: str = Query(..., description="Comma-separated list of activity IDs"),
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """Henter HRV-data for flere aktiviteter på en gang fra databasen."""
+    try:
+        # Parse activity IDs
+        activity_id_list = [int(id.strip()) for id in activity_ids.split(',') if id.strip()]
+        
+        if not activity_id_list:
+            return {"hrv_data": {}}
+        
+        # Use HRVService to fetch data from the database
+        from ..services.hrv_service import HRVService
+        hrv_service = HRVService(storage)
+        
+        hrv_results = {}
+        
+        for activity_id in activity_id_list:
+            try:
+                hrv_data = hrv_service.get_hrv_for_activity_date(activity_id, db)
+                if hrv_data:
+                    hrv_results[str(activity_id)] = hrv_data
+                else:
+                    hrv_results[str(activity_id)] = None
+            except Exception as e:
+                logger.warning(f"Feil ved henting av HRV for aktivitet {activity_id}: {e}")
+                hrv_results[str(activity_id)] = None
+        
+        return {
+            "hrv_data": hrv_results,
+            "total_activities": len(activity_id_list),
+            "activities_with_hrv": len([v for v in hrv_results.values() if v is not None])
+        }
+        
+    except Exception as e:
+        logger.error(f"Feil ved henting av HRV-data for flere aktiviteter: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/body-battery/by-activity/{activity_id}", response_model=dict)
 def get_body_battery_for_activity(
@@ -309,3 +370,68 @@ def get_body_battery_for_activity(
     except Exception as e:
         logger.error(f"Error calculating Body Battery for activity {activity_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get("/body-battery")
+async def get_body_battery_data(
+    start_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """Henter Body Battery-data for en tidsperiode fra databasen"""
+    try:
+        from ..services.body_battery_service import BodyBatteryService
+        from ..services.garmin_client import GarminClient
+        from ..config import settings
+        
+        # Initialiser Body Battery service
+        garmin_client = GarminClient(
+            email=settings.GARMIN_EMAIL,
+            password=settings.GARMIN_PASSWORD,
+            token_dir=settings.TOKEN_DIR
+        )
+        body_battery_service = BodyBatteryService(garmin_client)
+        
+        # Bruk standard tidsperiode hvis ikke spesifisert
+        if not start_date:
+            start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+        
+        # Hent data fra databasen
+        result = body_battery_service.get_body_battery_over_time(db, start_date, end_date)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Feil ved henting av Body Battery-data: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/body-battery/statistics")
+async def get_body_battery_statistics(
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """Henter statistikk for Body Battery-data"""
+    try:
+        from ..services.body_battery_service import BodyBatteryService
+        from ..services.garmin_client import GarminClient
+        from ..config import settings
+        
+        # Initialiser Body Battery service
+        garmin_client = GarminClient(
+            email=settings.GARMIN_EMAIL,
+            password=settings.GARMIN_PASSWORD,
+            token_dir=settings.TOKEN_DIR
+        )
+        body_battery_service = BodyBatteryService(garmin_client)
+        
+        # Hent statistikk fra databasen
+        result = body_battery_service.get_body_battery_statistics(db)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Feil ved henting av Body Battery-statistikk: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
