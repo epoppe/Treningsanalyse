@@ -432,7 +432,8 @@ class GarminClient:
                 summary = activity_data['summaryDTO']
                 
                 training_effect_data = {
-                    "aerobic_training_effect": summary.get('trainingEffect'),
+                    # Garmin: 'aerobicTrainingEffect' er aerob TE; 'trainingEffect' er total/combined
+                    "aerobic_training_effect": summary.get('aerobicTrainingEffect') or summary.get('trainingEffect'),
                     "anaerobic_training_effect": summary.get('anaerobicTrainingEffect'),
                     "aerobic_te_message": summary.get('aerobicTrainingEffectMessage'),
                     "anaerobic_te_message": summary.get('anaerobicTrainingEffectMessage'),

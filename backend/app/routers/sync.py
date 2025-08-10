@@ -346,7 +346,8 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
         
         # 3. Synkroniser Training Effect data
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
-        await sync_service.sync_training_effect_data(start_date, end_date)
+        # Tving re-beregning for siste aktivitet for å sikre komplette verdier
+        await sync_service.sync_training_effect_data(start_date, end_date, force_refresh_recent=True)
         
         # 4. Synkroniser HRV-data til database
         sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
