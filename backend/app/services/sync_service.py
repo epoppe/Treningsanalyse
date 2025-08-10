@@ -1083,6 +1083,11 @@ class SyncService:
                 logger.error("Kunne ikke initialisere Garmin-klient for Training Effect synkronisering.")
                 return {"status": "Feil", "message": "Kunne ikke autentisere mot Garmin"}
             
+            # Finn alltid siste aktivitet (globalt) og tving oppdatering for den,
+            # uavhengig av valgt periode. Dette sikrer komplette verdier på nyeste økt.
+            latest_activity = self.db.query(Activity).order_by(Activity.start_time.desc()).first()
+            latest_activity_id = str(latest_activity.activity_id) if latest_activity else None
+
             # Hent aktiviteter fra databasen i den gitte perioden
             activities = self.db.query(Activity).filter(
                 Activity.start_time >= effective_start,
@@ -1110,8 +1115,10 @@ class SyncService:
                 has_training_effect = (activity.total_training_effect is not None or 
                                      activity.total_anaerobic_training_effect is not None)
                 
-                # Skip hvis aktiviteten allerede har Training Effect data og ikke er nylig
-                if has_training_effect and not (force_refresh_recent and is_recent):
+                # Ikke hopp over hvis dette er aller siste aktivitet (skal alltid oppdateres)
+                is_latest = (latest_activity_id is not None and activity_id == latest_activity_id)
+                # Skip hvis aktiviteten allerede har Training Effect data og ikke er nylig og ikke er siste aktivitet
+                if has_training_effect and not (force_refresh_recent and is_recent) and not is_latest:
                     skipped_count += 1
                     continue
                 
