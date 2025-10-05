@@ -46,12 +46,8 @@ def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
         'other': 'Annet'
     }
     
-    # Map engelske aktivitetstyper til norske og fjern duplikater
-    norwegian_activity_types = []
-    for activity_type in activity_types:
-        norwegian_type = activity_type_mapping.get(activity_type, activity_type)
-        if norwegian_type not in norwegian_activity_types:
-            norwegian_activity_types.append(norwegian_type)
+    # Breakdown i database bruker engelske typeKeys, ikke norske navn
+    # Så vi må bruke activity_types direkte (engelsk)
     
     filtered_summaries = []
     for summary in summaries:
@@ -64,10 +60,10 @@ def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
         except:
             continue
         
-        # Sjekk om noen av de ønskede aktivitetstypene finnes (bruk norske navn)
-        if any(activity_type in breakdown for activity_type in norwegian_activity_types):
+        # Sjekk om noen av de ønskede aktivitetstypene finnes (bruk engelske typeKeys)
+        if any(activity_type in breakdown for activity_type in activity_types):
             # Beregn andeler for valgte aktivitetstyper
-            total_selected = sum(breakdown.get(activity_type, {}).get('count', 0) for activity_type in norwegian_activity_types)
+            total_selected = sum(breakdown.get(activity_type, {}).get('count', 0) for activity_type in activity_types)
             total_all = sum(data.get('count', 0) for data in breakdown.values())
             
             if total_selected > 0 and total_all > 0:
@@ -81,7 +77,7 @@ def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
                 summary.total_ascent = summary.total_ascent * ratio if summary.total_ascent else 0
                 
                 # Oppdater activity_types_breakdown til å bare inkludere valgte typer
-                filtered_breakdown = {k: v for k, v in breakdown.items() if k in norwegian_activity_types}
+                filtered_breakdown = {k: v for k, v in breakdown.items() if k in activity_types}
                 summary.activity_types_breakdown = json.dumps(filtered_breakdown)
                 
                 filtered_summaries.append(summary)

@@ -69,6 +69,28 @@ const Button = styled.button`
   }
 `;
 
+const TimeFilterButton = styled.button<{ $active: boolean }>`
+  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
+  color: ${props => (props.$active ? 'white' : '#2c3e50')};
+  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
+  }
+`;
+
+const TimeFilterContainer = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+`;
+
 const TopSection = styled.div`
   display: flex;
   align-items: flex-start;
@@ -297,6 +319,7 @@ interface TrainingStressData {
 }
 
 const TrainingStressPage: React.FC = () => {
+  const [timeFilter, setTimeFilter] = useState<'3m' | '6m' | 'ytd' | '12m' | '3y' | 'all'>('6m');
   const [startDate, setStartDate] = useState<string>(
     new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   );
@@ -347,6 +370,38 @@ const TrainingStressPage: React.FC = () => {
     }
   };
 
+  const handleTimeFilterChange = (filter: '3m' | '6m' | 'ytd' | '12m' | '3y' | 'all') => {
+    setTimeFilter(filter);
+    const now = new Date();
+    let start = new Date();
+    
+    switch (filter) {
+      case '3m':
+        start.setMonth(now.getMonth() - 3);
+        break;
+      case '6m':
+        start.setMonth(now.getMonth() - 6);
+        break;
+      case 'ytd':
+        start = new Date(now.getFullYear(), 0, 1);
+        break;
+      case '12m':
+        start.setFullYear(now.getFullYear() - 1);
+        break;
+      case '3y':
+        start.setFullYear(now.getFullYear() - 3);
+        break;
+      case 'all':
+        start = new Date(2008, 0, 1); // Fra 2008
+        break;
+      default:
+        start.setMonth(now.getMonth() - 6);
+    }
+    
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(now.toISOString().split('T')[0]);
+  };
+
   const getFormStatus = (form: number) => {
     if (form >= 10) return 'God form';
     if (form >= 0) return 'Nøytral';
@@ -389,6 +444,27 @@ const TrainingStressPage: React.FC = () => {
         <LoadingSpinner />
       ) : data ? (
         <>
+          <TimeFilterContainer>
+            <TimeFilterButton $active={timeFilter === '3m'} onClick={() => handleTimeFilterChange('3m')}>
+              Siste 3 mnd
+            </TimeFilterButton>
+            <TimeFilterButton $active={timeFilter === '6m'} onClick={() => handleTimeFilterChange('6m')}>
+              Siste 6 mnd
+            </TimeFilterButton>
+            <TimeFilterButton $active={timeFilter === 'ytd'} onClick={() => handleTimeFilterChange('ytd')}>
+              År til dato
+            </TimeFilterButton>
+            <TimeFilterButton $active={timeFilter === '12m'} onClick={() => handleTimeFilterChange('12m')}>
+              Siste 12 mnd
+            </TimeFilterButton>
+            <TimeFilterButton $active={timeFilter === '3y'} onClick={() => handleTimeFilterChange('3y')}>
+              Siste 3 år
+            </TimeFilterButton>
+            <TimeFilterButton $active={timeFilter === 'all'} onClick={() => handleTimeFilterChange('all')}>
+              All historikk
+            </TimeFilterButton>
+          </TimeFilterContainer>
+
           <TopSection>
             <DateRangeSelector>
               <label htmlFor="start-date">Fra:</label>

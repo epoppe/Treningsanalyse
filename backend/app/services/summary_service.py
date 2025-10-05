@@ -4,7 +4,7 @@ Service for å beregne og oppdatere sammendragstabeller.
 
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Any, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, extract, and_
 
 from app.database.session import SessionLocal
@@ -291,8 +291,10 @@ class SummaryService:
     def calculate_monthly_summary(self, year: int, month: int) -> MonthlySummary:
         """Beregn månedlig sammendrag."""
         
-        # Hent aktiviteter for måneden
-        activities = self.db.query(Activity).filter(
+        # Hent aktiviteter for måneden (med eager loading av activity_type)
+        activities = self.db.query(Activity).options(
+            joinedload(Activity.activity_type)
+        ).filter(
             and_(
                 extract('year', Activity.start_time) == year,
                 extract('month', Activity.start_time) == month
@@ -358,7 +360,17 @@ class SummaryService:
         # Aktivitetstype breakdown
         activity_types = {}
         for activity in activities:
-            type_name = activity.activity_type.type_name if activity.activity_type else 'Ukjent'
+            # Bruk type_key fra activity_type relasjon (type_name er ikke populert i databasen)
+            type_name = None
+            if hasattr(activity, 'activity_type') and activity.activity_type:
+                type_name = activity.activity_type.type_key or activity.activity_type.type_name
+            elif hasattr(activity, 'activity_type_name') and activity.activity_type_name:
+                type_name = activity.activity_type_name
+            
+            # Fallback til 'Ukjent' hvis ingenting er satt
+            if not type_name or type_name == 'None' or type_name == '':
+                type_name = 'Ukjent'
+                
             if type_name not in activity_types:
                 activity_types[type_name] = {
                     'count': 0,
