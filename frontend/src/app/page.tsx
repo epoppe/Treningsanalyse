@@ -116,26 +116,12 @@ export default function Home() {
 
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(() => {
-    console.log('[Home] Synkronisering fullført, oppdaterer aktiviteter...');
+    console.log('[Home] Synkronisering fullført, henter alle aktiviteter på nytt...');
     
-    // Hent datoen for siste aktivitet hvis vi har noen
-    if (activities.length > 0) {
-      // Finn den nyeste aktiviteten
-      const latestActivity = activities.reduce((latest, current) => {
-        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-      });
-      
-      const latestDate = new Date(latestActivity.startTimeLocal);
-      const sinceDate = latestDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      
-      console.log('[Home] Henter nye aktiviteter siden', sinceDate);
-      dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
-    } else {
-      // Hvis vi ikke har noen aktiviteter, hent de siste 100
-      console.log('[Home] Ingen eksisterende aktiviteter, henter siste 100');
-      dispatch(fetchAllActivities({ forceRefresh: true, count: 100 }));
-    }
-  }, [dispatch, activities]);
+    // Etter synkronisering, hent ALLE aktiviteter på nytt (inkludert historiske)
+    // Dette sikrer at både nye og historiske synkroniserte aktiviteter vises
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
+  }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
@@ -157,8 +143,8 @@ export default function Home() {
         console.log('[Home] Henter nye aktiviteter siden', sinceDate);
         dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
       } else {
-        console.log('[Home] Ingen eksisterende aktiviteter, henter siste 100');
-        dispatch(fetchAllActivities({ forceRefresh: false, count: 100 }));
+        console.log('[Home] Ingen eksisterende aktiviteter, henter siste 500');
+        dispatch(fetchAllActivities({ forceRefresh: false, count: 2000 }));
       }
     };
 
@@ -222,7 +208,7 @@ export default function Home() {
     if (status === 'idle' && !hasRestoredFromStorage) {
       // Gjenopprett loadedCount fra localStorage
       const savedLoadedCount = localStorage.getItem('activitiesLoadedCount');
-      const savedCount = savedLoadedCount ? parseInt(savedLoadedCount, 10) : 100;
+      const savedCount = savedLoadedCount ? parseInt(savedLoadedCount, 10) : 2000;
       
       console.log('[Home] Gjenoppretter fra localStorage:', { savedCount });
       
@@ -231,9 +217,8 @@ export default function Home() {
         dispatch(fetchAllActivities({ forceRefresh: false, count: savedCount }));
         dispatch(setLoadedCount(savedCount));
       } else {
-        // Optimalisert: Start med færre aktiviteter for raskere lasting
-        // Hent kun de siste 100 aktivitetene ved første lasting
-        dispatch(fetchAllActivities({ forceRefresh: false, count: 100 }));
+        // Hent de siste 2000 aktivitetene ved første lasting for å dekke alle
+        dispatch(fetchAllActivities({ forceRefresh: false, count: 2000 }));
       }
       
       // Hent aktivitetsantall separat (påvirker ikke hovedstatus)
@@ -303,22 +288,9 @@ export default function Home() {
     // Reset localStorage når vi refresher aktiviteter
     localStorage.removeItem('activitiesLoadedCount');
     
-    // Hvis vi har aktiviteter, hent kun nye siden siste aktivitet
-    if (activities.length > 0) {
-      const latestActivity = activities.reduce((latest, current) => {
-        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-      });
-      
-      const latestDate = new Date(latestActivity.startTimeLocal);
-      const sinceDate = latestDate.toISOString().split('T')[0];
-      
-      console.log('[Home] Refresh: Henter nye aktiviteter siden', sinceDate);
-      dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
-    } else {
-      // Hvis ingen aktiviteter, hent de siste 100
-      console.log('[Home] Refresh: Ingen eksisterende aktiviteter, henter siste 100');
-      dispatch(fetchAllActivities({ forceRefresh: true, count: 100 }));
-    }
+    // Hent ALLE aktiviteter på nytt (inkludert historiske)
+    console.log('[Home] Refresh: Henter alle aktiviteter på nytt (2000)');
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
     
     // Sett timeFilter til 'all' for å vise alle aktiviteter
     setTimeFilter('all');

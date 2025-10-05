@@ -239,7 +239,15 @@ class SyncService:
         logger.info(f"Beregnet {len(chunked_periods)} perioder som skal hentes: {chunked_periods}")
         return chunked_periods
 
-    async def sync_activities_with_fit_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100) -> dict:
+    async def sync_activities_with_fit_data(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+        fit_data_limit: int = 100,
+        ignore_sync_state: bool = False,
+        fit_download_mode: str = "chunked",
+    ) -> dict:
         """
         Synkroniserer aktiviteter og laster automatisk ned FIT-data, HRV-data og Training Effect for aktiviteter som mangler det.
         
@@ -252,24 +260,46 @@ class SyncService:
         logger.info(f"Starter utvidet aktivitetssynkronisering med automatisk FIT-data, HRV og Training Effect nedlasting")
         
         # Først, gjør vanlig aktivitetssynkronisering
-        sync_result = await self.sync_activities(start_date, end_date, force_refresh_recent)
+        sync_result = await self.sync_activities(start_date, end_date, force_refresh_recent, ignore_sync_state)
         
         # Så, last ned FIT-data for aktiviteter som mangler det (kun for aktiviteter i det valgte tidsrommet)
         fit_result = {"status": "Ikke kjørt", "success_count": 0, "total_count": 0}
         
-        # Kun last ned FIT-data hvis perioden er kort (mindre enn 7 dager) for å unngå timeout
+        # Last ned FIT-data
         days_diff = (end_date - start_date).days
-        if days_diff <= 7:
-            try:
+        try:
+            if days_diff <= 7 or fit_download_mode == "auto":
                 logger.info(f"Starter automatisk FIT-data nedlasting for aktiviteter i perioden {start_date.date()} til {end_date.date()}...")
                 fit_result = await self.download_fit_data_for_period(start_date, end_date)
                 logger.info(f"FIT-data nedlasting ferdig: {fit_result.get('message', 'Ukjent status')}")
-            except Exception as e:
-                logger.error(f"Feil under automatisk FIT-data nedlasting: {e}")
-                fit_result = {"status": "Feil", "message": str(e), "success_count": 0, "total_count": 0}
-        else:
-            logger.info(f"Hopper over automatisk FIT-data nedlasting for periode på {days_diff} dager (for lang)")
-            fit_result = {"status": "Hoppet over", "message": f"Periode på {days_diff} dager er for lang", "success_count": 0, "total_count": 0}
+            else:
+                # chunked modus for lange perioder
+                logger.info(f"Starter chunket FIT-data nedlasting for periode på {days_diff} dager")
+                chunk_success = 0
+                chunk_total = 0
+                metrics_agg = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
+                chunk_start = start_date
+                while chunk_start <= end_date:
+                    chunk_end = min(chunk_start + timedelta(days=6), end_date)
+                    logger.info(f"FIT-chunk: {chunk_start.date()} -> {chunk_end.date()}")
+                    chunk_res = await self.download_fit_data_for_period(chunk_start, chunk_end)
+                    chunk_success += int(chunk_res.get("success_count", 0))
+                    chunk_total += int(chunk_res.get("total_count", 0))
+                    m = chunk_res.get("metrics_calculated", {})
+                    metrics_agg["negative_split"] += int(m.get("negative_split", 0))
+                    metrics_agg["decoupling"] += int(m.get("decoupling", 0))
+                    metrics_agg["hrv_available"] += int(m.get("hrv_available", 0))
+                    chunk_start = chunk_end + timedelta(days=1)
+                fit_result = {
+                    "status": "Fullført",
+                    "message": f"Chunket FIT-data nedlasting fullført for periode {start_date.date()} til {end_date.date()}",
+                    "success_count": chunk_success,
+                    "total_count": chunk_total,
+                    "metrics_calculated": metrics_agg,
+                }
+        except Exception as e:
+            logger.error(f"Feil under automatisk FIT-data nedlasting: {e}")
+            fit_result = {"status": "Feil", "message": str(e), "success_count": 0, "total_count": 0}
         
         # Synkroniser HRV-data for samme periode
         hrv_result = {"status": "Ikke kjørt", "message": "Ikke kjørt"}
@@ -347,7 +377,7 @@ class SyncService:
         logger.info(f"Utvidet synkronisering fullført: {combined_result['summary']}")
         return combined_result
 
-    async def sync_activities(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False) -> dict:
+    async def sync_activities(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, ignore_sync_state: bool = False) -> dict:
         """
         Orkestrerer synkronisering av aktiviteter for en gitt tidsperiode og lagrer dem i databasen.
         """
@@ -359,17 +389,18 @@ class SyncService:
                 summary["status"] = "Feil: Kunne ikke autentisere mot Garmin"
                 return summary
 
-            # Inkrementell startdato basert på SyncState
+            # Inkrementell startdato basert på SyncState, med mulighet for å ignorere
             effective_start = start_date
-            try:
-                act_state = self.db.query(SyncState).filter_by(key="activities").first()
-                if act_state and act_state.last_synced_date and not force_refresh_recent:
-                    effective_start = max(
-                        effective_start,
-                        datetime.combine(act_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
-                    )
-            except Exception as e:
-                logger.debug(f"Kunne ikke lese SyncState for activities: {e}")
+            if not ignore_sync_state:
+                try:
+                    act_state = self.db.query(SyncState).filter_by(key="activities").first()
+                    if act_state and act_state.last_synced_date and not force_refresh_recent:
+                        effective_start = max(
+                            effective_start,
+                            datetime.combine(act_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                        )
+                except Exception as e:
+                    logger.debug(f"Kunne ikke lese SyncState for activities: {e}")
 
             logger.info(f"Henter aktiviteter fra Garmin: {effective_start.date()} -> {end_date.date()}")
             

@@ -221,7 +221,8 @@ export const activitiesApi = {
     
     const response = await apiClient.post<ApiResponse<any>>('/sync/activities', {
       start_date: formatDate(startDate),
-      end_date: formatDate(endDate)
+      end_date: formatDate(endDate),
+      ignore_sync_state: true  // Ignorer SyncState for å tillate synkronisering av historiske data
     });
     return response.data;
   },
@@ -304,14 +305,12 @@ export const analysisApi = {
 
 export const syncApi = {
   // --- Aktiviteter ---
-  syncActivities: (startDate: string, endDate: string) => apiCall('post', '/sync/activities', { start_date: startDate, end_date: endDate }),
+  syncActivities: (startDate: string, endDate: string) => apiCall('post', '/sync/activities', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
   syncNewActivities: () => apiCall('post', '/sync/new-activities'),
   syncAllActivities: () => apiCall('post', '/sync/full-sync'),
-  fullSync: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate }),
-  // Bruk eksplisitt body for kompatibilitet med apiCall
-  // NB: backend forventer JSON med start_date og end_date
-  // (se FastAPI SyncRequest-modell)
-  fullSyncBody: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { body: { start_date: startDate, end_date: endDate } }),
+  fullSync: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
+  // Sender data direkte til apiCall (IKKE wrappet i body)
+  fullSyncBody: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
   
   // --- HRV ---
   syncHrvData: (startDate?: string, endDate?: string) => {

@@ -338,25 +338,10 @@ const StatistikkPage = () => {
 
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(async () => {
-    console.log('[Statistikk] Synkronisering fullført, oppdaterer data...');
+    console.log('[Statistikk] Synkronisering fullført, henter alle aktiviteter på nytt...');
     
-    // Hent datoen for siste aktivitet hvis vi har noen
-    if (activities.length > 0) {
-      // Finn den nyeste aktiviteten
-      const latestActivity = activities.reduce((latest, current) => {
-        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-      });
-      
-      const latestDate = new Date(latestActivity.startTimeLocal);
-      const sinceDate = latestDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      
-      console.log('[Statistikk] Henter nye aktiviteter siden', sinceDate);
-                dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
-    } else {
-      // Hvis vi ikke har noen aktiviteter, hent de siste 100
-      console.log('[Statistikk] Ingen eksisterende aktiviteter, henter siste 100');
-      dispatch(fetchAllActivities({ count: 100 }));
-    }
+    // Etter synkronisering, hent ALLE aktiviteter på nytt (inkludert historiske)
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
     
     // Oppdater sammendragstabeller i backend
     try {

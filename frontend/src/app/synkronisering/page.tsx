@@ -245,9 +245,9 @@ export default function SynkroniseringPage() {
   };
 
   const syncAll = () => {
-    // Synkroniser siste 5 år (eller mer hvis nødvendig)
+    // Synkroniser aktiviteter fra 2008, helsedata fra 2020
     const end = new Date();
-    const start = new Date(end.getFullYear() - 5, 0, 1); // 1. januar for 5 år siden
+    const start = new Date(2008, 0, 1); // 1. januar 2008 for aktiviteter og FIT-data
     const startStr = format(start, 'yyyy-MM-dd');
     const endStr = format(end, 'yyyy-MM-dd');
     startSync(() => api.fullSyncBody(startStr, endStr));
@@ -325,7 +325,7 @@ export default function SynkroniseringPage() {
         </div>
         
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
-          ⚠️ "Synk alle" vil synkronisere alle data fra de siste 5 årene. Kan ta lang tid.
+          ⚠️ "Synk alle" vil synkronisere aktiviteter og FIT-data fra 2008, helsedata fra 2020. Kan ta lang tid.
         </p>
       </SyncSection>
 
@@ -393,7 +393,7 @@ export default function SynkroniseringPage() {
           <ul>
             <li><strong>"Synk nye aktiviteter"</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
             <li><strong>"Synk valgt periode"</strong> for å synkronisere en spesifikk tidsperiode</li>
-            <li><strong>"Synk alle"</strong> for full synkronisering av alle historiske data (kan ta lang tid)</li>
+            <li><strong>"Synk alle"</strong> for full synkronisering av alle aktiviteter fra 2008 og helsedata fra 2020 (kan ta lang tid)</li>
             <li>Du kan lukke denne siden - synkroniseringen fortsetter i bakgrunnen</li>
             <li>Sjekk status på jobbene nedenfor for å følge fremgangen</li>
           </ul>

@@ -28,15 +28,24 @@ sync_jobs: Dict[str, Dict] = {}
 class SyncRequest(BaseModel):
     start_date: date
     end_date: date
+    ignore_sync_state: Optional[bool] = False
+    fit_download_mode: Optional[str] = "chunked"  # "auto" | "chunked"
 
-async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100):
+async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100, ignore_sync_state: bool = False, fit_download_mode: str = "chunked"):
     """Kjører aktivitetssynkronisering i bakgrunnen med automatisk FIT-data nedlasting."""
     db_session = None
     try:
         sync_jobs[job_id]["status"] = "processing"
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
-        result = await sync_service.sync_activities_with_fit_data(start_date, end_date, force_refresh_recent, fit_data_limit)
+        result = await sync_service.sync_activities_with_fit_data(
+            start_date,
+            end_date,
+            force_refresh_recent,
+            fit_data_limit,
+            ignore_sync_state,
+            fit_download_mode,
+        )
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
         logger.critical(f"Feil i utvidet aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
@@ -176,9 +185,51 @@ async def trigger_activity_sync(
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
     # Bruk force_refresh_recent=True for å sikre at nylige aktiviteter oppdateres
-    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, True, 100)
+    background_tasks.add_task(
+        run_activity_sync_with_fit_data,
+        job_id,
+        garmin_client,
+        storage,
+        start_datetime,
+        end_datetime,
+        True,  # force_refresh_recent
+        100,   # fit_data_limit
+        request.ignore_sync_state,
+        request.fit_download_mode or "chunked",
+    )
     
     return {"message": "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting og force refresh for nylige aktiviteter).", "job_id": job_id}
+
+@router.post("/activities/historical", status_code=202)
+async def trigger_activity_sync_historical(
+    start_date: date = Query(..., description="Startdato (YYYY-MM-DD)"),
+    end_date: date = Query(..., description="Sluttdato (YYYY-MM-DD)"),
+    background_tasks: BackgroundTasks = None,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter synkronisering for en gitt periode med ignore_sync_state=true og chunket FIT.
+    Dette gjør det enkelt å trigge fra frontend uten JSON-body."""
+    start_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+
+    background_tasks.add_task(
+        run_activity_sync_with_fit_data,
+        job_id,
+        garmin_client,
+        storage,
+        start_datetime,
+        end_datetime,
+        True,      # force_refresh_recent
+        150,       # fit_data_limit
+        True,      # ignore_sync_state
+        "chunked"  # fit_download_mode
+    )
+
+    return {"message": "Historisk synkronisering startet (ignore_sync_state, chunked FIT)", "job_id": job_id}
 
 @router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
@@ -192,7 +243,18 @@ async def trigger_recent_activity_sync(
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_activity_sync_with_fit_data, job_id, garmin_client, storage, start_datetime, end_datetime, True, 150)
+    background_tasks.add_task(
+        run_activity_sync_with_fit_data,
+        job_id,
+        garmin_client,
+        storage,
+        start_datetime,
+        end_datetime,
+        True,   # force_refresh_recent
+        150,    # fit_data_limit
+        False,  # ignore_sync_state
+        "chunked",  # fit_download_mode
+    )
     
     return {"message": "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh og automatisk FIT-data nedlasting).", "job_id": job_id}
 
@@ -326,8 +388,12 @@ def sync_json_to_db_endpoint(db: Session = Depends(get_db)):
     result = sync_service.sync_json_to_db()
     return result
 
-async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
-    """Kjører full synkronisering av alle data i bakgrunnen."""
+async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, ignore_sync_state: bool = False):
+    """Kjører full synkronisering av alle data i bakgrunnen.
+    
+    Aktiviteter og FIT-data synkroniseres fra start_date.
+    Helsedata (HRV, Body Battery, Training Effect) begrenses til 2020 eller senere.
+    """
     db_session = None
     try:
         sync_jobs[job_id]["status"] = "processing"
@@ -336,34 +402,49 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         
+        # Begrens helsedata, HRV og Body Battery til 2020 eller senere
+        # (Aktiviteter og FIT-data kan gå tilbake til 2008)
+        health_data_cutoff = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        health_start_date = max(start_date, health_data_cutoff)
+        
+        if start_date < health_data_cutoff:
+            logger.info(f"Full sync: Aktiviteter fra {start_date.date()}, helsedata fra {health_start_date.date()}")
+        
         # 1. Synkroniser aktiviteter med FIT-data
         sync_jobs[job_id]["message"] = "Synkroniserer aktiviteter og FIT-data..."
-        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date)
+        activity_result = await sync_service.sync_activities_with_fit_data(
+            start_date, 
+            end_date,
+            force_refresh_recent=True,
+            fit_data_limit=150,
+            ignore_sync_state=ignore_sync_state,
+            fit_download_mode="chunked"
+        )
         
-        # 2. Synkroniser helsedata
+        # 2. Synkroniser helsedata (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."
-        await sync_service.sync_health_data(start_date, end_date)
+        await sync_service.sync_health_data(health_start_date, end_date)
         
-        # 3. Synkroniser Training Effect data
+        # 3. Synkroniser Training Effect data (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
         # Tving re-beregning for siste aktivitet for å sikre komplette verdier
-        await sync_service.sync_training_effect_data(start_date, end_date, force_refresh_recent=True)
+        await sync_service.sync_training_effect_data(health_start_date, end_date, force_refresh_recent=True)
         
-        # 4. Synkroniser HRV-data til database
+        # 4. Synkroniser HRV-data til database (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
         hrv_service = HRVService(storage)
         hrv_result = hrv_service.sync_hrv_data_to_database(
             db_session, 
-            start_date.strftime('%Y-%m-%d'), 
+            health_start_date.strftime('%Y-%m-%d'), 
             end_date.strftime('%Y-%m-%d')
         )
         
-        # 5. Synkroniser Body Battery-data til database
+        # 5. Synkroniser Body Battery-data til database (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer Body Battery-data til database..."
         body_battery_service = BodyBatteryService(garmin_client)
         body_battery_result = await body_battery_service.sync_body_battery_data_to_database(
             db_session,
-            start_date.strftime('%Y-%m-%d'),
+            health_start_date.strftime('%Y-%m-%d'),
             end_date.strftime('%Y-%m-%d')
         )
         
@@ -480,14 +561,23 @@ async def trigger_full_sync(
 ):
     """
     Starter full synkronisering av alle data for en gitt periode.
-    Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.
+    - Aktiviteter og FIT-data: Fra start_date til end_date
+    - Helsedata (HRV, Body Battery, Training Effect): Kun fra 2020-01-01 eller senere
     """
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
     job_id = str(uuid.uuid4())
     sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
-    background_tasks.add_task(run_full_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
+    background_tasks.add_task(
+        run_full_sync, 
+        job_id, 
+        garmin_client, 
+        storage, 
+        start_datetime, 
+        end_datetime,
+        request.ignore_sync_state  # Send ignore_sync_state videre!
+    )
     
     return {
         "message": f"Full synkronisering startet for perioden {request.start_date} til {request.end_date}. Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.",

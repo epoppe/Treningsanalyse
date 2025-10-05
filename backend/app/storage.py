@@ -95,7 +95,33 @@ class DataStorage:
     def _save_dataframe(self, df: pd.DataFrame, file_path: str, df_name: str):
         """Lagrer en DataFrame til en Parquet-fil og logger prosessen."""
         try:
-            df.to_parquet(file_path)
+            # Sanitér uønskede dtype-utvidelser (som Period) som kan krasje Parquet-serialisering
+            try:
+                df = df.copy()
+                for col in df.columns:
+                    try:
+                        import pandas as pd  # local import for safety
+                        from pandas.api.types import is_period_dtype
+                        if is_period_dtype(df[col]):
+                            df[col] = df[col].astype(str)
+                    except Exception:
+                        pass
+                # Håndter PeriodIndex dersom brukt som index
+                try:
+                    if getattr(df.index, 'dtype', None) is not None:
+                        if str(df.index.dtype).startswith('period'):
+                            df.index = df.index.astype(str)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            # Bruk fastparquet som primær motor for å unngå kjente pyarrow type extension-problemer
+            try:
+                df.to_parquet(file_path, engine="fastparquet")
+            except Exception as e_fast:
+                logger.warning(f"fastparquet feilet for {df_name} ({e_fast}), prøver pyarrow...")
+                import pyarrow  # sikre import
+                df.to_parquet(file_path, engine="pyarrow")
             logger.info(f"Lagret {df_name}-data til {file_path} ({len(df)} rader).")
         except Exception as e:
             logger.error(f"Kunne ikke lagre DataFrame til {file_path}: {e}")
