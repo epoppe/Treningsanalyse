@@ -1,0 +1,17 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting fitparse
+  Downloading fitparse-1.2.0.tar.gz (65 kB)
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'done'
+  Preparing metadata (pyproject.toml): started
+  Preparing metadata (pyproject.toml): finished with status 'done'
+Building wheels for collected packages: fitparse
+  Building wheel for fitparse (pyproject.toml): started
+  Building wheel for fitparse (pyproject.toml): finished with status 'done'
+  Created wheel for fitparse: filename=fitparse-1.2.0-py3-none-any.whl size=68276 sha256=8155a187624d6b3744f92eb1b7fcfc0ca802aaaefd056ac1a76f52bb5ad88b43
+  Stored in directory: /home/ubuntu/.cache/pip/wheels/6a/8a/17/d5e85db99c2efece41b1aa8388d9e5c42d1796021b30f3f1ee
+Successfully built fitparse
+Installing collected packages: fitparse
+Successfully installed fitparse-1.2.0
