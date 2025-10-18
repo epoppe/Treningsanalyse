@@ -8,6 +8,7 @@ import logging
 
 from ..database.models.activity import Activity
 from ..database.session import get_db
+from ..cache.cache_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class TrainingStressService:
     
     def __init__(self, db: Session):
         self.db = db
+        self.cache = get_cache_manager()
     
     def calculate_tss_for_activity(self, activity: Activity) -> float:
         """
@@ -31,6 +33,12 @@ class TrainingStressService:
         TSS er det samme som EPOC-verdien fra Garmin Connect.
         """
         try:
+            # Sjekk cache først
+            cached_tss = self.cache.get_tss(str(activity.activity_id))
+            if cached_tss is not None:
+                logger.debug(f"TSS cache hit for activity {activity.activity_id}")
+                return cached_tss
+            
             if not activity.duration or activity.duration <= 0:
                 return 0.0
             
@@ -39,9 +47,12 @@ class TrainingStressService:
                 # TSS er det samme som EPOC-verdien fra Garmin
                 epoc_value = activity.epoc
                 
-                logger.info(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
+                logger.debug(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
                           f"EPOC={epoc_value}")
-                return round(epoc_value, 1)  # TSS = EPOC
+                tss = round(epoc_value, 1)
+                # Cache resultatet
+                self.cache.set_tss(str(activity.activity_id), tss)
+                return tss  # TSS = EPOC
             
             # Prioritet 2: Fallback til estimert beregning hvis ingen EPOC
             logger.info(f"Ingen EPOC-data for aktivitet {activity.activity_id}, bruker estimert TSS")
@@ -62,7 +73,10 @@ class TrainingStressService:
             tss = max(0, min(200, tss))
             
             logger.info(f"Estimert TSS beregnet for aktivitet {activity.activity_id}: {tss:.1f}")
-            return round(tss, 1)
+            tss_rounded = round(tss, 1)
+            # Cache resultatet
+            self.cache.set_tss(str(activity.activity_id), tss_rounded)
+            return tss_rounded
             
         except Exception as e:
             logger.error(f"Feil ved beregning av TSS for aktivitet {activity.activity_id}: {e}")
@@ -339,7 +353,7 @@ class TrainingStressService:
                         # TSS er det samme som EPOC-verdien fra Garmin
                         epoc_value = activity.epoc
                         
-                        logger.info(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
+                        logger.debug(f"EPOC-basert TSS for aktivitet {activity.activity_id}: "
                                   f"EPOC={epoc_value}")
                         
                         tss_data.append({

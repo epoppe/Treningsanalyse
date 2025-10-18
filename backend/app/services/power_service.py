@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from ..storage import DataStorage
 from ..database.models.activity import Activity
+from ..cache.cache_manager import get_cache_manager
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 class PowerService:
     def __init__(self, storage: DataStorage):
         self.storage = storage
+        self.cache = get_cache_manager()
         
         # Konstant parametere for power-beregning
         self.MASS = 75.0  # kg (løper + sko/utstyr)
@@ -102,6 +104,12 @@ class PowerService:
             Dictionary med power-statistikk
         """
         try:
+            # Sjekk cache først
+            cached_power = self.cache.get_power(str(activity_id))
+            if cached_power is not None:
+                logger.debug(f"Power cache hit for activity {activity_id}")
+                return cached_power
+            
             # Hent aktivitet fra database
             activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
             if not activity:
@@ -182,7 +190,7 @@ class PowerService:
             
             logger.info(f"Beregnet power for aktivitet {activity_id}: avg={avg_power:.1f}W, max={max_power:.1f}W")
             
-            return {
+            result = {
                 "activity_id": activity_id,
                 "average_power_watts": round(avg_power, 1),
                 "max_power_watts": round(max_power, 1),
@@ -192,6 +200,11 @@ class PowerService:
                 "mass_kg": mass_kg,
                 "calculation_method": "calculated"
             }
+            
+            # Cache resultatet
+            self.cache.set_power(str(activity_id), result)
+            
+            return result
             
         except HTTPException:
             # Re-raise HTTPExceptions without logging them as errors

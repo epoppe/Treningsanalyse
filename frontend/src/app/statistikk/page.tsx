@@ -341,7 +341,7 @@ const StatistikkPage = () => {
     console.log('[Statistikk] Synkronisering fullført, henter alle aktiviteter på nytt...');
     
     // Etter synkronisering, hent ALLE aktiviteter på nytt (inkludert historiske)
-    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 1000 }));
     
     // Oppdater sammendragstabeller i backend
     try {
@@ -376,8 +376,8 @@ const StatistikkPage = () => {
         console.log('[Statistikk] Henter nye aktiviteter siden', sinceDate);
         dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
       } else {
-        console.log('[Statistikk] Ingen eksisterende aktiviteter, henter siste 100');
-        dispatch(fetchAllActivities({ count: 100 }));
+        console.log('[Statistikk] Ingen eksisterende aktiviteter, henter alle (1000)');
+        dispatch(fetchAllActivities({ count: 1000 }));
       }
     };
 
@@ -411,21 +411,21 @@ const StatistikkPage = () => {
     console.log(`[Statistikk] Antall aktiviteter: ${ids.length}, unike: ${uniqueIds.size}`);
   }, [activities]);
 
-  const handleActivityTypeChange = (type: string, checked: boolean) => {
+  const handleActivityTypeChange = useCallback((type: string, checked: boolean) => {
     if (checked) {
       setSelectedActivityTypes(prev => [...prev, type]);
     } else {
       setSelectedActivityTypes(prev => prev.filter(t => t !== type));
     }
-  };
+  }, []);
 
-  const handleSelectAll = () => {
+  const handleSelectAll = useCallback(() => {
     setSelectedActivityTypes(activityTypes);
-  };
+  }, [activityTypes]);
 
-  const handleClearAll = () => {
+  const handleClearAll = useCallback(() => {
     setSelectedActivityTypes([]);
-  };
+  }, []);
 
 
 

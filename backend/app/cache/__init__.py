@@ -1,0 +1,2 @@
+# Cache module for Treningsanalyse
+

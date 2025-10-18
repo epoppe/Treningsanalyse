@@ -27,9 +27,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
     
     # Garmin Connect API konfigurasjon
-    GARMIN_EMAIL: str = "erik.p.poppe@gmail.com"
-    GARMIN_PASSWORD: str = "Erik1984!"
-    TOKEN_DIR: str = "tokens"
+    # VIKTIG: Sett disse som miljøvariabler i .env-filen!
+    GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "")
+    GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "")
+    TOKEN_DIR: str = os.getenv("TOKEN_DIR", "tokens")
     
     # Lactate threshold speed konfigurasjon (i m/s)
     # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API

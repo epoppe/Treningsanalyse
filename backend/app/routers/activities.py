@@ -61,8 +61,10 @@ def get_activities_by_date_range(
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         
-        # Hent aktiviteter i perioden
-        activities = db.query(Activity).filter(
+        # Hent aktiviteter i perioden med eager loading av activity_type
+        activities = db.query(Activity).options(
+            joinedload(Activity.activity_type)
+        ).filter(
             Activity.start_time >= start_dt,
             Activity.start_time <= end_dt
         ).order_by(Activity.start_time.desc()).all()

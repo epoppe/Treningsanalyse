@@ -55,7 +55,7 @@ export default function RunningEconomyPage() {
     console.log('[RunningEconomy] Synkronisering fullført, henter alle aktiviteter på nytt...');
     
     // Etter synkronisering, hent ALLE aktiviteter på nytt (inkludert historiske)
-    dispatch(fetchAllActivities({ forceRefresh: true, count: 2000 }));
+    dispatch(fetchAllActivities({ forceRefresh: true, count: 1000 }));
   }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
@@ -78,8 +78,8 @@ export default function RunningEconomyPage() {
         console.log('[RunningEconomy] Henter nye aktiviteter siden', sinceDate);
         dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
       } else {
-        console.log('[RunningEconomy] Ingen eksisterende aktiviteter, henter siste 100');
-        dispatch(fetchActivities());
+        console.log('[RunningEconomy] Ingen eksisterende aktiviteter, henter alle (1000)');
+        dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
       }
     };
 
@@ -98,7 +98,7 @@ export default function RunningEconomyPage() {
 
   useEffect(() => {
     if (status === 'idle') {
-      dispatch(fetchAllActivities({ forceRefresh: false, count: 2000 }));
+      dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
     }
   }, [status, dispatch]);
 

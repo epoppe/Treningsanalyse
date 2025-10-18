@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import {
   BarChart,
   Bar,
@@ -52,7 +53,7 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   return null;
 };
 
-export default function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
+function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
   if (activities.length === 0) {
     return (
       <ChartContainer>
@@ -226,4 +227,7 @@ export default function ActivityChart({ activities, metric, title, useDynamicYAx
       </ResponsiveContainer>
     </ChartContainer>
   );
-} 
+}
+
+// Wrap component with React.memo for performance
+export default memo(ActivityChart); 

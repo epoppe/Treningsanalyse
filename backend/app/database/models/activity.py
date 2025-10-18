@@ -1,9 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Boolean, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Boolean, Text, Index
 from sqlalchemy.orm import relationship
 from .base import Base
 
 class Activity(Base):
     __tablename__ = 'activities'
+    
+    # Sammensatte indekser for ytelse
+    __table_args__ = (
+        Index('idx_start_time_activity_type', 'start_time', 'activity_type_id'),
+        Index('idx_duration_distance', 'duration', 'distance'),
+        Index('idx_epoc_tss', 'epoc', 'training_stress_score'),
+        Index('idx_start_time_desc', 'start_time'),  # For DESC ordering
+    )
 
     # Primærnøkkel - bruker Garmin activity ID
     activity_id = Column(String(255), primary_key=True, index=True)
@@ -15,8 +23,8 @@ class Activity(Base):
     end_time = Column(DateTime, nullable=True)
     
     # Målinger
-    distance = Column(Float, nullable=True)  # meter
-    duration = Column(Float, nullable=True)  # sekunder
+    distance = Column(Float, nullable=True, index=True)  # meter - nå indeksert
+    duration = Column(Float, nullable=True, index=True)  # sekunder - nå indeksert
     moving_duration = Column(Float, nullable=True)  # sekunder
     elapsed_duration = Column(Float, nullable=True)  # sekunder
     calories = Column(Float, nullable=True)

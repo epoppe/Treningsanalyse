@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { useRouter } from 'next/navigation';
@@ -464,4 +465,5 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   );
 };
 
-export default ActivityList; 
+// Wrap component with React.memo for performance optimization
+export default memo(ActivityList); 
