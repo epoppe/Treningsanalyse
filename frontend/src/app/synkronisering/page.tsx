@@ -5,6 +5,7 @@ import styled from 'styled-components';
 import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 import { api } from '../../utils/api';
+import CacheCalculationPanel from '../../components/CacheCalculationPanel';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -270,6 +271,9 @@ export default function SynkroniseringPage() {
   return (
     <Container>
       <Title>Synkronisering av Data</Title>
+
+      {/* Cache Calculation Panel */}
+      <CacheCalculationPanel />
 
       {/* All Sync Options in One Row */}
       <SyncSection>
