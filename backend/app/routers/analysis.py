@@ -548,7 +548,7 @@ async def get_hrv_for_multiple_activities(
     storage: DataStorage = Depends(get_data_storage),
     db: Session = Depends(get_db)
 ):
-    """Henter HRV-data for flere aktiviteter på en gang fra databasen."""
+    """Henter HRV-data for flere aktiviteter på en gang fra databasen med bulk-query (optimalisert)."""
     try:
         # Parse activity IDs
         activity_id_list = [int(id.strip()) for id in activity_ids.split(',') if id.strip()]
@@ -556,31 +556,79 @@ async def get_hrv_for_multiple_activities(
         if not activity_id_list:
             return {"hrv_data": {}}
         
-        # Use HRVService to fetch data from the database
-        from ..services.hrv_service import HRVService
-        hrv_service = HRVService(storage)
+        logger.info(f"📊 HRV Bulk: Henter HRV-data for {len(activity_id_list)} aktiviteter...")
         
+        # Bulk-query: Hent alle aktiviteter på en gang
+        from ..database.models import Activity, HRV
+        from sqlalchemy import func, cast, Date
+        
+        # Konverter til string for database-query
+        activity_id_str_list = [str(id) for id in activity_id_list]
+        
+        # Hent aktiviteter med deres datoer (bulk query)
+        activities = db.query(
+            Activity.activity_id,
+            Activity.start_time
+        ).filter(
+            Activity.activity_id.in_(activity_id_str_list)
+        ).all()
+        
+        # Bygg mapping fra activity_id til dato (konverter datetime til date)
+        activity_date_map = {}
+        for act in activities:
+            activity_date = act.start_time.date() if act.start_time else None
+            if activity_date:
+                activity_date_map[str(act.activity_id)] = activity_date
+        
+        logger.info(f"📅 Aktivitetsdatoer: {list(activity_date_map.values())[:5]}...")
+        
+        # Hent alle unike datoer
+        unique_dates = list(set(activity_date_map.values()))
+        logger.info(f"🔍 Søker etter HRV for {len(unique_dates)} unike datoer")
+        
+        # Bulk-query: Hent HRV-data for alle relevante datoer på en gang
+        hrv_records = db.query(HRV).filter(
+            HRV.measurement_date.in_(unique_dates)
+        ).all()
+        
+        logger.info(f"💾 Fant {len(hrv_records)} HRV-records i database")
+        
+        # Bygg mapping fra dato til HRV-data
+        hrv_by_date = {}
+        for hrv in hrv_records:
+            hrv_by_date[hrv.measurement_date] = {
+                "date": hrv.measurement_date.strftime('%Y-%m-%d'),
+                "last_night_avg": hrv.rmssd,
+                "measurement_time": hrv.measurement_time.isoformat() if hrv.measurement_time else None,
+                "measurement_type": hrv.measurement_type
+            }
+        
+        logger.info(f"📊 HRV-dato-map har {len(hrv_by_date)} entries")
+        
+        # Bygg resultat: Map aktivitets-ID til HRV-data via dato
         hrv_results = {}
-        
         for activity_id in activity_id_list:
-            try:
-                hrv_data = hrv_service.get_hrv_for_activity_date(activity_id, db)
-                if hrv_data:
-                    hrv_results[str(activity_id)] = hrv_data
-                else:
-                    hrv_results[str(activity_id)] = None
-            except Exception as e:
-                logger.warning(f"Feil ved henting av HRV for aktivitet {activity_id}: {e}")
-                hrv_results[str(activity_id)] = None
+            activity_id_str = str(activity_id)
+            activity_date = activity_date_map.get(activity_id_str)
+            
+            if activity_date and activity_date in hrv_by_date:
+                # HRV-data finnes for denne datoen
+                hrv_results[activity_id_str] = hrv_by_date[activity_date]
+            else:
+                # Ingen HRV-data for denne aktiviteten
+                hrv_results[activity_id_str] = None
+        
+        activities_with_hrv = len([v for v in hrv_results.values() if v is not None])
+        logger.info(f"✅ HRV Bulk: Returnerer {activities_with_hrv}/{len(activity_id_list)} aktiviteter med HRV-data")
         
         return {
             "hrv_data": hrv_results,
             "total_activities": len(activity_id_list),
-            "activities_with_hrv": len([v for v in hrv_results.values() if v is not None])
+            "activities_with_hrv": activities_with_hrv
         }
         
     except Exception as e:
-        logger.error(f"Feil ved henting av HRV-data for flere aktiviteter: {str(e)}")
+        logger.error(f"❌ HRV Bulk: Feil ved henting av HRV-data: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/body-battery/by-activity/{activity_id}", response_model=dict)

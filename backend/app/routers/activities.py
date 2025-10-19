@@ -69,9 +69,9 @@ def get_activities_by_date_range(
             Activity.start_time <= end_dt
         ).order_by(Activity.start_time.desc()).all()
         
-        # Initialiser PowerService for power-beregning
-        storage = DataStorage()
-        power_service = PowerService(storage)
+        # Initialiser PowerService kun hvis vi trenger å beregne power
+        storage = None
+        power_service = None
         
         response_data = []
         for act in activities:
@@ -89,7 +89,7 @@ def get_activities_by_date_range(
                 # Gjennomsnittlig steglengde = distanse / antall steg
                 avg_stride_length = act.distance / act.total_steps
             
-            # Hent power for løpeaktiviteter
+            # Hent power for løpeaktiviteter - kun hvis ikke allerede lagret
             average_power_watts = None
             if act.activity_type and act.activity_type.type_key == 'running' or (act_type_data and act_type_data.get('typeKey') == 'running'):
                 # Bruk lagret power fra database hvis tilgjengelig
@@ -97,6 +97,9 @@ def get_activities_by_date_range(
                     average_power_watts = act.average_power
                 elif force_refresh == 'true':
                     # Beregn power kun hvis force_refresh er true og power ikke er lagret
+                    if storage is None:
+                        storage = DataStorage()
+                        power_service = PowerService(storage)
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)
                         if power_result:
@@ -105,6 +108,7 @@ def get_activities_by_date_range(
                         logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
             
             # Manually construct the dictionary for the response, ensuring correct field names
+            # Ekskluder 'details' for ytelse - disse er store og kan hentes separat ved behov
             response_data.append({
                 "activityId": act.activity_id,
                 "activityName": act.activity_name,
@@ -127,7 +131,7 @@ def get_activities_by_date_range(
                 "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
                 "averagePowerWatts": average_power_watts,  # Power i watt
                 "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
-                "details": act.detailed_metrics
+                # "details": act.detailed_metrics  # Fjernet for ytelse - hentes separat ved behov
             })
             
         logger.info(f"Returnerer {len(response_data)} aktiviteter for perioden {start_date} til {end_date}")
@@ -165,7 +169,13 @@ def get_activities(
                 logger.warning(f"Ugyldig since dato format: {since}")
         
         # Hent aktiviteter sortert etter starttid (nyeste først)
-        activities = query.order_by(Activity.start_time.desc()).limit(limit).offset(offset).all()
+        # Hvis limit er veldig stort (>1000), bruk None for å unngå SQLite-feil
+        query = query.order_by(Activity.start_time.desc())
+        if limit > 1000:
+            logger.info(f"Limit {limit} er større enn 1000, henter alle aktiviteter uten limit")
+            activities = query.offset(offset).all()
+        else:
+            activities = query.limit(limit).offset(offset).all()
         logger.info(f"Hentet {len(activities)} aktiviteter fra databasen")
         
         # Initialiser PowerService kun hvis vi trenger å beregne power
@@ -173,66 +183,73 @@ def get_activities(
         power_service = None
         
         response_data = []
-        for act in activities:
-            # Construct the nested activity type object
-            act_type_data = None
-            if act.activity_type:
-                act_type_data = {
-                    "typeKey": act.activity_type.type_key,
-                    "parentTypeKey": act.activity_type.parent_type_key
-                }
+        logger.info(f"Starter prosessering av {len(activities)} aktiviteter for respons...")
+        
+        for i, act in enumerate(activities):
+            try:
+                # Construct the nested activity type object
+                act_type_data = None
+                if act.activity_type:
+                    act_type_data = {
+                        "typeKey": act.activity_type.type_key,
+                        "parentTypeKey": act.activity_type.parent_type_key
+                    }
 
-            # Calculate average stride length
-            avg_stride_length = None
-            if act.average_speed and act.average_running_cadence and act.average_running_cadence > 0:
-                # average_speed is in m/s, cadence is in steps/min.
-                # Convert speed to m/min: average_speed * 60
-                # Stride length (m/step) = (m/min) / (steps/min)
-                avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
+                # Calculate average stride length
+                avg_stride_length = None
+                if act.average_speed and act.average_running_cadence and act.average_running_cadence > 0:
+                    # average_speed is in m/s, cadence is in steps/min.
+                    # Convert speed to m/min: average_speed * 60
+                    # Stride length (m/step) = (m/min) / (steps/min)
+                    avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
 
-            # Hent power for løpeaktiviteter - kun hvis ikke allerede lagret
-            average_power_watts = None
-            if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
-                # Bruk lagret power fra database hvis tilgjengelig
-                if act.average_power is not None:
-                    average_power_watts = act.average_power
-                elif force_refresh == 'true':
-                    # Beregn power kun hvis force_refresh er true og power ikke er lagret
-                    if storage is None:
-                        storage = DataStorage()
-                        power_service = PowerService(storage)
-                    try:
-                        power_result = power_service.calculate_activity_power(int(act.activity_id), db)
-                        if power_result:
-                            average_power_watts = power_result['average_power_watts']
-                    except Exception as e:
-                        logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
+                # Hent power for løpeaktiviteter - kun hvis ikke allerede lagret
+                average_power_watts = None
+                if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
+                    # Bruk lagret power fra database hvis tilgjengelig
+                    if act.average_power is not None:
+                        average_power_watts = act.average_power
+                    elif force_refresh == 'true':
+                        # Beregn power kun hvis force_refresh er true og power ikke er lagret
+                        if storage is None:
+                            storage = DataStorage()
+                            power_service = PowerService(storage)
+                        try:
+                            power_result = power_service.calculate_activity_power(int(act.activity_id), db)
+                            if power_result:
+                                average_power_watts = power_result['average_power_watts']
+                        except Exception as e:
+                            logger.warning(f"Kunne ikke beregne power for aktivitet {act.activity_id}: {e}")
 
-            # Manually construct the dictionary for the response, ensuring correct field names
-            response_data.append({
-                "activityId": act.activity_id,
-                "activityName": act.activity_name,
-                "startTimeLocal": act.start_time,
-                "distance": act.distance,
-                "duration": act.duration,
-                "calories": act.calories,
-                "averageHR": act.average_heart_rate,
-                "averageSpeed": act.average_speed,
-                "averagePace": act.average_pace,
-                "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
-                "vO2MaxValue": act.vo2_max,
-                "activityType": act_type_data,
-                "avgStrideLength": avg_stride_length,
-                "negativeSplitPercent": act.negative_split_percent,
-                "decouplingPercent": act.decoupling_percent,
-                "trainingReadinessScore": act.training_readiness_score,
-                "totalTrainingEffect": act.total_training_effect,
-                "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
-                "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
-                "averagePowerWatts": average_power_watts,  # Power i watt
-                "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
-                "details": act.detailed_metrics
-            })
+                # Manually construct the dictionary for the response, ensuring correct field names
+                # Ekskluder 'details' for ytelse - disse er store og kan hentes separat ved behov
+                response_data.append({
+                    "activityId": act.activity_id,
+                    "activityName": act.activity_name,
+                    "startTimeLocal": act.start_time,
+                    "distance": act.distance,
+                    "duration": act.duration,
+                    "calories": act.calories,
+                    "averageHR": act.average_heart_rate,
+                    "averageSpeed": act.average_speed,
+                    "averagePace": act.average_pace,
+                    "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
+                    "vO2MaxValue": act.vo2_max,
+                    "activityType": act_type_data,
+                    "avgStrideLength": avg_stride_length,
+                    "negativeSplitPercent": act.negative_split_percent,
+                    "decouplingPercent": act.decoupling_percent,
+                    "trainingReadinessScore": act.training_readiness_score,
+                    "totalTrainingEffect": act.total_training_effect,
+                    "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
+                    "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                    "averagePowerWatts": average_power_watts,  # Power i watt
+                    "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
+                    # "details": act.detailed_metrics  # Fjernet for ytelse - hentes separat ved behov
+                })
+            except Exception as e:
+                logger.error(f"Feil ved prosessering av aktivitet {i+1}/{len(activities)} (ID: {act.activity_id if hasattr(act, 'activity_id') else 'ukjent'}): {e}", exc_info=True)
+                continue
             
         logger.info(f"Returnerer {len(response_data)} aktiviteter til frontend")
         return response_data
@@ -264,9 +281,9 @@ def get_new_activities(
         
         logger.info(f"Hentet {len(activities)} nye aktiviteter siden {since_date}")
         
-        # Initialiser PowerService for power-beregning
-        storage = DataStorage()
-        power_service = PowerService(storage)
+        # Initialiser PowerService kun hvis vi trenger å beregne power
+        storage = None
+        power_service = None
         
         response_data = []
         for act in activities:
@@ -283,7 +300,7 @@ def get_new_activities(
             if act.average_speed and act.average_running_cadence and act.average_running_cadence > 0:
                 avg_stride_length = (act.average_speed * 60) / act.average_running_cadence
 
-            # Hent power for løpeaktiviteter
+            # Hent power for løpeaktiviteter - kun hvis ikke allerede lagret
             average_power_watts = None
             if (act.activity_type and act.activity_type.type_key == 'running') or (act_type_data and act_type_data.get('typeKey') == 'running'):
                 # Bruk lagret power fra database hvis tilgjengelig
@@ -291,6 +308,9 @@ def get_new_activities(
                     average_power_watts = act.average_power
                 elif force_refresh == 'true':
                     # Beregn power kun hvis force_refresh er true og power ikke er lagret
+                    if storage is None:
+                        storage = DataStorage()
+                        power_service = PowerService(storage)
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)
                         if power_result:

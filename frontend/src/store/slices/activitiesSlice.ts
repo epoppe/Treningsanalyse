@@ -189,9 +189,19 @@ const activitiesSlice = createSlice({
       })
       .addCase(fetchMoreActivities.fulfilled, (state, action: PayloadAction<Activity[]>) => {
         state.status = 'succeeded';
-        // Legg til nye aktiviteter til eksisterende liste
-        state.items = [...state.items, ...action.payload];
-        state.loadedCount = state.items.length;
+        // Legg til nye aktiviteter til eksisterende liste, fjern duplikater
+        const newActivities = action.payload;
+        const existingIds = new Set(state.items.map(item => item.activityId));
+        const uniqueNewActivities = newActivities.filter(activity => !existingIds.has(activity.activityId));
+        
+        console.log('[fetchMoreActivities] Fikk', newActivities.length, 'aktiviteter,', uniqueNewActivities.length, 'er unike');
+        
+        // Kombiner og sorter etter dato (nyeste først)
+        const combinedActivities = [...state.items, ...uniqueNewActivities];
+        combinedActivities.sort((a, b) => new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime());
+        
+        state.items = combinedActivities;
+        state.loadedCount = combinedActivities.length;
       })
       .addCase(fetchMoreActivities.rejected, (state, action) => {
         state.status = 'failed';

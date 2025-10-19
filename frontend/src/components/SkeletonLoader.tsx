@@ -91,3 +91,4 @@ const SkeletonLoader = ({ type = 'card', count = 3 }: SkeletonLoaderProps) => {
 
 export default memo(SkeletonLoader);
 
+

@@ -141,10 +141,10 @@ export default function Home() {
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
 
-  // Automatisk sjekk for nye aktiviteter når siden lastes
+  // Automatisk sjekk for nye aktiviteter når siden får fokus (ikke ved initial load)
   useEffect(() => {
     const checkForNewActivities = () => {
-      console.log('[Home] Sjekker for nye aktiviteter ved sideinnlasting...');
+      console.log('[Home] Side fikk fokus, sjekker for nye aktiviteter...');
       
       if (activities.length > 0) {
         // Finn den nyeste aktiviteten
@@ -157,24 +157,20 @@ export default function Home() {
         
         console.log('[Home] Henter nye aktiviteter siden', sinceDate);
         dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
-      } else {
-        console.log('[Home] Ingen eksisterende aktiviteter, henter alle (1000)');
-        dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
       }
     };
 
-    // Sjekk for nye aktiviteter når komponenten mountes
-    checkForNewActivities();
-
-    // Sjekk også når siden får fokus (bruker kommer tilbake til siden)
+    // Sjekk for nye aktiviteter når siden får fokus (bruker kommer tilbake til siden)
+    // IKKE ved initial mount - det håndteres av progressive loading
     const handleFocus = () => {
-      console.log('[Home] Side fikk fokus, sjekker for nye aktiviteter...');
-      checkForNewActivities();
+      if (hasRestoredFromStorage) {
+        checkForNewActivities();
+      }
     };
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [dispatch, activities.length]);
+  }, [dispatch, activities.length, hasRestoredFromStorage]);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
@@ -221,25 +217,21 @@ export default function Home() {
 
   useEffect(() => {
     if (status === 'idle' && !hasRestoredFromStorage) {
-      // Gjenopprett loadedCount fra localStorage
-      const savedLoadedCount = localStorage.getItem('activitiesLoadedCount');
-      const savedCount = savedLoadedCount ? parseInt(savedLoadedCount, 10) : 100;
+      console.log('[Home] 🚀 Progressive loading: Henter første 50 aktiviteter...');
       
-      console.log('[Home] Gjenoppretter fra localStorage:', { savedCount });
+      // 1. Last FØRST 50 aktiviteter for rask visning (uten details for ytelse)
+      dispatch(fetchActivities({ limit: 50, offset: 0 }));
+      dispatch(setLoadedCount(50));
       
-      if (savedCount > 100) {
-        // Hvis vi hadde lastet flere aktiviteter, hent dem alle på nytt
-        dispatch(fetchAllActivities({ forceRefresh: false, count: savedCount }));
-        dispatch(setLoadedCount(savedCount));
-      } else {
-        // Hent alle aktiviteter ved første lasting
-        dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
-      }
-      
-      // Hent aktivitetsantall separat (påvirker ikke hovedstatus)
+      // 2. Hent total count
       dispatch(fetchActivityCount());
       
-      // Sett hasRestoredFromStorage til true umiddelbart
+      // 3. Last resten i bakgrunnen etter kort pause
+      setTimeout(() => {
+        console.log('[Home] 📥 Laster resten av aktivitetene i bakgrunnen...');
+        dispatch(fetchMoreActivities({ limit: 1000, offset: 50 }));
+      }, 500); // 500ms pause slik at bruker får se siden først
+      
       setHasRestoredFromStorage(true);
     }
   }, [dispatch, status, hasRestoredFromStorage]);

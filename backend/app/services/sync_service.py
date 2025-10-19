@@ -597,8 +597,8 @@ class SyncService:
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             
-            # Beregn metrics for nye aktiviteter
-            logger.info("Starter beregning av metrics for nye aktiviteter...")
+            # Beregn ALLE metrics for nye aktiviteter
+            logger.info("Starter beregning av alle metrics for nye aktiviteter...")
             metrics_results = []
             for act_data in activities_to_save:
                 activity_id = str(act_data.get('activityId'))
@@ -607,17 +607,26 @@ class SyncService:
                     metrics_results.append(metrics_result)
             
             # Logg resultater
+            successful_tss = sum(1 for r in metrics_results if r["tss_calculated"])
+            successful_power = sum(1 for r in metrics_results if r["power_calculated"])
+            successful_running_economy = sum(1 for r in metrics_results if r["running_economy_calculated"])
             successful_negative_splits = sum(1 for r in metrics_results if r["negative_split_calculated"])
             successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
             successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
             
-            logger.info(f"Metrics-beregning fullført:")
+            logger.info(f"📊 Metrics-beregning fullført:")
+            logger.info(f"  - TSS: {successful_tss}/{len(metrics_results)}")
+            logger.info(f"  - Power: {successful_power}/{len(metrics_results)}")
+            logger.info(f"  - Løpsøkonomi: {successful_running_economy}/{len(metrics_results)}")
             logger.info(f"  - Negative split: {successful_negative_splits}/{len(metrics_results)}")
             logger.info(f"  - Decoupling: {successful_decouplings}/{len(metrics_results)}")
             logger.info(f"  - HRV tilgjengelig: {successful_hrv}/{len(metrics_results)}")
             
             summary["total_fetched"] = added_count
             summary["metrics_calculated"] = {
+                "tss": successful_tss,
+                "power": successful_power,
+                "running_economy": successful_running_economy,
                 "negative_split": successful_negative_splits,
                 "decoupling": successful_decouplings,
                 "hrv_available": successful_hrv,
@@ -986,7 +995,7 @@ class SyncService:
             
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
             logger.info(message)
-            logger.info(f"Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
+            logger.info(f"📊 Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
             
             return {
                 "status": "Fullført",
@@ -1071,7 +1080,7 @@ class SyncService:
             
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter i perioden {start_date.date()} til {end_date.date()}"
             logger.info(message)
-            logger.info(f"Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
+            logger.info(f"📊 Metrics beregnet: Negative split={metrics_calculated['negative_split']}, Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}")
             
             return {
                 "status": "Fullført", 
@@ -1211,11 +1220,15 @@ class SyncService:
 
     def _calculate_metrics_for_new_activity(self, activity_id: str) -> dict:
         """
-        Beregner og lagrer decoupling og negative split for en ny aktivitet.
+        Beregner og lagrer ALLE beregnede verdier for en ny aktivitet.
+        Sjekker først om verdier allerede finnes i databasen for å unngå unødvendige beregninger.
         Returnerer en ordbok med resultater.
         """
         results = {
             "activity_id": activity_id,
+            "tss_calculated": False,
+            "power_calculated": False,
+            "running_economy_calculated": False,
             "negative_split_calculated": False,
             "decoupling_calculated": False,
             "hrv_calculated": False,
@@ -1225,43 +1238,106 @@ class SyncService:
         try:
             activity_id_int = int(activity_id)
             
-            # Beregn negative split
-            try:
-                negative_split_result = self.analysis_service.calculate_negative_split(activity_id_int, self.db)
-                if negative_split_result:
-                    results["negative_split_calculated"] = True
-                    logger.info(f"Beregnet negative split for aktivitet {activity_id}: {negative_split_result.get('negative_split_percent', 'N/A')}%")
-                else:
-                    results["errors"].append("Kunne ikke beregne negative split")
-            except Exception as e:
-                logger.warning(f"Feil ved beregning av negative split for aktivitet {activity_id}: {e}")
-                results["errors"].append(f"Negative split feil: {str(e)}")
+            # Hent aktiviteten fra databasen
+            activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+            if not activity:
+                results["errors"].append("Aktivitet ikke funnet i database")
+                return results
             
-            # Beregn decoupling
-            try:
-                decoupling_result = self.analysis_service.calculate_decoupling(activity_id_int, self.db)
-                if decoupling_result:
-                    results["decoupling_calculated"] = True
-                    logger.info(f"Beregnet decoupling for aktivitet {activity_id}: {decoupling_result.get('decoupling_percent', 'N/A')}%")
-                else:
-                    results["errors"].append("Kunne ikke beregne decoupling")
-            except Exception as e:
-                logger.warning(f"Feil ved beregning av decoupling for aktivitet {activity_id}: {e}")
-                results["errors"].append(f"Decoupling feil: {str(e)}")
+            # 1. TSS (Training Stress Score) - sjekk om det allerede finnes
+            if activity.training_stress_score is None:
+                try:
+                    from ..services.training_stress_service import TrainingStressService
+                    tss_service = TrainingStressService(self.db)
+                    tss = tss_service.calculate_tss_for_activity(activity)
+                    if tss is not None:
+                        activity.training_stress_score = tss
+                        results["tss_calculated"] = True
+                        logger.info(f"✅ Beregnet TSS for aktivitet {activity_id}: {tss}")
+                except Exception as e:
+                    logger.warning(f"Feil ved beregning av TSS for aktivitet {activity_id}: {e}")
+                    results["errors"].append(f"TSS feil: {str(e)}")
+            else:
+                logger.debug(f"TSS finnes allerede for aktivitet {activity_id}: {activity.training_stress_score}")
             
-            # HRV beregnes ikke her - det hentes separat via sync_health_data
-            # Men vi kan sjekke om HRV-data finnes for aktivitetens dato
+            # 2. Power (kun for løpeaktiviteter) - sjekk om det allerede finnes
+            if activity.activity_type and activity.activity_type.type_key == 'running':
+                if activity.average_power is None:
+                    try:
+                        from ..services.power_service import PowerService
+                        power_service = PowerService(self.storage)
+                        power_data = power_service.calculate_activity_power(activity_id_int, self.db)
+                        if power_data:
+                            # Power lagres automatisk i calculate_activity_power
+                            results["power_calculated"] = True
+                            logger.info(f"✅ Beregnet power for aktivitet {activity_id}: {power_data.get('average_power_watts')}W")
+                    except Exception as e:
+                        logger.warning(f"Feil ved beregning av power for aktivitet {activity_id}: {e}")
+                        results["errors"].append(f"Power feil: {str(e)}")
+                else:
+                    logger.debug(f"Power finnes allerede for aktivitet {activity_id}: {activity.average_power}W")
+            
+            # 3. Running Economy (hastighet/puls-forhold)
+            if activity.activity_type and 'running' in activity.activity_type.type_key:
+                if activity.running_economy is None:
+                    try:
+                        if activity.average_speed and activity.average_heart_rate and activity.average_speed > 0 and activity.average_heart_rate > 0:
+                            # Running economy = (speed in km/h / HR) * 100
+                            speed_kmh = activity.average_speed * 3.6
+                            running_economy = (speed_kmh / activity.average_heart_rate) * 100
+                            activity.running_economy = round(running_economy, 2)
+                            results["running_economy_calculated"] = True
+                            logger.info(f"✅ Beregnet løpsøkonomi for aktivitet {activity_id}: {running_economy}")
+                    except Exception as e:
+                        logger.warning(f"Feil ved beregning av løpsøkonomi for aktivitet {activity_id}: {e}")
+                        results["errors"].append(f"Running economy feil: {str(e)}")
+                else:
+                    logger.debug(f"Løpsøkonomi finnes allerede for aktivitet {activity_id}: {activity.running_economy}")
+            
+            # 4. Negative split (fra FIT-data hvis tilgjengelig)
+            if activity.negative_split_percent is None:
+                try:
+                    negative_split_result = self.analysis_service.calculate_negative_split(activity_id_int, self.db)
+                    if negative_split_result and 'negative_split_percent' in negative_split_result:
+                        results["negative_split_calculated"] = True
+                        logger.info(f"✅ Beregnet negative split for aktivitet {activity_id}: {negative_split_result.get('negative_split_percent')}%")
+                except Exception as e:
+                    logger.debug(f"Kunne ikke beregne negative split for aktivitet {activity_id}: {e}")
+            else:
+                logger.debug(f"Negative split finnes allerede for aktivitet {activity_id}: {activity.negative_split_percent}%")
+            
+            # 5. Decoupling (fra FIT-data hvis tilgjengelig)
+            if activity.decoupling_percent is None:
+                try:
+                    decoupling_result = self.analysis_service.calculate_decoupling(activity_id_int, self.db)
+                    if decoupling_result and 'decoupling_percent' in decoupling_result:
+                        results["decoupling_calculated"] = True
+                        logger.info(f"✅ Beregnet decoupling for aktivitet {activity_id}: {decoupling_result.get('decoupling_percent')}%")
+                except Exception as e:
+                    logger.debug(f"Kunne ikke beregne decoupling for aktivitet {activity_id}: {e}")
+            else:
+                logger.debug(f"Decoupling finnes allerede for aktivitet {activity_id}: {activity.decoupling_percent}%")
+            
+            # 6. HRV-sjekk (HRV hentes separat via sync_health_data)
             try:
-                activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
-                if activity and activity.start_time:
+                if activity.start_time:
                     # HRV-data er kun tilgjengelig fra 2023
                     if activity.start_time.year >= 2023:
                         hrv_data = self.analysis_service.get_hrv_for_activity_date(activity_id_int, self.db)
                         if hrv_data and hrv_data.get('last_night_avg'):
                             results["hrv_calculated"] = True
-                            logger.info(f"HRV-data tilgjengelig for aktivitet {activity_id}: {hrv_data.get('last_night_avg')}ms")
+                            logger.debug(f"HRV-data tilgjengelig for aktivitet {activity_id}: {hrv_data.get('last_night_avg')}ms")
             except Exception as e:
                 logger.debug(f"HRV-sjekk for aktivitet {activity_id}: {e}")
+            
+            # Commit alle endringer til databasen
+            try:
+                self.db.commit()
+                logger.info(f"💾 Lagret alle beregnede verdier for aktivitet {activity_id}")
+            except Exception as e:
+                self.db.rollback()
+                logger.error(f"Feil ved lagring av beregnede verdier for aktivitet {activity_id}: {e}")
+                results["errors"].append(f"Lagringsfeil: {str(e)}")
             
         except Exception as e:
             logger.error(f"Generell feil ved beregning av metrics for aktivitet {activity_id}: {e}")

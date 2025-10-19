@@ -123,3 +123,4 @@ def get_cache_manager() -> CacheManager:
         logger.info("Cache manager initialized")
     return _cache_manager
 
+
