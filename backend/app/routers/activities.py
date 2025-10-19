@@ -41,7 +41,8 @@ class ActivityResponse(BaseModel):
     trainingReadinessScore: Optional[float] = Field(None, description="Training readiness score (0-100)")
     totalTrainingEffect: Optional[float] = Field(None, description="Aerobic Training Effect (1.0-5.0)")
     totalAnaerobicTrainingEffect: Optional[float] = Field(None, description="Anaerobic Training Effect (1.0-5.0)")
-    epoc: Optional[float] = Field(None, description="Exercise Post Oxygen Consumption (også brukt som TSS)")
+    epoc: Optional[float] = Field(None, description="Exercise Post Oxygen Consumption (kun fra juli 2021)")
+    trainingStressScore: Optional[float] = Field(None, description="Training Stress Score (TSS) - beregnet for alle aktiviteter")
     averagePowerWatts: Optional[float] = Field(None, description="Average power in watts")
     lactateThresholdSpeed: Optional[float] = Field(None, description="Lactate threshold speed in m/s")
     details: Optional[Dict[str, Any]] = Field(None, description="Detailed metrics for the activity")
@@ -128,7 +129,8 @@ def get_activities_by_date_range(
                 "trainingReadinessScore": act.training_readiness_score,
                 "totalTrainingEffect": act.total_training_effect,
                 "totalAnaerobicTrainingEffect": act.total_anaerobic_training_effect,
-                "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
+                "epoc": act.epoc,  # Exercise Post Oxygen Consumption (kun fra juli 2021)
+                "trainingStressScore": act.training_stress_score,  # TSS - beregnet for alle aktiviteter
                 "averagePowerWatts": average_power_watts,  # Power i watt
                 "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
                 # "details": act.detailed_metrics  # Fjernet for ytelse - hentes separat ved behov
