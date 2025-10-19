@@ -67,7 +67,9 @@ class TrainingStressService:
             ftp_equivalent = self._estimate_ftp_equivalent(activity)
             
             # Beregn estimert TSS
-            tss = (duration_hours * intensity_factor * intensity_factor) / (ftp_equivalent * 3600) * 100
+            # TSS = timer * IF² * 100
+            # Dette gir et fornuftig estimat: 1 time ved IF=1.0 => TSS=100
+            tss = duration_hours * intensity_factor * intensity_factor * 100
             
             # Begrens estimert TSS til realistiske verdier
             tss = max(0, min(200, tss))
