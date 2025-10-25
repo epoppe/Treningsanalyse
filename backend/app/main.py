@@ -7,12 +7,13 @@ from contextlib import asynccontextmanager
 from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
-from .routers import activities, analysis, garmin_data, health, sync, training_readiness, training_stress, power, cache
+from .routers import activities, analysis, garmin_data, health, sync, training_readiness, training_stress, power, cache, bulk
 from .database.models.activity import Base
 from .database.session import engine as db_engine, SessionLocal
 from .database.models import activity as activity_model
 from .dependencies import get_db, get_garmin_client, get_data_storage
 from .services.sync_service import SyncService
+from .middleware.cache_headers import CacheHeadersMiddleware
 
 # Konfigurer logging 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -75,6 +76,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Legg til HTTP Cache Headers middleware
+app.add_middleware(CacheHeadersMiddleware)
+
 # Inkluder alle routere med korrekt prefix
 app.include_router(activities.router, prefix="/api", tags=["Aktiviteter"])
 app.include_router(garmin_data.router, prefix="/api", tags=["Garmin Data"])
@@ -86,6 +90,7 @@ app.include_router(training_readiness.router, prefix="/api", tags=["Training Rea
 app.include_router(training_stress.router, prefix="/api", tags=["Training Stress"])
 app.include_router(power.router, prefix="/api", tags=["Power"])
 app.include_router(cache.router, prefix="/api", tags=["Cache"])
+app.include_router(bulk.router, prefix="/api", tags=["Bulk Operations"])
 
 @app.get("/")
 def read_root():

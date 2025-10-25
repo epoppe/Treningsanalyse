@@ -7,7 +7,8 @@ import json
 import fitparse
 from io import BytesIO
 from fitparse.utils import FitHeaderError
-import pandas as pd
+import polars as pl
+from dateutil import parser as date_parser
 
 from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
@@ -481,11 +482,13 @@ class SyncService:
                                 timestamp = record.get('timestamp')
                                 if timestamp:
                                     if isinstance(timestamp, str):
-                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                        timestamp = date_parser.parse(timestamp)
+                                        if timestamp.tzinfo is None:
+                                            timestamp = timestamp.replace(tzinfo=timezone.utc)
                                     elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
-                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                        timestamp = timestamp.replace(tzinfo=timezone.utc)
                                     elif not hasattr(timestamp, 'tzinfo'):
-                                        timestamp = pd.to_datetime(timestamp, utc=True)
+                                        timestamp = datetime.fromisoformat(str(timestamp)).replace(tzinfo=timezone.utc)
                                 
                                 parquet_record = {
                                     'activity_id': int(activity_id),
@@ -699,8 +702,8 @@ class SyncService:
             hrv_df = self.storage.get_hrv_data()
             if hrv_df is not None and not hrv_df.empty:
                 # Filtrer eksisterende data til kun det ønskede tidsrommet
-                start_filter = pd.to_datetime(start_date.date(), utc=True)
-                end_filter = pd.to_datetime(end_date.date(), utc=True)
+                start_filter = datetime.combine(start_date.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
+                end_filter = datetime.combine(end_date.date(), datetime.min.time()).replace(tzinfo=timezone.utc)
                 filtered_hrv_df = hrv_df[(hrv_df.index >= start_filter) & (hrv_df.index <= end_filter)]
                 existing_dates = set(filtered_hrv_df.index.to_series().dt.date)
                 logger.info(f"Fant {len(existing_dates)} eksisterende HRV-datoer innenfor det ønskede tidsrommet.")
@@ -879,11 +882,13 @@ class SyncService:
                 timestamp = record.get('timestamp')
                 if timestamp:
                     if isinstance(timestamp, str):
-                        timestamp = pd.to_datetime(timestamp, utc=True)
+                        timestamp = date_parser.parse(timestamp)
+                        if timestamp.tzinfo is None:
+                            timestamp = timestamp.replace(tzinfo=timezone.utc)
                     elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
-                        timestamp = pd.to_datetime(timestamp, utc=True)
+                        timestamp = timestamp.replace(tzinfo=timezone.utc)
                     elif not hasattr(timestamp, 'tzinfo'):
-                        timestamp = pd.to_datetime(timestamp, utc=True)
+                        timestamp = datetime.fromisoformat(str(timestamp)).replace(tzinfo=timezone.utc)
                 
                 parquet_record = {
                     'activity_id': int(activity_id),
@@ -937,8 +942,7 @@ class SyncService:
             if activity_ids is None:
                 # Finn aktiviteter som ikke har FIT-data i parquet-filen ELLER i database
                 try:
-                    import pandas as pd
-                    existing_parquet_df = pd.read_parquet('data/activity_details.parquet')
+                    existing_parquet_df = pl.read_parquet('data/activity_details.parquet')
                     existing_fit_activity_ids = set(existing_parquet_df['activity_id'].unique())
                 except:
                     existing_fit_activity_ids = set()
@@ -1016,11 +1020,9 @@ class SyncService:
             return {"status": "Feil", "message": "Kunne ikke initialisere Garmin-klient"}
 
         try:
-            import pandas as pd
-            
             # Finn eksisterende FIT-data
             try:
-                existing_parquet_df = pd.read_parquet('data/activity_details.parquet')
+                existing_parquet_df = pl.read_parquet('data/activity_details.parquet')
                 existing_fit_activity_ids = set(existing_parquet_df['activity_id'].unique())
             except:
                 existing_fit_activity_ids = set()

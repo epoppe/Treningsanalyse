@@ -7,10 +7,19 @@ class Activity(Base):
     
     # Sammensatte indekser for ytelse
     __table_args__ = (
+        # Eksisterende indekser
         Index('idx_start_time_activity_type', 'start_time', 'activity_type_id'),
         Index('idx_duration_distance', 'duration', 'distance'),
         Index('idx_epoc_tss', 'epoc', 'training_stress_score'),
         Index('idx_start_time_desc', 'start_time'),  # For DESC ordering
+        
+        # Nye indekser for bulk operations og queries
+        Index('idx_activity_type_start_time', 'activity_type_id', 'start_time'),  # For type-filtrerte queries
+        Index('idx_start_time_range', 'start_time', 'end_time'),  # For tidsperiode-queries
+        Index('idx_power_null', 'average_power'),  # For å finne aktiviteter som mangler power
+        Index('idx_tss_null', 'training_stress_score'),  # For å finne aktiviteter som mangler TSS
+        Index('idx_vo2max', 'vo2_max'),  # For VO2max queries
+        Index('idx_distance_duration', 'distance', 'duration', 'start_time'),  # Composite for statistikk
     )
 
     # Primærnøkkel - bruker Garmin activity ID

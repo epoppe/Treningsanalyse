@@ -158,8 +158,11 @@ def get_activities(
     try:
         logger.info(f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset}, since: {since})...")
         
-        # Bygg query
-        query = db.query(Activity).options(joinedload(Activity.activity_type))
+        # Bygg query med optimized loading
+        from sqlalchemy.orm import selectinload
+        query = db.query(Activity).options(
+            selectinload(Activity.activity_type),  # Bedre enn joinedload for one-to-many
+        )
         
         # Legg til since filter hvis gitt
         if since:

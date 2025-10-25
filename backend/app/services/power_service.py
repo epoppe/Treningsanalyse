@@ -1,5 +1,5 @@
 import math
-import pandas as pd
+import polars as pl
 import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
@@ -137,26 +137,33 @@ class PowerService:
                 logger.warning(f"Mangler nødvendige kolonner for power-beregning: {required_columns}")
                 raise HTTPException(status_code=404, detail="Missing required data columns for power calculation")
             
+            # Konverter til Polars hvis det er pandas (for kompatibilitet)
+            if hasattr(details_df, 'to_dict'):  # pandas DataFrame
+                details_df = pl.from_pandas(details_df)
+            
             # Filtrer ut rader med gyldig speed og timestamp data
-            valid_data = details_df.dropna(subset=['speed', 'timestamp'])
-            valid_data = valid_data[(valid_data['speed'] > 0)]
+            valid_data = details_df.filter(
+                (pl.col('speed').is_not_null()) &
+                (pl.col('timestamp').is_not_null()) &
+                (pl.col('speed') > 0)
+            )
             
             if len(valid_data) < 10:
                 logger.warning(f"Ikke nok datapunkter for power-beregning: {len(valid_data)}")
                 raise HTTPException(status_code=404, detail="Insufficient data points for power calculation")
             
             # Sorter etter timestamp
-            valid_data = valid_data.sort_values('timestamp')
+            valid_data = valid_data.sort('timestamp')
             
             # Beregn power for hvert datapunkt
             power_values = []
             prev_speed = 0.0
             
-            for idx, row in valid_data.iterrows():
+            for row in valid_data.iter_rows(named=True):
                 speed = row['speed']
-                grade = row.get('grade', 0.0) if pd.notna(row.get('grade')) else 0.0
-                vo = row.get('vertical_oscillation', 0.0) if pd.notna(row.get('vertical_oscillation')) else 0.0
-                gct = row.get('stance_time', 0.0) if pd.notna(row.get('stance_time')) else 0.0
+                grade = row.get('grade', 0.0) if row.get('grade') is not None else 0.0
+                vo = row.get('vertical_oscillation', 0.0) if row.get('vertical_oscillation') is not None else 0.0
+                gct = row.get('stance_time', 0.0) if row.get('stance_time') is not None else 0.0
                 
                 power = self.running_power(mass_kg, speed, prev_speed, grade, vo, gct)
                 power_values.append(power)
