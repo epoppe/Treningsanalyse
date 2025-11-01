@@ -111,3 +111,8 @@ class CacheHeadersMiddleware(BaseHTTPMiddleware):
         # Default: Kort cache for alle andre endpoints
         return {'max-age': 60, 'public': False}  # 1 minutt default
 
+
+
+
+
+

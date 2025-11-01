@@ -14,22 +14,13 @@ const NavContainer = styled.div`
   display: flex;
   justify-content: flex-start;
   align-items: center;
-  gap: 4rem;
   padding-left: 1rem;
-`;
-
-const Logo = styled.span`
-  color: white;
-  font-size: 2rem;
-  font-weight: bold;
-  line-height: 1;
-  display: flex;
-  align-items: center;
 `;
 
 const NavLinks = styled.div`
   display: flex;
-  gap: 2rem;
+  gap: 1.5rem;
+  flex-wrap: wrap;
 `;
 
 const NavLink = styled(Link)<{ $active?: boolean }>`
@@ -55,7 +46,6 @@ export default function Navbar() {
   return (
     <Nav>
       <NavContainer>
-        <Logo>TreningsApp</Logo>
         <NavLinks>
           <NavLink href="/" prefetch={false} onClick={(e) => hardNavigate(e, '/') } $active={pathname === '/'}>
             Aktiviteter
@@ -69,6 +59,12 @@ export default function Navbar() {
           <NavLink href="/hrv" prefetch={false} onClick={(e) => hardNavigate(e, '/hrv') } $active={pathname === '/hrv'}>
             HRV
           </NavLink>
+          <NavLink href="/vo2max" prefetch={false} onClick={(e) => hardNavigate(e, '/vo2max') } $active={pathname === '/vo2max'}>
+            VO2Max
+          </NavLink>
+          <NavLink href="/stress" prefetch={false} onClick={(e) => hardNavigate(e, '/stress') } $active={pathname === '/stress'}>
+            Stress
+          </NavLink>
           <NavLink href="/daglig-readiness" prefetch={false} onClick={(e) => hardNavigate(e, '/daglig-readiness') } $active={pathname === '/daglig-readiness'}>
             Daglig Readiness
           </NavLink>
@@ -77,6 +73,9 @@ export default function Navbar() {
           </NavLink>
           <NavLink href="/sovn" prefetch={false} onClick={(e) => hardNavigate(e, '/sovn') } $active={pathname === '/sovn'}>
             Søvn
+          </NavLink>
+          <NavLink href="/training-status" prefetch={false} onClick={(e) => hardNavigate(e, '/training-status') } $active={pathname === '/training-status'}>
+            Treningstatus
           </NavLink>
           <NavLink href="/training-stress" prefetch={false} onClick={(e) => hardNavigate(e, '/training-stress') } $active={pathname === '/training-stress'}>
             Training Stress Score

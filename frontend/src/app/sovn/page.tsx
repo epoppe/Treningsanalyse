@@ -5,6 +5,7 @@ import styled from 'styled-components';
 import { api } from '../../utils/api';
 import { format, subDays } from 'date-fns';
 import { nb } from 'date-fns/locale';
+import { useSleepData } from '../../hooks/useHealthData';
 import {
   ResponsiveContainer,
   LineChart,
@@ -138,9 +139,6 @@ export default function SovnPage() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
   const [activeFilter, setActiveFilter] = useState<string>('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [days, setDays] = useState<SleepDay[]>([]);
 
   useEffect(() => {
     const end = new Date();
@@ -150,29 +148,17 @@ export default function SovnPage() {
     setActiveFilter('30d');
   }, []);
 
-  useEffect(() => {
-    if (!startDate || !endDate) return;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Hent fra backend-DB (server-first). Endepunktet vil automatisk persistere manglende dager.
-        let data: any[] = [];
-        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${base}/api/analysis/sleep/range?start_date=${startDate}&end_date=${endDate}`);
-        if (res.ok) {
-          data = await res.json();
-        }
-        const sorted = (data || []).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-        setDays(sorted);
-      } catch (e: any) {
-        setError(e?.message || 'Feil ved henting av søvndata');
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, [startDate, endDate]);
+  // Bruk React Query for data fetching med automatisk caching
+  const { data: sleepData, isLoading: loading, error: queryError } = useSleepData(
+    startDate,
+    endDate,
+    !!startDate && !!endDate
+  );
+
+  const error = queryError ? String(queryError) : null;
+  const days: SleepDay[] = sleepData 
+    ? (sleepData as any[]).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    : [];
 
   const handleQuickFilter = (days: number, name: string) => {
     const end = new Date();

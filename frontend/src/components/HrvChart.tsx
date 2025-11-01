@@ -88,7 +88,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
       }}>
         <p><strong>Dato: {format(parseISO(label), 'dd.MM.yyyy')}</strong></p>
         <p>HRV (natt gj.snitt): <span style={{color: '#e74c3c'}}>{data.last_night_avg}ms</span></p>
-        <p>7-dagers snitt: <span style={{color: '#3498db'}}>{data.rolling_avg_7d?.toFixed(1)}ms</span></p>
+        <p>7-dagers snitt: <span style={{color: '#3b82f6'}}>{data.rolling_avg_7d?.toFixed(1)}ms</span></p>
         <p>Baseline (balansert): {data.baseline_balanced_lower} - {data.baseline_balanced_upper}ms</p>
         {data.status && <p>Status: <span style={{fontWeight: 'bold'}}>{data.status}</span></p>}
       </div>
@@ -245,7 +245,7 @@ export default function HrvChart({ data, title }: HrvChartProps) {
             <Line
               type="monotone"
               dataKey="rolling_avg_7d"
-              stroke="#3498db"
+              stroke="#3b82f6"
               strokeWidth={3}
               dot={false}
               name="7-dagers snitt"

@@ -284,6 +284,15 @@ export interface BodyBatteryByActivityResponse {
 }
 
 export const analysisApi = {
+  getVo2MaxHistory: (startDate?: string, endDate?: string) => {
+    const params = new URLSearchParams();
+    if (startDate) params.append('start_date', startDate);
+    if (endDate) params.append('end_date', endDate);
+    return apiCall('get', `/analysis/vo2max/history?${params.toString()}`);
+  },
+  
+  getTrainingOverview: (days: number = 30) => 
+    apiCall('get', `/analysis/training-overview?days=${days}`),
   getRunningEconomy: (forceRefresh: boolean = false) => apiCall('get', `/analysis/running-economy?force_refresh=${forceRefresh}`),
   getNegativeSplit: (activityId: number) => apiCall('get', `/activities/${activityId}/negative-split`),
   getDecoupling: (activityId: number) => apiCall('get', `/activities/${activityId}/decoupling`),

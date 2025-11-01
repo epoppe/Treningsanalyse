@@ -2,7 +2,7 @@ import asyncio
 import logging
 import traceback
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -14,17 +14,21 @@ from pydantic import BaseModel
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Prøv å importere garth's HRV- og Body Battery-klasser hvis tilgjengelige
+# Prøv å importere garth's HRV-, Body Battery- og Stress-klasser hvis tilgjengelige
 try:
     DailyHRV = getattr(garth, 'DailyHRV', None)
     HRVData = getattr(garth, 'HRVData', None)
     DailyBodyBatteryStress = getattr(garth, 'DailyBodyBatteryStress', None)
     BodyBatteryDetail = getattr(garth, 'BodyBatteryData', None)
+    DailyStress = getattr(garth, 'DailyStress', None)
+    WeeklyStress = getattr(garth, 'WeeklyStress', None)
 except ImportError as e:
     DailyHRV = None
     HRVData = None
     DailyBodyBatteryStress = None
     BodyBatteryDetail = None
+    DailyStress = None
+    WeeklyStress = None
     logger.warning(f"Kunne ikke importere HRV-klasser fra garth: {e} - bruker kun API-kall")
 
 # Pydantic-modeller for HRV-data
@@ -463,6 +467,42 @@ class GarminClient:
 
     # Nye metoder basert på Garmy metrics
 
+    async def get_training_status(self) -> Optional[Dict[str, Any]]:
+        """Henter treningstatus fra Garmin Connect."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente treningstatus.")
+            return None
+        
+        try:
+            logger.info("Henter treningstatus...")
+            
+            # Hent treningsstatistikk fra Garmin API
+            stats_data = await asyncio.to_thread(
+                garth.connectapi,
+                "/userstats-service/stats"
+            )
+            
+            logger.info(f"Stats data type: {type(stats_data)}")
+            logger.info(f"Stats data keys (if dict): {list(stats_data.keys())[:10] if isinstance(stats_data, dict) else 'Not a dict'}")
+            
+            if isinstance(stats_data, dict):
+                logger.info(f"Hentet treningstatus-data med {len(stats_data)} nøkler")
+                return stats_data
+            else:
+                logger.warning(f"Uventet data-type: {type(stats_data)}")
+                return None
+                
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info("Ingen treningstatus-data funnet (404)")
+                return None
+            else:
+                logger.error(f"HTTP-feil ved henting av treningstatus: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av treningstatus: {e}", exc_info=True)
+            return None
+
     async def get_body_battery_data(self, date) -> Optional[Dict[str, Any]]:
         """Henter body battery data for en spesifikk dato."""
         if not self.is_authenticated():
@@ -885,17 +925,63 @@ class GarminClient:
             logger.error(f"Feil ved henting av søvndata range: {e}")
             return []
 
-    async def get_stress_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+    async def get_stress_data(self, date_input) -> Optional[Dict[str, Any]]:
         """Henter stressdata for en spesifikk dato."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente stressdata.")
             return None
         
         try:
-            date_str = date.strftime("%Y-%m-%d")
+            # Håndter både date og datetime
+            if isinstance(date_input, datetime):
+                date_obj = date_input.date()
+            elif isinstance(date_input, date):
+                date_obj = date_input
+            else:
+                # Fallback - prøv å hente date-attribute
+                date_obj = date_input.date() if hasattr(date_input, 'date') else date_input
+            
+            date_str = date_obj.strftime("%Y-%m-%d") if hasattr(date_obj, 'strftime') else str(date_obj)
             logger.info(f"Henter stressdata for {date_str}")
             
-            # Hent stressdata fra Garmin Connect API (pass params som keyword for å unngå dict.upper-feil)
+            # Prøv først garth.DailyStress hvis tilgjengelig
+            if DailyStress:
+                try:
+                    logger.debug(f"Prøver DailyStress.list for {date_str}")
+                    stress_list = await asyncio.to_thread(DailyStress.list, date_str, 1)
+                    
+                    if stress_list and len(stress_list) > 0:
+                        stress = stress_list[0]
+                        
+                        # Konverter sekunder til minutter
+                        def to_minutes(seconds):
+                            return round(seconds / 60) if seconds else None
+                        
+                        result = {
+                            "date": date_str,
+                            "stress_time": to_minutes(getattr(stress, 'activity_stress_duration', None) or getattr(stress, 'low_stress_duration', 0) + getattr(stress, 'medium_stress_duration', 0) + getattr(stress, 'high_stress_duration', 0)),
+                            "rest_time": to_minutes(getattr(stress, 'rest_stress_duration', None)),
+                            "low_stress_time": to_minutes(getattr(stress, 'low_stress_duration', None)),
+                            "medium_stress_time": to_minutes(getattr(stress, 'medium_stress_duration', None)),
+                            "high_stress_time": to_minutes(getattr(stress, 'high_stress_duration', None)),
+                            "stress_level": getattr(stress, 'overall_stress_level', None),
+                            "total_time": None  # Beregnes på klientsiden
+                        }
+                        
+                        # Beregn total_time
+                        stress_time = result['stress_time'] or 0
+                        rest_time = result['rest_time'] or 0
+                        result['total_time'] = stress_time + rest_time
+                        
+                        logger.info(f"Hentet stressdata via DailyStress for {date_str}: {result}")
+                        return result
+                    else:
+                        logger.debug(f"DailyStress.list returnerte ingen data for {date_str}")
+                except Exception as e:
+                    logger.debug(f"Feil ved bruk av DailyStress: {e}")
+            
+            # Fallback til API-kall hvis DailyStress ikke fungerer
+            logger.debug(f"Prøver API-kall for {date_str}")
             stress_data = await asyncio.to_thread(
                 garth.connectapi,
                 f"/usersummary-service/usersummary/daily/{garth.client.username}",
@@ -922,7 +1008,7 @@ class GarminClient:
                     "total_time": (stress_time or 0) + (rest_time or 0)
                 }
                 
-                logger.info(f"Hentet stressdata for {date_str}: {result}")
+                logger.info(f"Hentet stressdata via API for {date_str}: {result}")
                 return result
             else:
                 logger.info(f"Ingen stressdata funnet for {date_str}")
@@ -938,19 +1024,37 @@ class GarminClient:
             logger.error(f"Feil ved henting av stressdata for {date_str}: {e}")
             return None
 
-    async def get_stress_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:
+    async def get_stress_range(self, start_date, end_date) -> List[Dict[str, Any]]:
         """Henter stressdata for en datoperiode."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente stressdata.")
             return []
         
         try:
-            logger.info(f"Henter stressdata fra {start_date.date()} til {end_date.date()}")
+            # Konverter til datetime hvis nødvendig
+            if isinstance(start_date, date) and not isinstance(start_date, datetime):
+                start_datetime = datetime.combine(start_date, datetime.min.time())
+            elif isinstance(start_date, datetime):
+                start_datetime = start_date
+            else:
+                start_datetime = start_date
+            
+            if isinstance(end_date, date) and not isinstance(end_date, datetime):
+                end_datetime = datetime.combine(end_date, datetime.max.time())
+            elif isinstance(end_date, datetime):
+                end_datetime = end_date
+            else:
+                end_datetime = end_date
+            
+            # Logg med sikker datohåndtering
+            start_date_str = start_datetime.date().isoformat() if isinstance(start_datetime, datetime) else str(start_datetime)
+            end_date_str = end_datetime.date().isoformat() if isinstance(end_datetime, datetime) else str(end_datetime)
+            logger.info(f"Henter stressdata fra {start_date_str} til {end_date_str}")
             
             all_data = []
-            current_date = start_date
+            current_date = start_datetime
             
-            while current_date <= end_date:
+            while current_date <= end_datetime:
                 data = await self.get_stress_data(current_date)
                 if data:
                     all_data.append(data)
@@ -962,7 +1066,7 @@ class GarminClient:
             return all_data
             
         except Exception as e:
-            logger.error(f"Feil ved henting av stressdata range: {e}")
+            logger.error(f"Feil ved henting av stressdata range: {e}", exc_info=True)
             return []
 
     async def get_hrv_range(self, start_date: datetime, end_date: datetime) -> List[Dict[str, Any]]:

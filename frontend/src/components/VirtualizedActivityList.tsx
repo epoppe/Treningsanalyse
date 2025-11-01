@@ -1,22 +1,71 @@
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import styled from 'styled-components';
 import { Activity } from '../types';
-import { activitiesApi } from '../utils/api';
 import ActivityCard from './ActivityCard';
+import { activitiesApi } from '../utils/api';
 
 const ActivityContainer = styled.div`
   padding: 0.5rem;
 `;
 
-interface ActivityListProps {
+const VirtualScrollContainer = styled.div`
+  height: 100vh;
+  overflow-auto;
+`;
+
+const VirtualList = styled.div<{ height: number }>`
+  height: ${props => props.height}px;
+  width: 100%;
+  position: relative;
+`;
+
+const VirtualRow = styled.div<{ start: number }>`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  transform: translateY(${props => props.start}px);
+`;
+
+const EmptyState = styled.div`
+  text-align: center;
+  padding: 2rem;
+  color: #666;
+  
+  h3 {
+    margin-bottom: 0.5rem;
+  }
+  
+  p {
+    margin: 0;
+  }
+`;
+
+const LoadingIndicator = styled.div`
+  text-align: center;
+  padding: 1rem;
+  color: #666;
+`;
+
+interface VirtualizedActivityListProps {
   activities: Activity[];
 }
 
-const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
+const VirtualizedActivityList: React.FC<VirtualizedActivityListProps> = ({ activities }) => {
+  const parentRef = useRef<HTMLDivElement>(null);
   const [hrvData, setHrvData] = useState<{[activityId: string]: number | null}>({});
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
+
+  // Setup virtualizer
+  const rowVirtualizer = useVirtualizer({
+    count: activities.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 250, // Estimated height of each activity card
+    overscan: 5, // Render 5 extra items above and below viewport for smooth scrolling
+  });
 
   // Fetch HRV data progressively
   useEffect(() => {
@@ -111,31 +160,49 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
   if (activities.length === 0) {
     return (
       <ActivityContainer>
-        <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
+        <EmptyState>
           <h3>Ingen aktiviteter å vise</h3>
           <p>Velg aktivitetstyper fra filteret ovenfor for å se aktiviteter.</p>
-        </div>
+        </EmptyState>
       </ActivityContainer>
     );
   }
 
+  const items = rowVirtualizer.getVirtualItems();
+
   return (
     <ActivityContainer>
-      {activities.map((activity) => {
-        const hrvValue = hrvData[activity.activityId];
-
-        return (
-          <ActivityCard 
-            key={activity.activityId}
-            activity={activity}
-            hrvValue={hrvValue}
-            isLoadingHrv={isLoadingHrv}
-          />
-        );
-      })}
+      <VirtualScrollContainer ref={parentRef}>
+        <VirtualList height={rowVirtualizer.getTotalSize()}>
+          {items.map((virtualRow) => {
+            const activity = activities[virtualRow.index];
+            const hrvValue = hrvData[activity.activityId];
+            
+            return (
+              <VirtualRow
+                key={virtualRow.key}
+                start={virtualRow.start}
+                ref={rowVirtualizer.measureElement}
+                data-index={virtualRow.index}
+              >
+                <ActivityCard
+                  activity={activity}
+                  hrvValue={hrvValue}
+                  isLoadingHrv={isLoadingHrv}
+                />
+              </VirtualRow>
+            );
+          })}
+        </VirtualList>
+      </VirtualScrollContainer>
+      
+      {isLoadingHrv && (
+        <LoadingIndicator>
+          Laster HRV-data...
+        </LoadingIndicator>
+      )}
     </ActivityContainer>
   );
 };
 
-// Wrap component with React.memo for performance optimization
-export default memo(ActivityList); 
+export default VirtualizedActivityList;

@@ -717,3 +717,163 @@ async def get_body_battery_statistics(
     except Exception as e:
         logger.error(f"Feil ved henting av Body Battery-statistikk: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/vo2max/history")
+async def get_vo2max_history(
+    start_date: Optional[date] = Query(None, description="Startdato (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Sluttdato (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    """Henter VO2Max historikk fra aktiviteter."""
+    try:
+        from sqlalchemy.orm import joinedload
+        from datetime import datetime as dt
+        from ..database.models import ActivityType
+        
+        # Bygg query med eager loading
+        query = db.query(Activity).options(
+            joinedload(Activity.activity_type)
+        ).filter(
+            Activity.vo2_max.isnot(None),
+            Activity.vo2_max > 0
+        )
+        
+        # Filtrer på aktivitetstype - kun løping (ikke treadmill)
+        query = query.join(ActivityType).filter(
+            ActivityType.type_key.in_(['running', 'trail_running'])
+        ).filter(
+            ~ActivityType.type_key.like('%treadmill%')
+        )
+        
+        if start_date:
+            start_datetime = dt.combine(start_date, dt.min.time())
+            query = query.filter(Activity.start_time >= start_datetime)
+        
+        if end_date:
+            end_datetime = dt.combine(end_date, dt.max.time())
+            query = query.filter(Activity.start_time <= end_datetime)
+        
+        activities = query.order_by(Activity.start_time).all()
+        
+        result = []
+        for act in activities:
+            # Filtrer bort treadmill i Python også for sikkerhet
+            if act.activity_type and 'treadmill' not in act.activity_type.type_key.lower():
+                result.append({
+                    "date": act.start_time.date().isoformat(),
+                    "datetime": act.start_time.isoformat(),
+                    "vo2max": act.vo2_max,
+                    "activity_id": act.activity_id,
+                    "activity_name": act.activity_name,
+                    "distance": act.distance,
+                    "duration": act.duration,
+                    "average_pace": act.average_pace,
+                    "average_heart_rate": act.average_heart_rate
+                })
+        
+        logger.info(f"Returnerer {len(result)} VO2Max-målinger for perioden")
+        return {
+            "vo2max_history": result,
+            "total_records": len(result)
+        }
+        
+    except Exception as e:
+        logger.error(f"Feil ved henting av VO2Max historikk: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/training-overview")
+async def get_training_overview(
+    days: int = Query(30, description="Antall dager å analysere"),
+    db: Session = Depends(get_db)
+):
+    """Henter treningsoversikt basert på tilgjengelige data."""
+    try:
+        logger.info(f"Henter treningsoversikt for siste {days} dager...")
+        from datetime import datetime as dt, timedelta
+        from ..database.models import HRV, BodyBattery, Stress
+        from sqlalchemy import func
+        
+        end_date = dt.now().date()
+        start_date = end_date - timedelta(days=days)
+        
+        # Hent VO2Max trend
+        vo2max_activities = db.query(Activity).filter(
+            Activity.vo2_max.isnot(None),
+            Activity.vo2_max > 0,
+            Activity.start_time >= dt.combine(start_date, dt.min.time())
+        ).order_by(Activity.start_time.desc()).limit(10).all()
+        
+        vo2max_data = []
+        for act in vo2max_activities:
+            vo2max_data.append({
+                "date": act.start_time.date().isoformat(),
+                "vo2max": act.vo2_max,
+                "activity_name": act.activity_name
+            })
+        
+        # Beregn gjennomsnittsverdig VO2Max
+        avg_vo2max = sum([d["vo2max"] for d in vo2max_data]) / len(vo2max_data) if vo2max_data else None
+        
+        # Hent treningsfrekvens
+        activity_count = db.query(func.count(Activity.activity_id)).filter(
+            Activity.start_time >= dt.combine(start_date, dt.min.time())
+        ).scalar()
+        
+        # Hent gjennomsnittlig Body Battery
+        avg_body_battery = db.query(func.avg(BodyBattery.max_body_battery)).filter(
+            BodyBattery.date >= start_date
+        ).scalar()
+        
+        # Hent gjennomsnittlig HRV
+        avg_hrv = db.query(func.avg(HRV.rmssd)).filter(
+            HRV.measurement_date >= start_date
+        ).scalar()
+        
+        # Hent gjennomsnittlig stress
+        avg_stress = db.query(func.avg(Stress.stress_level)).filter(
+            Stress.stress_date >= start_date
+        ).scalar()
+        
+        # Hent total treningstid (i minutter)
+        total_training_time = db.query(func.sum(Activity.duration)).filter(
+            Activity.start_time >= dt.combine(start_date, dt.min.time())
+        ).scalar()
+        total_training_minutes = int(total_training_time / 60) if total_training_time else 0
+        
+        # Hent total distanse (i km)
+        total_distance = db.query(func.sum(Activity.distance)).filter(
+            Activity.start_time >= dt.combine(start_date, dt.min.time())
+        ).scalar()
+        total_distance_km = round(total_distance / 1000, 1) if total_distance else 0
+        
+        result = {
+            "period_days": days,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "vo2max": {
+                "average": round(avg_vo2max, 1) if avg_vo2max else None,
+                "recent_values": vo2max_data,
+                "trend": "improving" if len(vo2max_data) >= 2 and vo2max_data[0]["vo2max"] > vo2max_data[-1]["vo2max"] else "stable"
+            },
+            "training_frequency": {
+                "total_activities": activity_count,
+                "activities_per_week": round(activity_count / (days / 7), 1) if days > 0 else 0
+            },
+            "training_volume": {
+                "total_time_minutes": total_training_minutes,
+                "total_distance_km": total_distance_km,
+                "avg_time_per_week_minutes": round(total_training_minutes / (days / 7), 0) if days > 0 else 0
+            },
+            "recovery_metrics": {
+                "avg_body_battery": round(float(avg_body_battery), 1) if avg_body_battery is not None else None,
+                "avg_hrv": round(float(avg_hrv), 1) if avg_hrv is not None else None,
+                "avg_stress": round(float(avg_stress), 1) if avg_stress is not None else None
+            }
+        }
+        
+        logger.info(f"Treningsoversikt generert for {days} dager")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Feil ved henting av treningsoversikt: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

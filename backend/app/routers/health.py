@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..services.garmin_client import GarminClient
 from ..dependencies import get_garmin_client, get_db, get_data_storage
 from ..storage import DataStorage
-from ..database.models import HRV, Sleep
+from ..database.models import HRV, Sleep, BodyBattery, Stress
 from ..database.models.sync_state import SyncState
 
 logger = logging.getLogger(__name__)
@@ -19,15 +19,91 @@ router = APIRouter()
 async def get_stress_range_endpoint(
     start_date: date = Query(..., description="Startdato (YYYY-MM-DD)"),
     end_date: date = Query(..., description="Sluttdato (YYYY-MM-DD)"),
-    garmin_client: GarminClient = Depends(get_garmin_client)
+    garmin_client: GarminClient = Depends(get_garmin_client),
+    db: Session = Depends(get_db)
 ):
-    """Henter stressdata for en datoperiode."""
-    logger.info(f"Mottok forespørsel om stressdata fra {start_date} til {end_date}")
+    """Henter stressdata for en datoperiode med intelligent database-caching."""
+    logger.info(f"😰 Stress: Forespørsel om stressdata fra {start_date} til {end_date}")
+    
     try:
-        stress_data = await garmin_client.get_stress_range(start_date, end_date)
-        return stress_data
+        # 1. Sjekk hvilke datoer som finnes i database
+        existing_stress = db.query(Stress).filter(
+            Stress.stress_date >= start_date,
+            Stress.stress_date <= end_date
+        ).all()
+        
+        existing_dates = {s.stress_date for s in existing_stress}
+        logger.info(f"💾 Stress: Fant {len(existing_dates)} dager i database")
+        
+        # 2. Finn manglende datoer
+        current = start_date
+        missing_dates = []
+        while current <= end_date:
+            if current not in existing_dates:
+                missing_dates.append(current)
+            current += timedelta(days=1)
+        
+        logger.info(f"📥 Stress: {len(missing_dates)} dager mangler, henter fra Garmin...")
+        
+        # 3. Hent manglende data fra Garmin og lagre i database
+        if missing_dates:
+            for missing_date in missing_dates:
+                try:
+                    stress_data = await garmin_client.get_stress_data(datetime.combine(missing_date, datetime.min.time()))
+                    if stress_data and (stress_data.get('stress_time') or stress_data.get('rest_time')):
+                        # Konverter minutter til sekunder
+                        def to_sec(minutes_val):
+                            if minutes_val is None:
+                                return None
+                            return float(minutes_val) * 60.0
+                        
+                        # Lagre i database
+                        new_stress = Stress(
+                            stress_date=missing_date,
+                            stress_level=stress_data.get('stress_level'),
+                            total_time=to_sec(stress_data.get('total_time')),
+                            stress_time=to_sec(stress_data.get('stress_time')),
+                            rest_time=to_sec(stress_data.get('rest_time')),
+                            low_stress_time=to_sec(stress_data.get('low_stress_time')),
+                            medium_stress_time=to_sec(stress_data.get('medium_stress_time')),
+                            high_stress_time=to_sec(stress_data.get('high_stress_time')),
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow()
+                        )
+                        db.add(new_stress)
+                        logger.debug(f"✅ Stress: Lagret data for {missing_date}")
+                except Exception as e:
+                    logger.debug(f"⚠️ Stress: Ingen data for {missing_date}: {e}")
+            
+            # Commit alle nye stress-records
+            db.commit()
+            logger.info(f"💾 Stress: Lagret nye data i database")
+        
+        # 4. Hent all data fra database (nå komplett)
+        all_stress = db.query(Stress).filter(
+            Stress.stress_date >= start_date,
+            Stress.stress_date <= end_date
+        ).order_by(Stress.stress_date).all()
+        
+        # 5. Returner formatert data (konverter tilbake til minutter)
+        result = []
+        for stress in all_stress:
+            result.append({
+                "date": stress.stress_date.isoformat(),
+                "stress_level": stress.stress_level,
+                "total_time": (stress.total_time / 60.0) if stress.total_time else None,
+                "stress_time": (stress.stress_time / 60.0) if stress.stress_time else None,
+                "rest_time": (stress.rest_time / 60.0) if stress.rest_time else None,
+                "low_stress_time": (stress.low_stress_time / 60.0) if stress.low_stress_time else None,
+                "medium_stress_time": (stress.medium_stress_time / 60.0) if stress.medium_stress_time else None,
+                "high_stress_time": (stress.high_stress_time / 60.0) if stress.high_stress_time else None
+            })
+        
+        logger.info(f"✅ Stress: Returnerer {len(result)} dager med data")
+        return result
+        
     except Exception as e:
-        logger.error(f"Feil ved henting av stressdata: {e}", exc_info=True)
+        logger.error(f"❌ Stress: Feil ved henting: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Intern serverfeil ved henting av stressdata.")
 
 @router.get("/hrv/range", response_model=List[Dict[str, Any]])
@@ -93,15 +169,40 @@ async def get_hrv_range_endpoint(
             HRV.measurement_date <= end_date
         ).order_by(HRV.measurement_date).all()
         
-        # 5. Returner formatert data
+        # 5. Returner formatert data med 7-dagers glidende gjennomsnitt
         result = []
-        for hrv in all_hrv:
+        for i, hrv in enumerate(all_hrv):
             result.append({
                 "date": hrv.measurement_date.isoformat(),
                 "last_night_avg": hrv.rmssd,
+                "last_night_5_min_high": hrv.rmssd,  # Placeholder
                 "measurement_time": hrv.measurement_time.isoformat() if hrv.measurement_time else None,
-                "measurement_type": hrv.measurement_type
+                "measurement_type": hrv.measurement_type,
+                "baseline_balanced_lower": 30.0,  # Placeholder
+                "baseline_balanced_upper": 50.0,  # Placeholder
+                "baseline_low_upper": 40.0,  # Placeholder
+                "status": "normal"  # Placeholder
             })
+        
+        # 6. Beregn 7-dagers glidende gjennomsnitt
+        if len(result) >= 7:
+            for i in range(len(result)):
+                # Ta de siste 7 dagene (inkludert dag i)
+                start_idx = max(0, i - 6)
+                end_idx = i + 1
+                window_data = result[start_idx:end_idx]
+                
+                # Beregn gjennomsnitt for de 7 dagene
+                valid_values = [d['last_night_avg'] for d in window_data if d['last_night_avg'] is not None]
+                if len(valid_values) >= 4:  # Minimum 4 gyldige verdier for å beregne snitt
+                    rolling_avg = sum(valid_values) / len(valid_values)
+                    result[i]['rolling_avg_7d'] = round(rolling_avg, 1)
+                else:
+                    result[i]['rolling_avg_7d'] = None
+        else:
+            # Hvis mindre enn 7 dager, sett rolling_avg_7d til None
+            for data in result:
+                data['rolling_avg_7d'] = None
         
         logger.info(f"✅ HRV: Returnerer {len(result)} dager med data")
         return result

@@ -130,3 +130,8 @@ async def get_bulk_status(
         "recommendation": "Bruk /bulk/calculate-power eller /bulk/calculate-tss for å beregne manglende verdier"
     }
 
+
+
+
+
+

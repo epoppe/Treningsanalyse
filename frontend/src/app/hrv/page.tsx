@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import styled from 'styled-components';
 import HrvChart from '../../components/HrvChart';
 import { api, BASE_URL } from '../../utils/api';
+import { useHrvData } from '../../hooks/useHealthData';
 
 const PageContainer = styled.div`
   padding: 2rem;
@@ -110,9 +111,6 @@ interface HrvResponse {
 }
 
 export default function HrvPage() {
-  const [hrvData, setHrvData] = useState<HrvData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -130,11 +128,17 @@ export default function HrvPage() {
     setEndDate(today.toISOString().split('T')[0]);
   }, []);
 
+  // Bruk React Query for å hente HRV-data med automatisk caching
+  const { data, isLoading: loading, error: queryError } = useHrvData(startDate, endDate, !!startDate && !!endDate);
+  
+  const error = queryError ? String(queryError) : null;
+  
   const fetchHrvData = async (start?: string, end?: string) => {
+    // Dette er nå håndtert av React Query, men vi beholder funksjonen for kompatibilitet
+    if (start) setStartDate(start);
+    if (end) setEndDate(end);
+    
     try {
-      setLoading(true);
-      setError(null);
-      
       const params = new URLSearchParams();
       if (start) params.append('start_date', start);
       if (end) params.append('end_date', end);
@@ -145,38 +149,17 @@ export default function HrvPage() {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      const data: HrvResponse = await response.json();
+      const responseData: HrvResponse = await response.json();
       
-      console.log('HRV API Response:', data);
-      console.log('HRV data length:', data.hrv_data?.length);
-      
-      if (data.hrv_data && data.hrv_data.length > 0) {
-        // Normaliser datofelt til kun dato-del (fjern timestamp)
-        const normalizedData = data.hrv_data.map(item => ({
-          ...item,
-          date: item.date.split('T')[0] // Fjern timestamp-del fra dato
-        }));
-        console.log('Normalized HRV data:', normalizedData);
-        setHrvData(normalizedData);
-      } else {
-        setHrvData([]);
-        setError('Ingen HRV-data funnet for valgt periode. HRV-data er kun tilgjengelig fra 2023 og fremover.');
-      }
+      console.log('HRV API Response:', responseData);
+      console.log('HRV data length:', responseData.hrv_data?.length);
     } catch (err) {
       console.error('Feil ved henting av HRV-data:', err);
-      setError('Det oppstod en feil ved henting av HRV-data. Vennligst prøv igjen.');
-      setHrvData([]);
-    } finally {
-      setLoading(false);
     }
   };
 
-  // Hent data når komponenten laster og når datoer er satt
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchHrvData(startDate, endDate);
-    }
-  }, [startDate, endDate]); // Avhengig av startDate og endDate
+  // Data kommer nå fra React Query
+  const hrvData = data ? (data as any).hrv_data || [] : [];
 
   const handleFilterSubmit = () => {
     if (startDate && endDate) {
@@ -241,16 +224,17 @@ export default function HrvPage() {
         </ErrorContainer>
       )}
 
-      {!error && hrvData.length > 0 && (
+      {!loading && !error && hrvData && hrvData.length > 0 && (
         <HrvChart 
           data={hrvData} 
           title="HRV (Heart Rate Variability) over tid"
+          subtitle={`Viser ${hrvData.length} målinger`}
         />
       )}
 
-      {!error && hrvData.length === 0 && !loading && (
+      {!loading && !error && (!hrvData || hrvData.length === 0) && (
         <ErrorContainer>
-          Ingen HRV-data funnet. HRV-data er kun tilgjengelig fra 2023 og fremover.
+          Ingen HRV-data funnet for valgt periode. HRV-data er kun tilgjengelig fra 2023 og fremover.
         </ErrorContainer>
       )}
     </PageContainer>
