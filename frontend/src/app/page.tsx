@@ -239,10 +239,33 @@ export default function Home() {
 
 
   useEffect(() => {
-    // Sett alle aktivitetstyper som valgt kun første gang når aktiviteter lastes
+    // Sett standard aktivitetstyper som valgt kun første gang når aktiviteter lastes
+    // Standard: Løping, Tredemølle løping, Trail running og Terrengløp (hvis den finnes)
     if (loadedCount > 0 && !hasInitializedTypes && activityTypes.length > 0) {
-      const allTypes = activityTypes.map(([typeKey]) => typeKey);
-      setSelectedActivityTypes(allTypes);
+      const defaultTypes = ['running', 'treadmill_running', 'trail_running'];
+      
+      // Finn også terrengløp-varianten (kan ha forskjellige navn/typeKeys)
+      const terrenglopTypes = activityTypes
+        .filter(([typeKey, readableName]) => 
+          readableName.toLowerCase().includes('terrengløp') || 
+          readableName.toLowerCase().includes('terrenglop') ||
+          typeKey.toLowerCase().includes('terrenglop') ||
+          typeKey.toLowerCase().includes('terrengløp')
+        )
+        .map(([typeKey]) => typeKey);
+      
+      // Kombiner default types med terrengløp-varianten
+      const allDefaultTypes = [...defaultTypes, ...terrenglopTypes];
+      
+      // Filtre for å bare inkludere typer som faktisk finnes i aktivitetene
+      const availableDefaultTypes = allDefaultTypes.filter(type => 
+        activityTypes.some(([typeKey]) => typeKey === type)
+      );
+      
+      // Fjern duplikater
+      const uniqueDefaultTypes = Array.from(new Set(availableDefaultTypes));
+      
+      setSelectedActivityTypes(uniqueDefaultTypes);
       setHasInitializedTypes(true);
     }
   }, [loadedCount, activityTypes, hasInitializedTypes]);

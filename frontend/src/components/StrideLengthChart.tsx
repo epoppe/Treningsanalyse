@@ -113,13 +113,12 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
   }
 
   const dates = activitiesWithStrideLength.map(a => parseISO(a.startTimeLocal));
-  const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
   
   const showPerActivity = timeFilter === '3m';
-  const groupByMonth = !showPerActivity && yearSpan >= 2;
+  const groupByWeek = !showPerActivity; // Alltid ukeverdier når ikke per aktivitet
 
   let chartData;
-  let groupingTitle = showPerActivity ? '(per økt)' : (groupByMonth ? '(per måned)' : '(per uke)');
+  let groupingTitle = showPerActivity ? '(per økt)' : '(per uke)';
   
   const calculateAverage = (data: number[]) => {
     if (data.length === 0) return 0;
@@ -135,48 +134,8 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
         activityId: activity.activityId
       }))
       .sort((a, b) => (a.activityId && b.activityId) ? a.activityId - b.activityId : 0);
-  } else if (groupByMonth) {
-    const monthlyDataMap = activitiesWithStrideLength.reduce((acc, activity) => {
-      const date = parseISO(activity.startTimeLocal);
-      const year = getYear(date);
-      const month = getMonth(date);
-      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      
-      if (!acc[monthKey]) {
-        acc[monthKey] = {
-          date: format(startOfMonth(date), 'MMM yy'),
-          groupKey: monthKey,
-          year: year,
-          values: []
-        };
-      }
-      acc[monthKey].values.push(activity.avgStrideLength || 0);
-      return acc;
-    }, {} as Record<string, any>);
-
-    const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
-
-    chartData = allMonths.map(monthStart => {
-      const year = getYear(monthStart);
-      const month = getMonth(monthStart);
-      const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      
-      if (monthlyDataMap[monthKey] && monthlyDataMap[monthKey].values.length > 0) {
-        return {
-          date: format(monthStart, 'MMM yy'),
-          groupKey: monthKey,
-          year: year,
-          strideLength: calculateAverage(monthlyDataMap[monthKey].values)
-        };
-      }
-      return {
-        date: format(monthStart, 'MMM yy'),
-        groupKey: monthKey,
-        year: year,
-        strideLength: null
-      };
-    });
   } else {
+    // Alltid ukeverdier
     const weeklyDataMap = activitiesWithStrideLength.reduce((acc, activity) => {
       const date = parseISO(activity.startTimeLocal);
       const week = getISOWeek(date);

@@ -10,7 +10,6 @@ import { useSyncListener } from '../../hooks/useSyncListener';
 
 import RunningEconomyChart from '../../components/RunningEconomyChart';
 import PowerPerHeartRateChart from '../../components/PowerPerHeartRateChart';
-import VO2MaxChart from '../../components/VO2MaxChart';
 import CadenceChart from '../../components/CadenceChart';
 import StrideLengthChart from '../../components/StrideLengthChart';
 
@@ -179,11 +178,6 @@ export default function RunningEconomyPage() {
           <StrideLengthChart
             activities={runningActivities}
             title="Skrittlengde"
-            timeFilter={timeFilter}
-          />
-          <VO2MaxChart
-            activities={runningActivities}
-            title="VO2Max"
             timeFilter={timeFilter}
           />
           <RunningEconomyTable activities={runningActivities} />

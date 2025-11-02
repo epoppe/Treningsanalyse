@@ -32,6 +32,7 @@ async def get_training_readiness(
     """
     try:
         readiness = service.calculate_training_readiness(target_date)
+        logger.info(f"DEBUG - Readiness components: {readiness.get('components', {})}")
         return readiness
     except Exception as e:
         logger.error(f"Feil ved henting av training readiness: {e}")

@@ -140,17 +140,35 @@ export default function DagligReadinessPage() {
 
           <div className="bg-white rounded-xl p-6 shadow-lg">
             <h3 className="text-xl font-semibold mb-4 text-gray-800">Komponenter</h3>
-            <div className="grid grid-cols-2 gap-2 mt-4">
-              {Object.entries(readinessData.components).map(([component, score]) => (
-                <div key={component} className="flex justify-between p-2 bg-gray-50 rounded">
-                  <span className="text-sm text-gray-700 capitalize">
-                    {component.replace('_', ' ')}
-                  </span>
-                  <span className="text-sm font-semibold text-gray-800">
-                    {Math.round(score as number)}
-                  </span>
+            <div className="grid grid-cols-1 gap-2 mt-4">
+              {Object.entries(readinessData.components).map(([component, score]) => {
+                const componentNames: {[key: string]: string} = {
+                  'sleep_score': 'Søvn (30% vekt)',
+                  'hrv_score': 'HRV (20% vekt)',
+                  'form_score': 'Form/TSB (50% vekt)'
+                };
+                return (
+                  <div key={component} className="flex justify-between p-2 bg-gray-50 rounded">
+                    <span className="text-sm text-gray-700">
+                      {componentNames[component] || component.replace('_', ' ')}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-800">
+                      {Math.round(score as number)}
+                    </span>
+                  </div>
+                );
+              })}
+              {readinessData.details?.form_value !== undefined && (
+                <div className="mt-2 p-2 bg-blue-50 rounded text-xs text-gray-600">
+                  <strong>TSB-verdi:</strong> {readinessData.details.form_value.toFixed(1)}
+                  {' '}
+                  {readinessData.details.form_value < -15 ? '🔴 Høy fatigue' :
+                   readinessData.details.form_value < -5 ? '🟡 Moderat fatigue' :
+                   readinessData.details.form_value < 5 ? '🟢 Balansert' :
+                   readinessData.details.form_value < 15 ? '🟢 Godt restituert' :
+                   '🟢 Meget frisk'}
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
@@ -162,7 +180,7 @@ export default function DagligReadinessPage() {
             Dato: {formatDate(readinessData.date)}
           </h3>
           <p className="text-gray-600">
-            Daglig readiness score beregnet basert på søvn, HRV, aktivitet og recovery data fra de siste 7 dagene.
+            Daglig readiness score beregnet basert på søvn (40%), HRV (35%), og Form/TSB (25%) - Training Stress Balance fra de siste 60 dagene.
           </p>
         </div>
       )}

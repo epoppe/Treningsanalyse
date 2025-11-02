@@ -11,13 +11,13 @@ interface TrainingReadinessData {
   components: {
     sleep_score: number;
     hrv_score: number;
-    activity_score: number;
-    recovery_score: number;
+    form_score: number;
   };
   details: {
     sleep_data: any[];
     hrv_data: any[];
     activity_data: any[];
+    form_value?: number;
   };
 }
 
@@ -132,9 +132,13 @@ const StatusBadge = styled.span<{ status: string }>`
 
 const ComponentsGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-top: 20px;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
 const ComponentCard = styled.div`
@@ -156,6 +160,26 @@ const ComponentScore = styled.div`
   font-size: 1.5rem;
   font-weight: bold;
   color: #1f2937;
+`;
+
+const ComponentWeight = styled.div`
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-top: 4px;
+`;
+
+const FormValueInfo = styled.div`
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  font-size: 0.75rem;
+  color: #6b7280;
+`;
+
+const FormExplanation = styled.div`
+  margin-top: 4px;
+  font-size: 0.7rem;
+  color: #9ca3af;
 `;
 
 const LoadingSpinner = styled.div`
@@ -297,21 +321,31 @@ export default function TrainingReadiness({ date, showDetails = true }: Training
           <ComponentCard>
             <ComponentTitle>Søvn</ComponentTitle>
             <ComponentScore>{Math.round(components.sleep_score)}</ComponentScore>
+            <ComponentWeight>30% vekt</ComponentWeight>
           </ComponentCard>
           
           <ComponentCard>
             <ComponentTitle>HRV</ComponentTitle>
             <ComponentScore>{Math.round(components.hrv_score)}</ComponentScore>
+            <ComponentWeight>20% vekt</ComponentWeight>
           </ComponentCard>
           
           <ComponentCard>
-            <ComponentTitle>Aktivitet</ComponentTitle>
-            <ComponentScore>{Math.round(components.activity_score)}</ComponentScore>
-          </ComponentCard>
-          
-          <ComponentCard>
-            <ComponentTitle>Recovery</ComponentTitle>
-            <ComponentScore>{Math.round(components.recovery_score)}</ComponentScore>
+            <ComponentTitle>Form / TSB</ComponentTitle>
+            <ComponentScore>{Math.round(components.form_score)}</ComponentScore>
+            <ComponentWeight>50% vekt</ComponentWeight>
+            {readinessData.details?.form_value !== undefined && (
+              <FormValueInfo>
+                TSB: {readinessData.details.form_value.toFixed(1)}
+                <FormExplanation>
+                  {readinessData.details.form_value < -15 ? '🔴 Høy fatigue' :
+                   readinessData.details.form_value < -5 ? '🟡 Moderat fatigue' :
+                   readinessData.details.form_value < 5 ? '🟢 Balansert' :
+                   readinessData.details.form_value < 15 ? '🟢 Godt restituert' :
+                   '🟢 Meget frisk'}
+                </FormExplanation>
+              </FormValueInfo>
+            )}
           </ComponentCard>
         </ComponentsGrid>
       )}

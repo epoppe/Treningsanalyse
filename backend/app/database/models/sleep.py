@@ -21,6 +21,7 @@ class Sleep(Base):
     
     # Søvnkvalitet
     sleep_score = Column(Float, nullable=True)  # 0-100
+    overall_score = Column(Float, nullable=True)  # Overall score value fra sleep_scores (0-100)
     sleep_quality = Column(String(20), nullable=True)  # 'excellent', 'good', 'fair', 'poor'
     
     # Søvnfaser (prosent)

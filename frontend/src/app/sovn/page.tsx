@@ -3,9 +3,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { api } from '../../utils/api';
-import { format, subDays } from 'date-fns';
+import { format, subDays, subMonths, startOfYear } from 'date-fns';
 import { nb } from 'date-fns/locale';
 import { useSleepData } from '../../hooks/useHealthData';
+import SleepScoreChart from '../../components/SleepScoreChart';
 import {
   ResponsiveContainer,
   LineChart,
@@ -89,6 +90,29 @@ const QuickFilterButton = styled.button<{ $active?: boolean }>`
   &:hover { background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'}; }
 `;
 
+const PeriodButtonContainer = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+`;
+
+const PeriodButton = styled.button<{ $active: boolean }>`
+  background-color: ${props => (props.$active ? '#3b82f6' : '#f3f4f6')};
+  color: ${props => (props.$active ? 'white' : '#374151')};
+  border: 1px solid ${props => (props.$active ? '#3b82f6' : '#d1d5db')};
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease-in-out;
+  
+  &:hover {
+    background-color: ${props => (props.$active ? '#2563eb' : '#e5e7eb')};
+    border-color: ${props => (props.$active ? '#2563eb' : '#9ca3af')};
+  }
+`;
+
 const ChartCard = styled.div`
   background: white;
   padding: 1rem;
@@ -126,6 +150,7 @@ type SleepDay = {
   sleep_time?: number | null;   // minutter
   sleep_goal?: number | null;   // minutter
   sleep_score?: number | null;  // score
+  overall_score?: number | null;  // overall score fra sleep_scores
   deep_sleep?: number | null;   // minutter
   light_sleep?: number | null;  // minutter
   rem_sleep?: number | null;    // minutter
@@ -138,14 +163,16 @@ const formatDateShort = (iso: string) => format(new Date(iso), 'dd.MM', { locale
 export default function SovnPage() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
-  const [activeFilter, setActiveFilter] = useState<string>('');
+  const [activePeriod, setActivePeriod] = useState<string>('');
 
+  // Sett standard datoer - siste 3 måneder
   useEffect(() => {
-    const end = new Date();
-    const start = subDays(end, 30);
-    setStartDate(format(start, 'yyyy-MM-dd'));
-    setEndDate(format(end, 'yyyy-MM-dd'));
-    setActiveFilter('30d');
+    const today = new Date();
+    const threeMonthsAgo = subMonths(today, 3);
+    
+    setStartDate(format(threeMonthsAgo, 'yyyy-MM-dd'));
+    setEndDate(format(today, 'yyyy-MM-dd'));
+    setActivePeriod('3m');
   }, []);
 
   // Bruk React Query for data fetching med automatisk caching
@@ -160,17 +187,40 @@ export default function SovnPage() {
     ? (sleepData as any[]).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
     : [];
 
-  const handleQuickFilter = (days: number, name: string) => {
-    const end = new Date();
-    const start = subDays(end, days);
-    setStartDate(format(start, 'yyyy-MM-dd'));
-    setEndDate(format(end, 'yyyy-MM-dd'));
-    setActiveFilter(name);
+  const handlePeriodChange = (period: string) => {
+    const today = new Date();
+    let newStartDate: Date;
+
+    switch (period) {
+      case '3m':
+        newStartDate = subMonths(today, 3);
+        break;
+      case '6m':
+        newStartDate = subMonths(today, 6);
+        break;
+      case 'ytd':
+        newStartDate = startOfYear(today);
+        break;
+      case '12m':
+        newStartDate = subMonths(today, 12);
+        break;
+      case '3y':
+        newStartDate = subMonths(today, 36);
+        break;
+      case 'all':
+        newStartDate = new Date('2020-01-01');
+        break;
+      default:
+        newStartDate = subMonths(today, 3);
+    }
+
+    setStartDate(format(newStartDate, 'yyyy-MM-dd'));
+    setEndDate(format(today, 'yyyy-MM-dd'));
+    setActivePeriod(period);
   };
 
-  const handleSubmit = () => {
-    setActiveFilter('custom');
-    // Effekt vil trigge last
+  const handleFilterSubmit = () => {
+    setActivePeriod('');
   };
 
   // Mapp for grafer: konverter minutter til timer for faser og søvntid
@@ -219,19 +269,56 @@ export default function SovnPage() {
       <Title>Søvn</Title>
 
       <FilterContainer>
-        <FilterGroup>
-          <Label>Fra dato:</Label>
-          <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
-        </FilterGroup>
-        <FilterGroup>
-          <Label>Til dato:</Label>
-          <Input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
-        </FilterGroup>
-        <Button onClick={handleSubmit} disabled={loading}>{loading ? 'Laster...' : 'Hent data'}</Button>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-          <QuickFilterButton $active={activeFilter==='7d'} onClick={() => handleQuickFilter(7,'7d')}>7 dager</QuickFilterButton>
-          <QuickFilterButton $active={activeFilter==='30d'} onClick={() => handleQuickFilter(30,'30d')}>30 dager</QuickFilterButton>
-          <QuickFilterButton $active={activeFilter==='90d'} onClick={() => handleQuickFilter(90,'90d')}>90 dager</QuickFilterButton>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
+          <PeriodButtonContainer>
+            <PeriodButton $active={activePeriod === '3m'} onClick={() => handlePeriodChange('3m')}>
+              3 mnd
+            </PeriodButton>
+            <PeriodButton $active={activePeriod === '6m'} onClick={() => handlePeriodChange('6m')}>
+              6 mnd
+            </PeriodButton>
+            <PeriodButton $active={activePeriod === 'ytd'} onClick={() => handlePeriodChange('ytd')}>
+              År til dato
+            </PeriodButton>
+            <PeriodButton $active={activePeriod === '12m'} onClick={() => handlePeriodChange('12m')}>
+              12 mnd
+            </PeriodButton>
+            <PeriodButton $active={activePeriod === '3y'} onClick={() => handlePeriodChange('3y')}>
+              3 år
+            </PeriodButton>
+            <PeriodButton $active={activePeriod === 'all'} onClick={() => handlePeriodChange('all')}>
+              Alt
+            </PeriodButton>
+          </PeriodButtonContainer>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginLeft: 'auto' }}>
+            <FilterGroup>
+              <Label htmlFor="startDate">Fra dato:</Label>
+              <Input
+                id="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setActivePeriod('');
+                }}
+              />
+            </FilterGroup>
+            <FilterGroup>
+              <Label htmlFor="endDate">Til dato:</Label>
+              <Input
+                id="endDate"
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setActivePeriod('');
+                }}
+              />
+            </FilterGroup>
+            <Button onClick={handleFilterSubmit} disabled={!startDate || !endDate || loading} style={{ marginTop: 0 }}>
+              {loading ? 'Laster...' : 'Filtrer periode'}
+            </Button>
+          </div>
         </div>
       </FilterContainer>
 
@@ -241,6 +328,16 @@ export default function SovnPage() {
         <LoadingContainer>Laster søvndata...</LoadingContainer>
       ) : (
         <>
+          {/* Overall Score graf */}
+          <SleepScoreChart 
+            data={days.map(d => ({
+              date: d.date,
+              overall_score: d.overall_score ?? null,
+              rolling_avg_7d: null
+            }))}
+            title="Søvnscore"
+          />
+
           {/* Søvntid vs mål */}
           <ChartCard>
             <ChartTitle>Søvntid (timer) og søvnmål</ChartTitle>

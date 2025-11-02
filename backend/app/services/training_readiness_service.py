@@ -12,6 +12,7 @@ from sqlalchemy import func, and_
 from app.database.models.activity import Activity
 from app.database.models.sleep import Sleep, HRV
 from app.database.session import SessionLocal
+from app.services.training_stress_service import TrainingStressService
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +21,15 @@ class TrainingReadinessService:
     
     def __init__(self):
         self.db = SessionLocal()
+        self.tss_service = TrainingStressService(self.db)
     
     def calculate_training_readiness(self, target_date: date = None) -> Dict[str, Any]:
         """
         Beregn training readiness score for en gitt dato.
-        Sjekker først om score allerede er lagret i databasen.
+        Beregner alltid på nytt for å sikre oppdaterte verdier.
         """
         if target_date is None:
             target_date = date.today()
-        
-        # Sjekk om readiness score allerede er lagret for denne datoen
-        stored_score = self._get_stored_readiness_score(target_date)
-        if stored_score is not None:
-            logger.info(f"Bruker lagret readiness score for {target_date}: {stored_score['total_score']}")
-            return stored_score
         
         try:
             # Hent data for de siste 7 dagene
@@ -49,14 +45,16 @@ class TrainingReadinessService:
             # 3. Hent aktivitetsdata
             activity_data = self._get_activity_data(start_date, end_date)
             
-            # 4. Beregn komponenter
+            # 4. Hent form-score (Training Stress Balance)
+            form_score_value = self._get_form_score(target_date)
+            
+            # 5. Beregn komponenter
             sleep_score = self._calculate_sleep_score(sleep_data)
             hrv_score = self._calculate_hrv_score(hrv_data)
-            activity_score = self._calculate_activity_score(activity_data)
-            recovery_score = self._calculate_recovery_score(activity_data)
+            form_score = self._calculate_form_score(form_score_value)
             
-            # 5. Beregn total score
-            total_score = self._calculate_total_score(sleep_score, hrv_score, activity_score, recovery_score)
+            # 6. Beregn total score
+            total_score = self._calculate_total_score(sleep_score, hrv_score, form_score)
             
             # 6. Bestem readiness status
             readiness_status = self._get_readiness_status(total_score)
@@ -68,18 +66,18 @@ class TrainingReadinessService:
                 "components": {
                     "sleep_score": sleep_score,
                     "hrv_score": hrv_score,
-                    "activity_score": activity_score,
-                    "recovery_score": recovery_score
+                    "form_score": form_score
                 },
                 "details": {
                     "sleep_data": sleep_data,
                     "hrv_data": hrv_data,
-                    "activity_data": activity_data
+                    "activity_data": activity_data,
+                    "form_value": form_score_value
                 }
             }
             
-            # 7. Lagre score i databasen
-            self._store_readiness_score(target_date, result)
+            # 7. Logger info
+            logger.info(f"Beregnet readiness for {target_date}: {total_score:.1f} (søvn:{sleep_score:.1f}, hrv:{hrv_score:.1f}, form:{form_score:.1f}, raw form:{form_score_value:.1f})")
             
             return result
             
@@ -106,6 +104,7 @@ class TrainingReadinessService:
                 "date": sleep.sleep_date.isoformat(),
                 "total_sleep_time": sleep.total_sleep_time,
                 "sleep_score": sleep.sleep_score,
+                "overall_score": sleep.overall_score,  # Legg til overall_score
                 "sleep_efficiency": sleep.sleep_efficiency,
                 "stress_score": sleep.stress_score,
                 "deep_sleep_time": sleep.deep_sleep_time,
@@ -163,18 +162,23 @@ class TrainingReadinessService:
         ]
     
     def _calculate_sleep_score(self, sleep_data: List[Dict[str, Any]]) -> float:
-        """Beregn søvnscore (0-100)."""
+        """Beregn søvnscore (0-100) basert på siste 3 netter."""
         if not sleep_data:
             return 50.0  # Middels score hvis ingen data
+        
+        # Fokuser på de siste 3 nettene (mest relevant for dagens readiness)
+        recent_sleep = sorted(sleep_data, key=lambda x: x['date'], reverse=True)[:3]
         
         total_score = 0
         count = 0
         
-        for sleep in sleep_data:
+        for sleep in recent_sleep:
             score = 0
+            has_data = False
             
             # Søvnvarighet (0-40 poeng)
             if sleep.get('total_sleep_time'):
+                has_data = True
                 sleep_hours = sleep['total_sleep_time'] / 3600
                 if 7 <= sleep_hours <= 9:
                     score += 40
@@ -185,12 +189,15 @@ class TrainingReadinessService:
                 else:
                     score += 10
             
-            # Søvnscore (0-30 poeng)
-            if sleep.get('sleep_score'):
-                score += (sleep['sleep_score'] / 100) * 30
+            # Søvnscore/Overall score (0-30 poeng) - prioriter overall_score hvis tilgjengelig
+            overall_score = sleep.get('overall_score') or sleep.get('sleep_score')
+            if overall_score:
+                has_data = True
+                score += (overall_score / 100) * 30
             
             # Søvneffektivitet (0-20 poeng)
             if sleep.get('sleep_efficiency'):
+                has_data = True
                 efficiency = sleep['sleep_efficiency']
                 if efficiency >= 90:
                     score += 20
@@ -203,6 +210,7 @@ class TrainingReadinessService:
             
             # Stress score (0-10 poeng)
             if sleep.get('stress_score'):
+                has_data = True
                 stress = sleep['stress_score']
                 if stress <= 25:
                     score += 10
@@ -211,8 +219,9 @@ class TrainingReadinessService:
                 elif stress <= 75:
                     score += 2
             
-            total_score += score
-            count += 1
+            if has_data:
+                total_score += score
+                count += 1
         
         return total_score / count if count > 0 else 50.0
     
@@ -271,44 +280,143 @@ class TrainingReadinessService:
             return 30.0  # For lite aktivitet
     
     def _calculate_recovery_score(self, activity_data: List[Dict[str, Any]]) -> float:
-        """Beregn recovery score (0-100)."""
+        """Beregn recovery score (0-100) basert på tid siden siste aktivitet og intensity."""
         if not activity_data:
             return 100.0  # Full recovery hvis ingen aktiviteter
         
-        # Sjekk siste aktivitet og recovery time
+        # Sjekk siste aktivitet
         latest_activity = max(activity_data, key=lambda x: x['start_time'])
         
-        if not latest_activity.get('recovery_time'):
-            return 70.0  # Middels recovery hvis ingen data
+        # Beregn timer siden siste aktivitet
+        last_activity_time = datetime.fromisoformat(latest_activity['start_time'])
+        hours_since = (datetime.now() - last_activity_time).total_seconds() / 3600
         
-        recovery_hours = latest_activity['recovery_time']
+        # Hvis recovery_time er tilgjengelig, bruk den
+        if latest_activity.get('recovery_time'):
+            recovery_hours = latest_activity['recovery_time']
+            
+            # Score basert på recovery time
+            if recovery_hours <= 12:
+                return 30.0  # Trenger mer recovery
+            elif recovery_hours <= 24:
+                return 60.0
+            elif recovery_hours <= 48:
+                return 80.0
+            else:
+                return 100.0  # Full recovery
         
-        # Score basert på recovery time
-        if recovery_hours <= 12:
-            return 30.0  # Trenger mer recovery
-        elif recovery_hours <= 24:
-            return 60.0
-        elif recovery_hours <= 48:
-            return 80.0
-        else:
+        # Fallback: Bruk tid siden siste aktivitet og intensitet
+        # Sjekk også training stress og training effect
+        intensity_factor = 1.0
+        if latest_activity.get('training_stress_score'):
+            tss = latest_activity['training_stress_score']
+            if tss > 150:
+                intensity_factor = 2.0  # Hard økt krever dobbel recovery
+            elif tss > 100:
+                intensity_factor = 1.5
+        elif latest_activity.get('total_training_effect'):
+            te = latest_activity['total_training_effect']
+            if te >= 4.0:
+                intensity_factor = 1.8
+            elif te >= 3.0:
+                intensity_factor = 1.3
+        
+        # Beregn nødvendig recovery tid basert på intensitet
+        needed_recovery = 24 * intensity_factor
+        recovery_ratio = hours_since / needed_recovery
+        
+        if recovery_ratio >= 1.0:
             return 100.0  # Full recovery
+        elif recovery_ratio >= 0.75:
+            return 80.0
+        elif recovery_ratio >= 0.5:
+            return 60.0
+        elif recovery_ratio >= 0.25:
+            return 40.0
+        else:
+            return 30.0  # Trenger mer recovery
+    
+    def _get_form_score(self, target_date: date) -> float:
+        """
+        Hent Training Stress Balance (Form) for en gitt dato.
+        Form = CTL - ATL (Chronic Training Load - Acute Training Load)
+        """
+        try:
+            # Hent metrics for en lengre periode for å beregne CTL/ATL
+            # CTL = 42 dager, ATL = 7 dager
+            start_date = target_date - timedelta(days=60)
+            end_date = target_date
+            
+            metrics_response = self.tss_service.calculate_training_load_metrics_simple(start_date, end_date)
+            metrics = metrics_response.get('data', {})
+            
+            if not metrics:
+                logger.warning(f"Ingen metrics data returnert for {target_date}")
+                return 0.0
+            
+            # Bruk sammendrag fra siste dag (som tilsvarer end_date = target_date)
+            summary = metrics.get('summary', {})
+            if summary and summary.get('current_form') is not None:
+                current_ctl = summary.get('current_ctl', 0)
+                current_atl = summary.get('current_atl', 0)
+                current_form = summary.get('current_form', 0)
+                
+                logger.debug(f"Form-score for {target_date}: {current_form} (CTL: {current_ctl}, ATL: {current_atl})")
+                return current_form
+            
+            # Fallback: Prøv å finne i daily_data
+            daily_data = metrics.get('daily_data', [])
+            target_date_str = target_date.isoformat()
+            
+            for day in reversed(daily_data):  # Start fra slutten (nyeste først)
+                if day['date'] == target_date_str:
+                    form_value = day.get('form', 0)
+                    logger.debug(f"Form-score for {target_date}: {form_value} (CTL: {day.get('ctl', 0)}, ATL: {day.get('atl', 0)})")
+                    return form_value
+            
+            # Hvis ingen data for denne dagen, returner 0 (balanced)
+            logger.warning(f"Ingen form-data funnet for {target_date}, bruker 0 (balanced)")
+            return 0.0
+            
+        except Exception as e:
+            logger.error(f"Feil ved henting av form-score: {e}", exc_info=True)
+            return 0.0
+    
+    def _calculate_form_score(self, form_value: float) -> float:
+        """
+        Konverter Training Stress Balance (Form) til readiness score (0-100).
+        
+        Form-verdier:
+        - Negativ (-30 til 0): Fatigue/Overreaching → lavere readiness
+        - Rundt 0 (-5 til +5): Balanced → medium readiness
+        - Positiv (0 til +30): Fresh/Peaked → høyere readiness
+        
+        Formel: score = 70 + (form * 1.5)
+        - form = -20 → 40 (veldig sliten)
+        - form = -8.5 → 57.25 (moderat sliten)
+        - form = 0 → 70 (balanced)
+        - form = +10 → 85 (godt restituert)
+        - form = +20 → 100 (meget frisk)
+        """
+        score = 70 + (form_value * 1.5)
+        
+        # Clamp til 0-100
+        return max(0, min(100, score))
     
     def _calculate_total_score(self, sleep_score: float, hrv_score: float, 
-                             activity_score: float, recovery_score: float) -> float:
-        """Beregn total training readiness score."""
-        # Vekting av komponenter (basert på garmy-tilnærming)
-        weights = {
-            'sleep': 0.3,
-            'hrv': 0.3,
-            'activity': 0.2,
-            'recovery': 0.2
-        }
+                             form_score: float) -> float:
+        """
+        Beregn total training readiness score.
         
+        Vektet gjennomsnitt:
+        - Søvn: 30% (viktig for recovery)
+        - HRV: 20% (indikator på recovery)
+        - Form (TSB): 50% (treningsmengde vs recovery - mest kritisk)
+        """
         total_score = (
-            sleep_score * weights['sleep'] +
-            hrv_score * weights['hrv'] +
-            activity_score * weights['activity'] +
-            recovery_score * weights['recovery']
+            sleep_score * 0.30 +
+            hrv_score * 0.20 +
+            form_score * 0.50
         )
         
         return round(total_score, 1)
@@ -359,13 +467,13 @@ class TrainingReadinessService:
                     "components": {
                         "sleep_score": 0,  # Disse må beregnes på nytt hvis nødvendig
                         "hrv_score": 0,
-                        "activity_score": 0,
-                        "recovery_score": 0
+                        "form_score": 0
                     },
                     "details": {
                         "sleep_data": [],
                         "hrv_data": [],
-                        "activity_data": []
+                        "activity_data": [],
+                        "form_value": 0
                     },
                     "from_cache": True
                 }

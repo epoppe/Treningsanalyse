@@ -762,24 +762,103 @@ class GarminClient:
             try:
                 DailySleep = getattr(garth, 'DailySleep', None)
                 if DailySleep is not None:
-                    ds = await asyncio.to_thread(DailySleep.list, date_str, '1d')
+                    ds = await asyncio.to_thread(DailySleep.list, date_str, 1)
                     if ds:
-                        payload = ds[0] if isinstance(ds, list) else ds
+                        payload_raw = ds[0] if isinstance(ds, list) else ds
+                        
+                        # Konverter til dict hvis objekt
+                        if hasattr(payload_raw, 'to_dict'):
+                            payload = payload_raw.to_dict()
+                        elif hasattr(payload_raw, 'dict'):
+                            payload = payload_raw.dict()
+                        elif hasattr(payload_raw, '__dict__'):
+                            payload = payload_raw.__dict__.copy()
+                        elif isinstance(payload_raw, dict):
+                            payload = payload_raw
+                        else:
+                            # Prøv å hente verdier direkte via getattr
+                            payload = {}
+                            for attr in ['total_sleep_seconds', 'totalSleepSeconds', 'deep_sleep_seconds', 
+                                       'deepSleepSeconds', 'light_sleep_seconds', 'lightSleepSeconds',
+                                       'rem_sleep_seconds', 'remSleepSeconds', 'awake_seconds', 
+                                       'awakeDurationInSeconds', 'scores', 'sleep_scores', 'sleep_score',
+                                       'sleepScore', 'overall_score', 'overallScore', 'score', 'value']:
+                                if hasattr(payload_raw, attr):
+                                    payload[attr] = getattr(payload_raw, attr)
+                        
                         # Hjelpere
                         def find_score_from_dict(d: dict):
                             # Direkte felt
-                            for k in ['sleep_score', 'sleepScore', 'overallScore', 'overall_score', 'score']:
+                            for k in ['sleep_score', 'sleepScore', 'score']:
                                 v = d.get(k)
                                 if isinstance(v, (int, float)):
                                     return v
-                            # Nestet under "scores"
-                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            # Nestet under "scores" - søk etter "sleep" først
+                            scores = d.get('scores')
                             if scores:
-                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
-                                    v = scores.get(k)
+                                # Håndter både dict og objekt
+                                if isinstance(scores, dict):
+                                    for k in ['sleep', 'sleepScore']:
+                                        v = scores.get(k)
+                                        if isinstance(v, (int, float)):
+                                            return v
+                                elif hasattr(scores, 'sleep'):
+                                    v = getattr(scores, 'sleep', None)
                                     if isinstance(v, (int, float)):
                                         return v
+                            # Prøv sleep_scores som eget attributt
+                            sleep_scores = d.get('sleep_scores')
+                            if sleep_scores:
+                                if isinstance(sleep_scores, dict):
+                                    for k in ['sleep', 'sleepScore']:
+                                        v = sleep_scores.get(k)
+                                        if isinstance(v, (int, float)):
+                                            return v
                             return None
+                        
+                        def find_overall_score_from_dict(d: dict):
+                            """Hent overall score spesifikt fra sleep_scores"""
+                            # Prøv først 'value' - DailySleep bruker dette for overall score
+                            value = d.get('value')
+                            if isinstance(value, (int, float)):
+                                return value
+                            
+                            # Søk under "scores" -> "overall"
+                            scores = d.get('scores')
+                            if scores:
+                                if isinstance(scores, dict):
+                                    overall = scores.get('overall')
+                                    if isinstance(overall, (int, float)):
+                                        return overall
+                                    overall_score = scores.get('overallScore')
+                                    if isinstance(overall_score, (int, float)):
+                                        return overall_score
+                                elif hasattr(scores, 'overall'):
+                                    overall = getattr(scores, 'overall', None)
+                                    if isinstance(overall, (int, float)):
+                                        return overall
+                                elif hasattr(scores, 'overallScore'):
+                                    overall_score = getattr(scores, 'overallScore', None)
+                                    if isinstance(overall_score, (int, float)):
+                                        return overall_score
+                            # Prøv sleep_scores som eget attributt
+                            sleep_scores = d.get('sleep_scores')
+                            if sleep_scores:
+                                if isinstance(sleep_scores, dict):
+                                    overall = sleep_scores.get('overall')
+                                    if isinstance(overall, (int, float)):
+                                        return overall
+                                elif hasattr(sleep_scores, 'overall'):
+                                    overall = getattr(sleep_scores, 'overall', None)
+                                    if isinstance(overall, (int, float)):
+                                        return overall
+                            # Prøv direkte felt
+                            for k in ['overall_score', 'overallScore']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            return None
+                        
                         to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
                         sleep_time = to_min(payload.get('total_sleep_seconds') or payload.get('totalSleepSeconds'))
                         deep = to_min(payload.get('deep_sleep_seconds') or payload.get('deepSleepSeconds'))
@@ -787,11 +866,18 @@ class GarminClient:
                         rem = to_min(payload.get('rem_sleep_seconds') or payload.get('remSleepSeconds'))
                         awake = to_min(payload.get('awake_seconds') or payload.get('awakeDurationInSeconds'))
                         score = find_score_from_dict(payload)
+                        overall_score = find_overall_score_from_dict(payload)
+                        
+                        # Log hvis overall_score finnes for debugging
+                        if overall_score is not None:
+                            logger.info(f"Fant overall_score = {overall_score} for {date_str}")
+                        
                         result = {
                             "date": date_str,
                             "sleep_time": sleep_time,
                             "sleep_goal": None,
                             "sleep_score": score,
+                            "overall_score": overall_score,
                             "deep_sleep": deep,
                             "light_sleep": light,
                             "rem_sleep": rem,
@@ -818,25 +904,51 @@ class GarminClient:
                             return None
                         def find_score(d: dict):
                             # Direkte felt
-                            for k in ['sleepScore', 'sleep_score', 'overallScore', 'overall_score', 'score']:
+                            for k in ['sleepScore', 'sleep_score', 'score']:
                                 v = d.get(k)
                                 if isinstance(v, (int, float)):
                                     return v
-                            # Nestet under "scores"-struktur
+                            # Nestet under "scores"-struktur - søk etter "sleep" først
                             scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
                             if scores:
-                                for k in ['overall', 'overallScore', 'sleep', 'sleepScore']:
+                                for k in ['sleep', 'sleepScore']:
                                     v = scores.get(k)
                                     if isinstance(v, (int, float)):
                                         return v
                             # Noen ganger under "summary"
                             summary = d.get('summary') if isinstance(d.get('summary'), dict) else None
                             if summary:
-                                for k in ['sleepScore', 'sleep_score', 'overall', 'overallScore']:
+                                for k in ['sleepScore', 'sleep_score']:
                                     v = summary.get(k)
                                     if isinstance(v, (int, float)):
                                         return v
                             return None
+                        
+                        def find_overall_score(d: dict):
+                            """Hent overall score spesifikt fra sleep_scores"""
+                            # Søk først under "scores" -> "overall"
+                            scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
+                            if scores:
+                                overall = scores.get('overall')
+                                if isinstance(overall, (int, float)):
+                                    return overall
+                                overall_score = scores.get('overallScore')
+                                if isinstance(overall_score, (int, float)):
+                                    return overall_score
+                            # Prøv direkte felt
+                            for k in ['overall_score', 'overallScore']:
+                                v = d.get(k)
+                                if isinstance(v, (int, float)):
+                                    return v
+                            # Prøv under "summary"
+                            summary = d.get('summary') if isinstance(d.get('summary'), dict) else None
+                            if summary:
+                                for k in ['overall', 'overallScore']:
+                                    v = summary.get(k)
+                                    if isinstance(v, (int, float)):
+                                        return v
+                            return None
+                        
                         to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
                         deep = to_min(find_num(sd_dict, ['deepSleepSeconds','deep_sleep_seconds']))
                         light = to_min(find_num(sd_dict, ['lightSleepSeconds','light_sleep_seconds']))
@@ -844,11 +956,13 @@ class GarminClient:
                         awake = to_min(find_num(sd_dict, ['awakeSeconds','awake_seconds']))
                         total = to_min(find_num(sd_dict, ['totalSleepSeconds','total_sleep_seconds']))
                         score = find_score(sd_dict)
+                        overall_score = find_overall_score(sd_dict)
                         result = {
                             "date": date_str,
                             "sleep_time": total,
                             "sleep_goal": None,
                             "sleep_score": score,
+                            "overall_score": overall_score,
                             "deep_sleep": deep,
                             "light_sleep": light,
                             "rem_sleep": rem,

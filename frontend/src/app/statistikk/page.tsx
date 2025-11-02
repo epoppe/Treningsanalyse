@@ -326,12 +326,34 @@ const StatistikkPage = () => {
     return tempActivities;
   }, [combinedActivities, trailing48MonthsDate]);
 
-  // Initialiser med alle aktivitetstyper valgt kun første gang
+  // Initialiser med standard aktivitetstyper valgt kun første gang
+  // Standard: Løping, Tredemølle løping, Trail running og Terrengløp (hvis den finnes)
   const [hasInitialized, setHasInitialized] = useState(false);
   
   useEffect(() => {
     if (activityTypes.length > 0 && selectedActivityTypes.length === 0 && !hasInitialized) {
-      setSelectedActivityTypes(activityTypes);
+      const defaultTypes = ['running', 'treadmill_running', 'trail_running'];
+      
+      // Finn også terrengløp-varianten (sjekker om typeKey eller navn inneholder "terrengløp")
+      // På statistikksiden brukes typeKey direkte, så vi sjekker typeKey
+      const terrenglopTypes = activityTypes.filter(type => 
+        type.toLowerCase().includes('terrenglop') ||
+        type.toLowerCase().includes('terrengløp') ||
+        type.toLowerCase().includes('trail')
+      );
+      
+      // Kombiner default types med terrengløp-varianten
+      const allDefaultTypes = [...defaultTypes, ...terrenglopTypes];
+      
+      // Filtre for å bare inkludere typer som faktisk finnes i aktivitetene
+      const availableDefaultTypes = allDefaultTypes.filter(type => 
+        activityTypes.includes(type)
+      );
+      
+      // Fjern duplikater
+      const uniqueDefaultTypes = Array.from(new Set(availableDefaultTypes));
+      
+      setSelectedActivityTypes(uniqueDefaultTypes);
       setHasInitialized(true);
     }
   }, [activityTypes, selectedActivityTypes.length, hasInitialized]);

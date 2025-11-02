@@ -257,48 +257,65 @@ async def get_sleep_range_endpoint(
         existing_dates = {s.sleep_date for s in existing_sleep}
         logger.info(f"💾 Søvn: Fant {len(existing_dates)} dager i database")
         
-        # 2. Finn manglende datoer
+        # 2. Finn manglende datoer OG datoer uten overall_score
         current = start_date
         missing_dates = []
+        dates_without_overall_score = []
+        
         while current <= end_date:
             if current not in existing_dates:
                 missing_dates.append(current)
+            else:
+                # Sjekk om eksisterende record mangler overall_score
+                existing_record = next((s for s in existing_sleep if s.sleep_date == current), None)
+                if existing_record and existing_record.overall_score is None:
+                    dates_without_overall_score.append(current)
             current += timedelta(days=1)
         
-        logger.info(f"📥 Søvn: {len(missing_dates)} dager mangler, henter fra Garmin...")
+        logger.info(f"📥 Søvn: {len(missing_dates)} dager mangler, {len(dates_without_overall_score)} dager mangler overall_score, henter fra Garmin...")
         
-        # 3. Hent manglende data fra Garmin og lagre i database
-        if missing_dates:
-            for missing_date in missing_dates:
+        # 3. Hent manglende data fra Garmin og lagre/oppdater i database
+        all_dates_to_fetch = missing_dates + dates_without_overall_score
+        if all_dates_to_fetch:
+            for fetch_date in all_dates_to_fetch:
                 try:
-                    sleep_data = await garmin_client.get_sleep_data(datetime.combine(missing_date, datetime.min.time()))
-                    if sleep_data and (sleep_data.get('sleep_time') or sleep_data.get('total_sleep')):
+                    sleep_data = await garmin_client.get_sleep_data(datetime.combine(fetch_date, datetime.min.time()))
+                    if sleep_data and (sleep_data.get('sleep_time') or sleep_data.get('total_sleep') or sleep_data.get('overall_score')):
                         # Konverter minutter til sekunder
                         def to_sec(minutes_val):
                             if minutes_val is None:
                                 return None
                             return float(minutes_val) * 60.0
                         
-                        # Lagre i database
-                        new_sleep = Sleep(
-                            sleep_date=missing_date,
-                            total_sleep_time=to_sec(sleep_data.get('sleep_time') or sleep_data.get('total_sleep')),
-                            deep_sleep_time=to_sec(sleep_data.get('deep_sleep')),
-                            light_sleep_time=to_sec(sleep_data.get('light_sleep')),
-                            rem_sleep_time=to_sec(sleep_data.get('rem_sleep')),
-                            awake_time=to_sec(sleep_data.get('awake_time')),
-                            sleep_score=sleep_data.get('sleep_score'),
-                            created_at=datetime.utcnow(),
-                            updated_at=datetime.utcnow()
-                        )
-                        db.add(new_sleep)
-                        logger.debug(f"✅ Søvn: Lagret data for {missing_date}")
+                        if fetch_date in missing_dates:
+                            # Ny record - lagre alt
+                            new_sleep = Sleep(
+                                sleep_date=fetch_date,
+                                total_sleep_time=to_sec(sleep_data.get('sleep_time') or sleep_data.get('total_sleep')),
+                                deep_sleep_time=to_sec(sleep_data.get('deep_sleep')),
+                                light_sleep_time=to_sec(sleep_data.get('light_sleep')),
+                                rem_sleep_time=to_sec(sleep_data.get('rem_sleep')),
+                                awake_time=to_sec(sleep_data.get('awake_time')),
+                                sleep_score=sleep_data.get('sleep_score'),
+                                overall_score=sleep_data.get('overall_score'),
+                                created_at=datetime.utcnow(),
+                                updated_at=datetime.utcnow()
+                            )
+                            db.add(new_sleep)
+                            logger.debug(f"✅ Søvn: Lagret ny data for {fetch_date}")
+                        elif fetch_date in dates_without_overall_score:
+                            # Eksisterende record - oppdater bare overall_score
+                            existing_record = next((s for s in existing_sleep if s.sleep_date == fetch_date), None)
+                            if existing_record and sleep_data.get('overall_score') is not None:
+                                existing_record.overall_score = sleep_data.get('overall_score')
+                                existing_record.updated_at = datetime.utcnow()
+                                logger.debug(f"✅ Søvn: Oppdatert overall_score for {fetch_date}: {sleep_data.get('overall_score')}")
                 except Exception as e:
-                    logger.debug(f"⚠️ Søvn: Ingen data for {missing_date}: {e}")
+                    logger.debug(f"⚠️ Søvn: Ingen data for {fetch_date}: {e}")
             
-            # Commit alle nye søvn-records
+            # Commit alle nye og oppdaterte søvn-records
             db.commit()
-            logger.info(f"💾 Søvn: Lagret nye data i database")
+            logger.info(f"💾 Søvn: Lagret/oppdatert data i database")
         
         # 4. Hent all data fra database (nå komplett)
         all_sleep = db.query(Sleep).filter(
@@ -317,7 +334,8 @@ async def get_sleep_range_endpoint(
                 "light_sleep": (sleep.light_sleep_time / 60.0) if sleep.light_sleep_time else None,
                 "rem_sleep": (sleep.rem_sleep_time / 60.0) if sleep.rem_sleep_time else None,
                 "awake_time": (sleep.awake_time / 60.0) if sleep.awake_time else None,
-                "sleep_score": sleep.sleep_score
+                "sleep_score": sleep.sleep_score,
+                "overall_score": sleep.overall_score
             })
         
         logger.info(f"✅ Søvn: Returnerer {len(result)} dager med data")
