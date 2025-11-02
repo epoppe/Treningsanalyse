@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  LineChart,
+  ComposedChart,
   Line,
   XAxis,
   YAxis,
@@ -9,23 +9,20 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
+  ReferenceArea,
 } from 'recharts';
 import styled from 'styled-components';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
+import { nb } from 'date-fns/locale';
 
 const ChartContainer = styled.div`
   background: white;
-  padding: 1rem;
+  padding: 0.75rem;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
-  height: 700px;
-`;
-
-const Title = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
+  margin-bottom: 1rem;
+  height: 600px;
 `;
 
 const ButtonContainer = styled.div`
@@ -50,9 +47,9 @@ const Button = styled.button<{ $active: boolean }>`
 
 const InfoPanel = styled.div`
   background: #f8f9fa;
-  padding: 1rem;
+  padding: 0.75rem;
   border-radius: 4px;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   font-size: 0.9rem;
   color: #495057;
 `;
@@ -103,7 +100,7 @@ const CustomAxisTick = ({ x, y, payload }: any) => {
   
   try {
     const date = parseISO(payload.value);
-    const formattedDate = format(date, 'dd.MM');
+    const formattedDate = format(date, 'd. MMM yyyy', { locale: nb });
     
     return (
       <g transform={`translate(${x},${y})`}>
@@ -132,7 +129,6 @@ export default function HrvChart({ data, title }: HrvChartProps) {
   if (!data || data.length === 0) {
     return (
       <ChartContainer>
-        <Title>{title}</Title>
         <InfoPanel>
           Ingen HRV-data tilgjengelig. HRV-data er kun tilgjengelig fra 2023 og fremover.
         </InfoPanel>
@@ -142,6 +138,38 @@ export default function HrvChart({ data, title }: HrvChartProps) {
 
   // Sorter data etter dato
   const sortedData = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  
+  // Filtrer data som har baseline-verdier for å vise normalområdet
+  const hasBaselineData = sortedData.some(d => 
+    d.baseline_balanced_lower !== null && 
+    d.baseline_balanced_lower !== undefined && 
+    !isNaN(d.baseline_balanced_lower) &&
+    d.baseline_balanced_upper !== null && 
+    d.baseline_balanced_upper !== undefined &&
+    !isNaN(d.baseline_balanced_upper)
+  );
+  
+  // Beregn gjennomsnittlig baseline for å vise statisk normalområde
+  const baselineValues = sortedData
+    .filter(d => 
+      d.baseline_balanced_lower !== null && 
+      d.baseline_balanced_lower !== undefined && 
+      !isNaN(d.baseline_balanced_lower) &&
+      d.baseline_balanced_upper !== null && 
+      d.baseline_balanced_upper !== undefined &&
+      !isNaN(d.baseline_balanced_upper)
+    )
+    .map(d => ({
+      lower: d.baseline_balanced_lower!,
+      upper: d.baseline_balanced_upper!,
+    }));
+  
+  const avgBaselineLower = baselineValues.length > 0
+    ? baselineValues.reduce((sum, v) => sum + v.lower, 0) / baselineValues.length
+    : null;
+  const avgBaselineUpper = baselineValues.length > 0
+    ? baselineValues.reduce((sum, v) => sum + v.upper, 0) / baselineValues.length
+    : null;
 
   // Beregn Y-akse domene basert på data
   const yAxisDomain = () => {
@@ -169,34 +197,33 @@ export default function HrvChart({ data, title }: HrvChartProps) {
 
   return (
     <ChartContainer>
-      <Title>{title}</Title>
-      
-      <InfoPanel>
-        <strong>Statistikk:</strong> 
-        Siste HRV: {latestHrv}ms | 
-        7-dagers snitt: {latestTrend?.toFixed(1)}ms | 
-        Gj.snitt alle dager: {avgHrv.toFixed(1)}ms | 
-        Antall målinger: {sortedData.length}
+      <InfoPanel style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <div>
+          <strong>Statistikk:</strong> 
+          Siste HRV: {latestHrv}ms | 
+          7-dagers snitt: {latestTrend?.toFixed(1)}ms | 
+          Gj.snitt alle dager: {avgHrv.toFixed(1)}ms | 
+          Antall målinger: {sortedData.length}
+        </div>
+        <ButtonContainer style={{ marginBottom: 0 }}>
+          <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+            {showTrend ? 'Skjul' : 'Vis'} 7-dagers snitt
+          </Button>
+          <Button $active={showBaselines} onClick={() => setShowBaselines(!showBaselines)}>
+            {showBaselines ? 'Skjul' : 'Vis'} normalområde
+          </Button>
+        </ButtonContainer>
       </InfoPanel>
 
-      <ButtonContainer>
-        <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
-          {showTrend ? 'Skjul' : 'Vis'} 7-dagers snitt
-        </Button>
-        <Button $active={showBaselines} onClick={() => setShowBaselines(!showBaselines)}>
-          {showBaselines ? 'Skjul' : 'Vis'} baseline-soner
-        </Button>
-      </ButtonContainer>
-
       <ResponsiveContainer width="100%" height="75%">
-        <LineChart data={sortedData} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
+        <ComposedChart data={sortedData} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                      <XAxis 
-              dataKey="date" 
-              tick={<CustomAxisTick />}
-              interval={Math.max(1, Math.floor(sortedData.length / 15))}
-              height={80}
-            />
+          <XAxis 
+            dataKey="date" 
+            tick={<CustomAxisTick />}
+            interval={Math.max(1, Math.floor(sortedData.length / 15))}
+            height={80}
+          />
           <YAxis
             label={{ value: 'HRV (ms)', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
@@ -205,26 +232,39 @@ export default function HrvChart({ data, title }: HrvChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Legend />
           
-          {/* Baseline-soner */}
-          {showBaselines && (
+          {/* Normalområde (skyggelagt) - bruk ReferenceArea for statisk område */}
+          {showBaselines && avgBaselineLower !== null && avgBaselineUpper !== null && (
+            <ReferenceArea
+              y1={avgBaselineLower}
+              y2={avgBaselineUpper}
+              fill="#a8d5ba"
+              fillOpacity={0.3}
+              label="Normalområde"
+            />
+          )}
+          
+          {/* Dynamiske baseline-linjer hvis de varierer */}
+          {showBaselines && hasBaselineData && (
             <>
               <Line
                 type="monotone"
                 dataKey="baseline_balanced_lower"
-                stroke="#95a5a6"
-                strokeDasharray="2 2"
+                stroke="#2e7d32"
+                strokeDasharray=""
                 dot={false}
-                name="Baseline (nedre)"
-                strokeWidth={1}
+                name="Normalområde nedre grense"
+                strokeWidth={4.5}
+                connectNulls={false}
               />
               <Line
                 type="monotone"
                 dataKey="baseline_balanced_upper"
-                stroke="#95a5a6"
-                strokeDasharray="2 2"
+                stroke="#2e7d32"
+                strokeDasharray=""
                 dot={false}
-                name="Baseline (øvre)"
-                strokeWidth={1}
+                name="Normalområde øvre grense"
+                strokeWidth={4.5}
+                connectNulls={false}
               />
             </>
           )}
@@ -233,9 +273,9 @@ export default function HrvChart({ data, title }: HrvChartProps) {
           <Line
             type="monotone"
             dataKey="last_night_avg"
-            stroke="#e74c3c"
-            strokeWidth={2}
-            dot={{ fill: '#e74c3c', strokeWidth: 2, r: 3 }}
+            stroke="none"
+            strokeWidth={0}
+            dot={{ fill: '#e74c3c', strokeWidth: 1, r: 2.5 }}
             name="HRV (natt gj.snitt)"
             connectNulls={false}
           />
@@ -252,7 +292,7 @@ export default function HrvChart({ data, title }: HrvChartProps) {
               connectNulls={false}
             />
           )}
-        </LineChart>
+        </ComposedChart>
       </ResponsiveContainer>
     </ChartContainer>
   );

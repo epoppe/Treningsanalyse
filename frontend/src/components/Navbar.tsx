@@ -6,7 +6,7 @@ import styled from 'styled-components';
 
 const Nav = styled.nav`
   background: #2c3e50;
-  padding: 0.5rem;
+  padding: 0.25rem 0.5rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 `;
 
@@ -14,7 +14,7 @@ const NavContainer = styled.div`
   display: flex;
   justify-content: flex-start;
   align-items: center;
-  padding-left: 1rem;
+  padding-left: 0.75rem;
 `;
 
 const NavLinks = styled.div`
@@ -27,7 +27,7 @@ const NavLink = styled(Link)<{ $active?: boolean }>`
   color: ${props => props.$active ? '#3498db' : 'white'};
   text-decoration: none;
   font-weight: ${props => props.$active ? 'bold' : 'normal'};
-  padding: 0.5rem 1rem;
+  padding: 0.25rem 0.75rem;
   border-radius: 4px;
   transition: all 0.2s ease;
 

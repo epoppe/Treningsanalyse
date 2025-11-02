@@ -234,29 +234,83 @@ class GarminClient:
                         # DailyHRV.list returnerer liste
                         hrv_item = hrv_data[0]
                         if hasattr(hrv_item, 'last_night_avg'):
+                            # Prøv å hente baseline-verdier på ulike måter
+                            baseline_low_upper = None
+                            baseline_balanced_lower = None
+                            baseline_balanced_upper = None
+                            
+                            # Prøv direkte attributter
+                            if hasattr(hrv_item, 'baseline_balanced_lower'):
+                                baseline_balanced_lower = hrv_item.baseline_balanced_lower
+                            elif hasattr(hrv_item, 'balanced_low'):
+                                baseline_balanced_lower = hrv_item.balanced_low
+                            
+                            if hasattr(hrv_item, 'baseline_balanced_upper'):
+                                baseline_balanced_upper = hrv_item.baseline_balanced_upper
+                            elif hasattr(hrv_item, 'balanced_upper'):
+                                baseline_balanced_upper = hrv_item.balanced_upper
+                            
+                            if hasattr(hrv_item, 'baseline_low_upper'):
+                                baseline_low_upper = hrv_item.baseline_low_upper
+                            
+                            # Prøv gjennom baseline-objekt hvis det eksisterer
+                            if hasattr(hrv_item, 'baseline') and hrv_item.baseline:
+                                if baseline_balanced_lower is None:
+                                    baseline_balanced_lower = getattr(hrv_item.baseline, 'balanced_lower', None) or getattr(hrv_item.baseline, 'balanced_low', None)
+                                if baseline_balanced_upper is None:
+                                    baseline_balanced_upper = getattr(hrv_item.baseline, 'balanced_upper', None)
+                                if baseline_low_upper is None:
+                                    baseline_low_upper = getattr(hrv_item.baseline, 'low_upper', None)
+                            
+                            logger.info(f"HRV baseline-verdier for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
+                            
                             hrv_dict = {
                                 "hrv_summary": {
                                     "last_night_avg": hrv_item.last_night_avg,
                                     "last_night_5_min_high": getattr(hrv_item, 'last_night_5_min_high', None),
                                     "weekly_avg": getattr(hrv_item, 'weekly_avg', None),
                                     "status": getattr(hrv_item, 'status', None),
-                                    "baseline_low_upper": getattr(hrv_item, 'baseline_low_upper', None) if hasattr(hrv_item, 'baseline') and hrv_item.baseline else None,
-                                    "baseline_balanced_lower": getattr(hrv_item, 'baseline_balanced_lower', None) if hasattr(hrv_item, 'baseline') and hrv_item.baseline else None,
-                                    "baseline_balanced_upper": getattr(hrv_item, 'baseline_balanced_upper', None) if hasattr(hrv_item, 'baseline') and hrv_item.baseline else None,
+                                    "baseline_low_upper": baseline_low_upper,
+                                    "baseline_balanced_lower": baseline_balanced_lower,
+                                    "baseline_balanced_upper": baseline_balanced_upper,
                                 }
                             }
                             return hrv_dict
                     elif hasattr(hrv_data, 'hrv_summary'):
                         # HRVData.get returnerer objekt med hrv_summary
+                        hrv_summary = hrv_data.hrv_summary
+                        
+                        # Prøv å hente baseline-verdier på ulike måter
+                        baseline_low_upper = None
+                        baseline_balanced_lower = None
+                        baseline_balanced_upper = None
+                        
+                        if hrv_summary:
+                            if hasattr(hrv_summary, 'baseline') and hrv_summary.baseline:
+                                baseline_obj = hrv_summary.baseline
+                                baseline_low_upper = getattr(baseline_obj, 'low_upper', None)
+                                baseline_balanced_lower = getattr(baseline_obj, 'balanced_lower', None) or getattr(baseline_obj, 'balanced_low', None)
+                                baseline_balanced_upper = getattr(baseline_obj, 'balanced_upper', None)
+                            
+                            # Prøv direkte på hrv_summary hvis baseline-objekt ikke fungerte
+                            if baseline_balanced_lower is None:
+                                baseline_balanced_lower = getattr(hrv_summary, 'baseline_balanced_lower', None) or getattr(hrv_summary, 'balanced_low', None)
+                            if baseline_balanced_upper is None:
+                                baseline_balanced_upper = getattr(hrv_summary, 'baseline_balanced_upper', None) or getattr(hrv_summary, 'balanced_upper', None)
+                            if baseline_low_upper is None:
+                                baseline_low_upper = getattr(hrv_summary, 'baseline_low_upper', None)
+                            
+                            logger.info(f"HRV baseline-verdier (hrv_summary) for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
+                        
                         hrv_dict = {
                             "hrv_summary": {
-                                "last_night_avg": hrv_data.hrv_summary.last_night_avg if hrv_data.hrv_summary else None,
-                                "last_night_5_min_high": hrv_data.hrv_summary.last_night_5_min_high if hrv_data.hrv_summary else None,
-                                "weekly_avg": hrv_data.hrv_summary.weekly_avg if hrv_data.hrv_summary else None,
-                                "status": hrv_data.hrv_summary.status if hrv_data.hrv_summary else None,
-                                "baseline_low_upper": hrv_data.hrv_summary.baseline.low_upper if hrv_data.hrv_summary and hrv_data.hrv_summary.baseline else None,
-                                "baseline_balanced_lower": hrv_data.hrv_summary.baseline.balanced_low if hrv_data.hrv_summary and hrv_data.hrv_summary.baseline else None,
-                                "baseline_balanced_upper": hrv_data.hrv_summary.baseline.balanced_upper if hrv_data.hrv_summary and hrv_data.hrv_summary.baseline else None,
+                                "last_night_avg": hrv_summary.last_night_avg if hrv_summary else None,
+                                "last_night_5_min_high": hrv_summary.last_night_5_min_high if hrv_summary else None,
+                                "weekly_avg": hrv_summary.weekly_avg if hrv_summary else None,
+                                "status": hrv_summary.status if hrv_summary else None,
+                                "baseline_low_upper": baseline_low_upper,
+                                "baseline_balanced_lower": baseline_balanced_lower,
+                                "baseline_balanced_upper": baseline_balanced_upper,
                             }
                         }
                         return hrv_dict

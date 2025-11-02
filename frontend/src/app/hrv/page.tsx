@@ -5,16 +5,17 @@ import styled from 'styled-components';
 import HrvChart from '../../components/HrvChart';
 import { api, BASE_URL } from '../../utils/api';
 import { useHrvData } from '../../hooks/useHealthData';
+import { subMonths, startOfYear, format } from 'date-fns';
 
 const PageContainer = styled.div`
-  padding: 2rem;
+  padding: 1rem 2rem;
   max-width: 1200px;
   margin: 0 auto;
 `;
 
 const Title = styled.h1`
   color: #2c3e50;
-  margin-bottom: 2rem;
+  margin: 0.5rem 0 1rem 0;
   text-align: center;
 `;
 
@@ -38,10 +39,10 @@ const ErrorContainer = styled.div`
 
 const FilterContainer = styled.div`
   background: white;
-  padding: 1.5rem;
+  padding: 1rem;
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
@@ -51,7 +52,7 @@ const FilterContainer = styled.div`
 const FilterGroup = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.1rem;
 `;
 
 const Label = styled.label`
@@ -94,6 +95,29 @@ const Button = styled.button`
   }
 `;
 
+const PeriodButtonContainer = styled.div`
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+`;
+
+const PeriodButton = styled.button<{ $active: boolean }>`
+  background-color: ${props => (props.$active ? '#3b82f6' : '#f3f4f6')};
+  color: ${props => (props.$active ? 'white' : '#374151')};
+  border: 1px solid ${props => (props.$active ? '#3b82f6' : '#d1d5db')};
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease-in-out;
+  
+  &:hover {
+    background-color: ${props => (props.$active ? '#2563eb' : '#e5e7eb')};
+    border-color: ${props => (props.$active ? '#2563eb' : '#9ca3af')};
+  }
+`;
+
 interface HrvData {
   date: string;
   last_night_avg: number;
@@ -113,6 +137,7 @@ interface HrvResponse {
 export default function HrvPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [activePeriod, setActivePeriod] = useState<string>('');
 
   // Sett standard datoer - siste 6 måneder
   useEffect(() => {
@@ -126,6 +151,7 @@ export default function HrvPage() {
     
     setStartDate(actualStartDate.toISOString().split('T')[0]);
     setEndDate(today.toISOString().split('T')[0]);
+    setActivePeriod('6m');
   }, []);
 
   // Bruk React Query for å hente HRV-data med automatisk caching
@@ -164,11 +190,50 @@ export default function HrvPage() {
   const handleFilterSubmit = () => {
     if (startDate && endDate) {
       fetchHrvData(startDate, endDate);
+      setActivePeriod(''); // Deaktiver periodevelger når man bruker spesifikk filtrering
     }
   };
 
   const handleLoadAll = () => {
     fetchHrvData(); // Uten datofilter
+    setActivePeriod('all');
+  };
+
+  const handlePeriodChange = (period: string) => {
+    setActivePeriod(period);
+    const today = new Date();
+    const minDate = new Date('2023-01-01');
+    let start: Date;
+    let end = today;
+
+    switch (period) {
+      case '3m':
+        start = subMonths(today, 3);
+        break;
+      case '6m':
+        start = subMonths(today, 6);
+        break;
+      case 'ytd':
+        start = startOfYear(today);
+        break;
+      case '12m':
+        start = subMonths(today, 12);
+        break;
+      case '3y':
+        start = subMonths(today, 36);
+        break;
+      case 'all':
+        start = minDate;
+        break;
+      default:
+        return;
+    }
+
+    // Sørg for at vi ikke går før 2023
+    const actualStart = start < minDate ? minDate : start;
+    
+    setStartDate(format(actualStart, 'yyyy-MM-dd'));
+    setEndDate(format(end, 'yyyy-MM-dd'));
   };
 
   if (loading) {
@@ -187,35 +252,80 @@ export default function HrvPage() {
       <Title>HRV-analyse</Title>
       
       <FilterContainer>
-        <FilterGroup>
-          <Label htmlFor="startDate">Fra dato:</Label>
-          <Input
-            id="startDate"
-            type="date"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            min="2023-01-01"
-          />
-        </FilterGroup>
-        
-        <FilterGroup>
-          <Label htmlFor="endDate">Til dato:</Label>
-          <Input
-            id="endDate"
-            type="date"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-            min="2023-01-01"
-          />
-        </FilterGroup>
-        
-        <Button onClick={handleFilterSubmit} disabled={!startDate || !endDate}>
-          Filtrer periode
-        </Button>
-        
-        <Button onClick={handleLoadAll}>
-          Last alle data
-        </Button>
+        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
+          <PeriodButtonContainer>
+            <PeriodButton
+              $active={activePeriod === '3m'}
+              onClick={() => handlePeriodChange('3m')}
+            >
+              Siste 3 mnd
+            </PeriodButton>
+            <PeriodButton
+              $active={activePeriod === '6m'}
+              onClick={() => handlePeriodChange('6m')}
+            >
+              Siste 6 mnd
+            </PeriodButton>
+            <PeriodButton
+              $active={activePeriod === 'ytd'}
+              onClick={() => handlePeriodChange('ytd')}
+            >
+              År til dato
+            </PeriodButton>
+            <PeriodButton
+              $active={activePeriod === '12m'}
+              onClick={() => handlePeriodChange('12m')}
+            >
+              Siste 12 mnd
+            </PeriodButton>
+            <PeriodButton
+              $active={activePeriod === '3y'}
+              onClick={() => handlePeriodChange('3y')}
+            >
+              Siste 3 år
+            </PeriodButton>
+            <PeriodButton
+              $active={activePeriod === 'all'}
+              onClick={() => handlePeriodChange('all')}
+            >
+              All historikk
+            </PeriodButton>
+          </PeriodButtonContainer>
+
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginLeft: 'auto' }}>
+            <FilterGroup>
+              <Label htmlFor="startDate">Fra dato:</Label>
+              <Input
+                id="startDate"
+                type="date"
+                value={startDate}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setActivePeriod(''); // Deaktiver periodevelger når man endrer dato manuelt
+                }}
+                min="2023-01-01"
+              />
+            </FilterGroup>
+            
+            <FilterGroup>
+              <Label htmlFor="endDate">Til dato:</Label>
+              <Input
+                id="endDate"
+                type="date"
+                value={endDate}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setActivePeriod(''); // Deaktiver periodevelger når man endrer dato manuelt
+                }}
+                min="2023-01-01"
+              />
+            </FilterGroup>
+            
+            <Button onClick={handleFilterSubmit} disabled={!startDate || !endDate} style={{ marginTop: 0 }}>
+              Filtrer periode
+            </Button>
+          </div>
+        </div>
       </FilterContainer>
 
       {error && (

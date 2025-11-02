@@ -101,6 +101,12 @@ class HRV(Base):
     pnn50 = Column(Float, nullable=True)  # prosent
     stress_score = Column(Float, nullable=True)  # 0-100
     
+    # Baseline-verdier fra Garmin
+    baseline_balanced_lower = Column(Float, nullable=True)  # ms
+    baseline_balanced_upper = Column(Float, nullable=True)  # ms
+    baseline_low_upper = Column(Float, nullable=True)  # ms
+    status = Column(String(50), nullable=True)  # HRV status fra Garmin
+    
     # Kontekst
     measurement_type = Column(String(50), nullable=True)  # 'morning', 'during_sleep', 'activity'
     activity_id = Column(String(255), nullable=True)  # referanse til aktivitet hvis relevant

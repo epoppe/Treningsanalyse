@@ -143,19 +143,28 @@ async def get_hrv_range_endpoint(
         if missing_dates:
             for missing_date in missing_dates:
                 try:
-                    hrv_data = await garmin_client.get_hrv_data(datetime.combine(missing_date, datetime.min.time()))
-                    if hrv_data and hrv_data.get('last_night_avg'):
-                        # Lagre i database
-                        new_hrv = HRV(
-                            measurement_date=missing_date,
-                            measurement_time=datetime.combine(missing_date, datetime.min.time()),
-                            rmssd=hrv_data.get('last_night_avg'),
-                            measurement_type='during_sleep',
-                            created_at=datetime.utcnow(),
-                            updated_at=datetime.utcnow()
-                        )
-                        db.add(new_hrv)
-                        logger.debug(f"✅ HRV: Lagret data for {missing_date}")
+                    # Bruk alternative metode som henter baseline-verdier
+                    hrv_data = await garmin_client.get_hrv_data_alternative(datetime.combine(missing_date, datetime.min.time()))
+                    if hrv_data and hrv_data.get('hrv_summary'):
+                        hrv_summary = hrv_data.get('hrv_summary', {})
+                        last_night_avg = hrv_summary.get('last_night_avg')
+                        
+                        if last_night_avg:
+                            # Lagre i database med baseline-verdier
+                            new_hrv = HRV(
+                                measurement_date=missing_date,
+                                measurement_time=datetime.combine(missing_date, datetime.min.time()),
+                                rmssd=last_night_avg,
+                                measurement_type='during_sleep',
+                                baseline_balanced_lower=hrv_summary.get('baseline_balanced_lower'),
+                                baseline_balanced_upper=hrv_summary.get('baseline_balanced_upper'),
+                                baseline_low_upper=hrv_summary.get('baseline_low_upper'),
+                                status=hrv_summary.get('status'),
+                                created_at=datetime.utcnow(),
+                                updated_at=datetime.utcnow()
+                            )
+                            db.add(new_hrv)
+                            logger.debug(f"✅ HRV: Lagret data for {missing_date} (baseline: {hrv_summary.get('baseline_balanced_lower')}-{hrv_summary.get('baseline_balanced_upper')})")
                 except Exception as e:
                     logger.debug(f"⚠️ HRV: Ingen data for {missing_date}: {e}")
             
@@ -178,10 +187,10 @@ async def get_hrv_range_endpoint(
                 "last_night_5_min_high": hrv.rmssd,  # Placeholder
                 "measurement_time": hrv.measurement_time.isoformat() if hrv.measurement_time else None,
                 "measurement_type": hrv.measurement_type,
-                "baseline_balanced_lower": 30.0,  # Placeholder
-                "baseline_balanced_upper": 50.0,  # Placeholder
-                "baseline_low_upper": 40.0,  # Placeholder
-                "status": "normal"  # Placeholder
+                "baseline_balanced_lower": hrv.baseline_balanced_lower if hrv.baseline_balanced_lower else None,
+                "baseline_balanced_upper": hrv.baseline_balanced_upper if hrv.baseline_balanced_upper else None,
+                "baseline_low_upper": hrv.baseline_low_upper if hrv.baseline_low_upper else None,
+                "status": hrv.status if hrv.status else "unknown"
             })
         
         # 6. Beregn 7-dagers glidende gjennomsnitt
