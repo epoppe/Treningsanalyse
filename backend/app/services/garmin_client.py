@@ -10,6 +10,8 @@ import garth
 from garth.exc import GarthException, GarthHTTPError
 from pydantic import BaseModel
 
+from app.config import settings
+
 # Sett opp logging tidlig så den er tilgjengelig
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1322,7 +1324,6 @@ class GarminClient:
             if not self.is_authenticated():
                 logger.warning("Garmin-klient ikke autentisert")
                 # Sjekk konfigurasjon som fallback
-                from app.config import settings
                 if settings.LACTATE_THRESHOLD_SPEED is not None:
                     logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
                     return settings.LACTATE_THRESHOLD_SPEED
@@ -1337,10 +1338,16 @@ class GarminClient:
                 
                 if hasattr(user_settings, 'user_data') and user_settings.user_data:
                     user_data = user_settings.user_data
-                    if hasattr(user_data, 'lactate_threshold_speed') and user_data.lactate_threshold_speed:
-                        lactate_speed = user_data.lactate_threshold_speed
-                        logger.info(f"Lactate threshold speed hentet fra Garmin: {lactate_speed} m/s")
-                        return lactate_speed
+                    lactate_speed = getattr(user_data, 'lactate_threshold_speed', None)
+                    if lactate_speed is not None:
+                        logger.info(f"Lactate threshold speed hentet fra Garmin: {lactate_speed} (råverdi)")
+                        if 2.0 <= lactate_speed <= 6.0:
+                            logger.info(f"Lactate threshold speed ({lactate_speed} m/s) er innenfor forventet område, returnerer verdi")
+                            return lactate_speed
+                        logger.warning(
+                            f"Lactate threshold speed {lactate_speed} m/s fra Garmin er utenfor forventet intervall "
+                            "(2.0 - 6.0 m/s). Bruker fallback fra konfigurasjon."
+                        )
                     else:
                         logger.warning("Lactate threshold speed ikke tilgjengelig i user_data")
                 else:
@@ -1350,7 +1357,6 @@ class GarminClient:
                 logger.warning(f"Kunne ikke hente lactate threshold speed via garth.UserSettings.get(): {e}")
                 
             # Fallback til konfigurasjon
-            from app.config import settings
             if settings.LACTATE_THRESHOLD_SPEED is not None:
                 logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
                 return settings.LACTATE_THRESHOLD_SPEED

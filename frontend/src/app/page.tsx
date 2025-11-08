@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchAllActivities, fetchNewActivities, setLoadedCount, Activity, resetActivitiesState } from '../store/slices/activitiesSlice';
+import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchNewActivities, setLoadedCount, Activity } from '../store/slices/activitiesSlice';
 import { selectAllActivities, selectActivitiesStatus, selectActivitiesError, selectActivitiesTotalCount, selectActivitiesLoadedCount } from '../store/slices/activitiesSlice';
 import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
@@ -114,32 +114,36 @@ export default function Home() {
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
   const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
   const [timeFilter, setTimeFilter] = useState<'all' | '12months' | '3months'>('all');
+  const syncRefreshTimeout = useRef<NodeJS.Timeout | null>(null);
 
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(() => {
     console.log('[Home] Synkronisering fullført, oppdaterer aktiviteter...');
-    
-    // Hent datoen for siste aktivitet hvis vi har noen
-    if (activities.length > 0) {
-      // Finn den nyeste aktiviteten
-      const latestActivity = activities.reduce((latest, current) => {
-        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-      });
-      
-      const latestDate = new Date(latestActivity.startTimeLocal);
-      const sinceDate = latestDate.toISOString().split('T')[0]; // Format: YYYY-MM-DD
-      
-      console.log('[Home] Henter nye aktiviteter siden', sinceDate);
-      dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
-    } else {
-      // Hvis vi ikke har noen aktiviteter, hent alle
-      console.log('[Home] Ingen eksisterende aktiviteter, henter alle (1000)');
-      dispatch(fetchAllActivities({ forceRefresh: true, count: 1000 }));
+    // Rydd opp eventuell tidligere refresh-timeout for å unngå overlappende kall
+    if (syncRefreshTimeout.current) {
+      clearTimeout(syncRefreshTimeout.current);
     }
-  }, [dispatch, activities]);
+
+    // Kjør en full oppfriskning av aktivitetslisten med force refresh
+    dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+    dispatch(fetchActivityCount());
+
+    syncRefreshTimeout.current = setTimeout(() => {
+      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 1000, offset: 50 }));
+      syncRefreshTimeout.current = null;
+    }, 500);
+  }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
+
+  useEffect(() => {
+    return () => {
+      if (syncRefreshTimeout.current) {
+        clearTimeout(syncRefreshTimeout.current);
+      }
+    };
+  }, []);
 
   // Automatisk sjekk for nye aktiviteter når siden får fokus (ikke ved initial load)
   useEffect(() => {
@@ -315,29 +319,23 @@ export default function Home() {
   }, []);
 
   const handleRefreshActivities = useCallback(() => {
-    // Reset localStorage når vi refresher aktiviteter
     localStorage.removeItem('activitiesLoadedCount');
-    
-    // Hvis vi har aktiviteter, hent kun nye siden siste aktivitet
-    if (activities.length > 0) {
-      const latestActivity = activities.reduce((latest, current) => {
-        return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-      });
-      
-      const latestDate = new Date(latestActivity.startTimeLocal);
-      const sinceDate = latestDate.toISOString().split('T')[0];
-      
-      console.log('[Home] Refresh: Henter nye aktiviteter siden', sinceDate);
-      dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: true }));
-    } else {
-      // Hvis ingen aktiviteter, hent alle
-      console.log('[Home] Refresh: Ingen eksisterende aktiviteter, henter alle (1000)');
-      dispatch(fetchAllActivities({ forceRefresh: true, count: 1000 }));
+
+    if (syncRefreshTimeout.current) {
+      clearTimeout(syncRefreshTimeout.current);
     }
+
+    console.log('[Home] Refresh: Tvinger full oppdatering av aktivitetslisten');
+    dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+    dispatch(fetchActivityCount());
+
+    syncRefreshTimeout.current = setTimeout(() => {
+      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 1000, offset: 50 }));
+      syncRefreshTimeout.current = null;
+    }, 500);
     
-    // Sett timeFilter til 'all' for å vise alle aktiviteter
     setTimeFilter('all');
-  }, [activities, dispatch]);
+  }, [dispatch]);
 
 
 

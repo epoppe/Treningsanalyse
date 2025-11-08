@@ -99,3 +99,6 @@ export function useBodyBatteryByActivity(activityId: number, enabled: boolean = 
 
 
 
+
+
+

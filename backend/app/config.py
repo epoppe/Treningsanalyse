@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     
     # Lactate threshold speed konfigurasjon (i m/s)
     # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API
-    LACTATE_THRESHOLD_SPEED: Optional[float] = 3.11  # m/s, tilsvarer 5:21 min/km pace
+    LACTATE_THRESHOLD_SPEED: Optional[float] = 1000 / (5 * 60 + 22)  # m/s, tilsvarer 5:22 min/km pace
     
     # Data Storage konfigurasjon
     DATA_DIR: str = os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR.absolute()))
