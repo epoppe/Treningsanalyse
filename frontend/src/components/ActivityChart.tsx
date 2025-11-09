@@ -11,23 +11,9 @@ import {
   Legend,
   ResponsiveContainer
 } from 'recharts';
-import styled from 'styled-components';
 import { Activity } from '../store/slices/activitiesSlice';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
-
-const ChartContainer = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 0.5rem;
-  height: 400px;
-`;
-
-const Title = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
-`;
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 interface ActivityChartProps {
   activities: Activity[];
@@ -56,10 +42,28 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
 function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
   if (activities.length === 0) {
     return (
-      <ChartContainer>
-        <Title>{title}</Title>
-        <p>Ingen data å vise for denne perioden.</p>
-      </ChartContainer>
+      <Card
+        className="h-[420px]"
+        style={{
+          border: '1px solid rgba(226, 232, 240, 0.9)',
+          borderRadius: '18px',
+          background: '#fff',
+          marginBottom: '1rem',
+          height: '420px',
+        }}
+      >
+        <CardHeader style={{ padding: '1.25rem 1.25rem 0.5rem 1.25rem' }}>
+          <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
+            {title}
+          </CardTitle>
+        </CardHeader>
+        <CardContent
+          className="flex h-full items-center justify-center text-sm text-muted-foreground"
+          style={{ padding: '0 1.25rem 1.25rem 1.25rem', color: '#475569', fontSize: '0.95rem' }}
+        >
+          Ingen data å vise for denne perioden.
+        </CardContent>
+      </Card>
     );
   }
 
@@ -181,51 +185,72 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
   };
 
   return (
-    <ChartContainer>
-      <Title>{title} {groupingTitle}</Title>
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis
-            dataKey="groupKey"
-            height={50}
-            interval={0}
-            tick={<CustomAxisTick data={chartData} />}
-          />
-          <YAxis
-            label={{
-              value: getYAxisLabel(),
-              angle: -90,
-              position: 'insideLeft'
-            }}
-            domain={getYAxisDomain()}
-          />
-          <Tooltip
-            content={({ active, payload, label }) => {
-              if (active && payload && payload.length && payload[0].value) {
-                return (
-                  <div style={{
-                    background: 'white',
-                    padding: '0.5rem',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px'
-                  }}>
-                    <p><strong>{groupByMonth ? 'Måned' : 'Uke (start)'}: {payload[0].payload.date}</strong></p>
-                    <p>{`Total ${getYAxisLabel().toLowerCase()}: ${payload[0].value.toFixed(2)}`}</p>
-                  </div>
-                );
-              }
-              return null;
-            }}
-          />
-          <Bar
-            dataKey={metric}
-            fill="#3498db"
-            name={getYAxisLabel()}
-          />
-        </BarChart>
-      </ResponsiveContainer>
-    </ChartContainer>
+    <Card
+      className="h-[420px]"
+      style={{
+        border: '1px solid rgba(226, 232, 240, 0.9)',
+        borderRadius: '18px',
+        background: '#fff',
+        marginBottom: '1rem',
+        height: '420px',
+      }}
+    >
+      <CardHeader className="pb-3" style={{ padding: '1.25rem 1.25rem 0.5rem 1.25rem' }}>
+        <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
+          {title} {groupingTitle}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="h-[340px]" style={{ padding: '0 1.25rem 1.25rem 1.25rem', height: '340px' }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+            <XAxis
+              dataKey="groupKey"
+              height={50}
+              interval={0}
+              tick={<CustomAxisTick data={chartData} />}
+            />
+            <YAxis
+              label={{
+                value: getYAxisLabel(),
+                angle: -90,
+                position: 'insideLeft',
+                fill: '#64748b',
+                fontSize: 12,
+              }}
+              domain={getYAxisDomain()}
+              tick={{ fill: '#64748b', fontSize: 12 }}
+              axisLine={{ stroke: '#e2e8f0' }}
+              tickLine={{ stroke: '#e2e8f0' }}
+            />
+            <Tooltip
+              content={({ active, payload }) => {
+                if (active && payload && payload.length && payload[0].value) {
+                  return (
+                    <div className="rounded-md border border-border bg-popover px-3 py-2 text-sm shadow-md">
+                      <p className="font-semibold text-foreground">
+                        {groupByMonth ? 'Måned' : 'Uke (start)'}: {payload[0].payload.date}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {`Total ${getYAxisLabel().toLowerCase()}: ${Number(payload[0].value).toFixed(2)}`}
+                      </p>
+                    </div>
+                  );
+                }
+                return null;
+              }}
+            />
+            <Legend />
+            <Bar
+              dataKey={metric}
+              fill="hsl(var(--primary))"
+              name={getYAxisLabel()}
+              radius={[6, 6, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
   );
 }
 

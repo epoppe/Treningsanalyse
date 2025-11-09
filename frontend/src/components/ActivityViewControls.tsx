@@ -1,61 +1,7 @@
 'use client';
 
 import React from 'react';
-import styled from 'styled-components';
-
-const ViewControlsContainer = styled.div`
-  display: flex;
-  gap: 1rem;
-  margin-bottom: 1rem;
-  justify-content: center;
-  align-items: center;
-  flex-wrap: wrap;
-`;
-
-const TimeFilterButton = styled.button<{ $active: boolean }>`
-  background-color: ${props => props.$active ? '#007bff' : '#6c757d'};
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-
-  &:hover {
-    background-color: ${props => props.$active ? '#0056b3' : '#5a6268'};
-  }
-
-  &:disabled {
-    background-color: #555;
-    cursor: not-allowed;
-  }
-`;
-
-const RefreshActivitiesButton = styled.button`
-  background-color: #007bff;
-  color: white;
-  border: none;
-  padding: 8px 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 14px;
-
-  &:hover {
-    background-color: #0056b3;
-  }
-
-  &:disabled {
-    background-color: #555;
-    cursor: not-allowed;
-  }
-`;
-
-const ActivityCount = styled.div`
-  color: #666;
-  font-size: 14px;
-  white-space: nowrap;
-  margin-left: auto;
-`;
+import { Button } from '@/components/ui/button';
 
 interface ActivityViewControlsProps {
   onTimeFilterChange?: (filter: 'all' | '12months' | '3months') => void;
@@ -65,49 +11,97 @@ interface ActivityViewControlsProps {
   activityCount?: string;
 }
 
-const ActivityViewControls: React.FC<ActivityViewControlsProps> = ({ 
-  onTimeFilterChange, 
+const ActivityViewControls: React.FC<ActivityViewControlsProps> = ({
+  onTimeFilterChange,
   currentTimeFilter = 'all',
   onRefreshActivities,
   isRefreshing = false,
-  activityCount
+  activityCount,
 }) => {
+  const timeFilters: Array<{ label: string; value: '12months' | '3months' }> = [
+    { label: 'Se 3 måneder', value: '3months' },
+    { label: 'Se 12 måneder', value: '12months' },
+  ];
+
   return (
-    <ViewControlsContainer>
-      {onTimeFilterChange && (
-        <>
-          <TimeFilterButton 
-            $active={currentTimeFilter === '12months'}
-            onClick={() => onTimeFilterChange('12months')}
+    <div
+      style={{
+        display: 'flex',
+        width: '100%',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'nowrap',
+        border: '1px solid rgba(226, 232, 240, 0.9)',
+        borderRadius: '18px',
+        background: '#f8fafc',
+        padding: '0.75rem 1rem',
+        boxShadow: '0 4px 14px rgba(15, 23, 42, 0.05)',
+      }}
+    >
+      <div className="flex flex-nowrap items-center gap-2">
+        {timeFilters.map((filter) => {
+          const isActive = currentTimeFilter === filter.value;
+          return (
+            <Button
+              key={filter.value}
+              type="button"
+              variant={isActive ? 'default' : 'secondary'}
+              size="sm"
+              disabled={isRefreshing}
+              onClick={() => onTimeFilterChange?.(filter.value)}
+              style={{
+                minWidth: '9rem',
+                display: 'inline-flex',
+                justifyContent: 'center',
+                padding: '0.45rem 1rem',
+                borderRadius: '9999px',
+                border: '1px solid rgba(148, 163, 184, 0.4)',
+                backgroundColor: isActive ? '#2563eb' : '#e2e8f0',
+                color: isActive ? '#f8fafc' : '#1e293b',
+                cursor: isRefreshing ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {filter.label}
+            </Button>
+          );
+        })}
+        {onRefreshActivities && (
+          <Button
+            type="button"
+            variant={currentTimeFilter === 'all' ? 'default' : 'outline'}
+            size="sm"
             disabled={isRefreshing}
+            onClick={() => {
+              onRefreshActivities();
+              onTimeFilterChange?.('all');
+            }}
+            className="min-w-[7rem] justify-center text-sm"
+            style={{
+              minWidth: '7rem',
+              display: 'inline-flex',
+              justifyContent: 'center',
+              padding: '0.45rem 1rem',
+              borderRadius: '9999px',
+              border: '1px solid rgba(148, 163, 184, 0.4)',
+              backgroundColor: currentTimeFilter === 'all' ? '#2563eb' : '#f8fafc',
+              color: currentTimeFilter === 'all' ? '#f8fafc' : '#1e293b',
+              cursor: isRefreshing ? 'not-allowed' : 'pointer',
+            }}
           >
-            Se 12 måneder
-          </TimeFilterButton>
-          <TimeFilterButton 
-            $active={currentTimeFilter === '3months'}
-            onClick={() => onTimeFilterChange('3months')}
-            disabled={isRefreshing}
-          >
-            Se 3 måneder
-          </TimeFilterButton>
-        </>
-      )}
-      
-      {onRefreshActivities && (
-        <RefreshActivitiesButton 
-          onClick={onRefreshActivities}
-          disabled={isRefreshing}
-        >
-          {isRefreshing ? 'Laster...' : 'Se alle'}
-        </RefreshActivitiesButton>
-      )}
-      
+            {isRefreshing ? 'Laster...' : 'Se alle'}
+          </Button>
+        )}
+      </div>
+
       {activityCount && (
-        <ActivityCount>
+        <span
+          className="whitespace-nowrap text-sm font-semibold"
+          style={{ fontSize: '0.875rem', color: '#1e293b' }}
+        >
           {activityCount}
-        </ActivityCount>
+        </span>
       )}
-    </ViewControlsContainer>
+    </div>
   );
 };
 

@@ -1,14 +1,9 @@
 'use client';
 
 import { memo, useEffect, useState } from 'react';
-import styled from 'styled-components';
 import { Activity } from '../types';
 import { activitiesApi } from '../utils/api';
 import ActivityCard from './ActivityCard';
-
-const ActivityContainer = styled.div`
-  padding: 0.5rem;
-`;
 
 interface ActivityListProps {
   activities: Activity[];
@@ -110,17 +105,28 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
 
   if (activities.length === 0) {
     return (
-      <ActivityContainer>
-        <div style={{ textAlign: 'center', padding: '2rem', color: '#666' }}>
-          <h3>Ingen aktiviteter å vise</h3>
-          <p>Velg aktivitetstyper fra filteret ovenfor for å se aktiviteter.</p>
-        </div>
-      </ActivityContainer>
+      <div
+        className="rounded-2xl border border-dashed border-border/70 bg-muted/40 p-10 text-center text-sm text-muted-foreground"
+        style={{
+          border: '1px dashed rgba(148, 163, 184, 0.6)',
+          borderRadius: '16px',
+          padding: '2.5rem',
+          textAlign: 'center',
+          color: '#64748b',
+        }}
+      >
+        <h3 className="text-base font-semibold text-foreground" style={{ color: '#0f172a', fontSize: '1rem', fontWeight: 600 }}>
+          Ingen aktiviteter å vise
+        </h3>
+        <p className="mt-2 max-w-md mx-auto" style={{ marginTop: '0.75rem', maxWidth: '32rem', marginLeft: 'auto', marginRight: 'auto' }}>
+          Juster filtrene ovenfor for å se aktiviteter eller synkroniser nye økter.
+        </p>
+      </div>
     );
   }
 
   return (
-    <ActivityContainer>
+    <div className="space-y-3" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {activities.map((activity) => {
         const hrvValue = hrvData[activity.activityId];
 
@@ -133,7 +139,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
           />
         );
       })}
-    </ActivityContainer>
+    </div>
   );
 };
 

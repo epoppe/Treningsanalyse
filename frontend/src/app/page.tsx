@@ -419,10 +419,12 @@ export default function Home() {
       
       <FiltersContainer>
         <FilterSection>
-          <FilterTitle>Velg aktivitetstyper</FilterTitle>
-          <div>
-            <SelectAllButton onClick={handleSelectAll}>Velg alle</SelectAllButton>
-            <ClearAllButton onClick={handleClearAll}>Fjern alle</ClearAllButton>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+            <FilterTitle style={{ margin: 0 }}>Velg aktivitetstyper</FilterTitle>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <SelectAllButton onClick={handleSelectAll}>Velg alle</SelectAllButton>
+              <ClearAllButton onClick={handleClearAll}>Fjern alle</ClearAllButton>
+            </div>
           </div>
           <CheckboxContainer>
             {activityTypes.map(([typeKey, readableName]) => (

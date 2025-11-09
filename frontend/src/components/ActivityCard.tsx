@@ -1,117 +1,8 @@
 'use client';
 
 import { memo } from 'react';
-import styled from 'styled-components';
-import { Activity } from '../types';
 import { useRouter } from 'next/navigation';
-
-const ActivityCardWrapper = styled.div`
-  background: white;
-  border-radius: 8px;
-  padding: 0.75rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
-  transition: box-shadow 0.2s;
-  
-  &:hover {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-  }
-`;
-
-const ActivityTitle = styled.h3`
-  margin: 0 0 0.5rem 0;
-  color: #2c3e50;
-  font-size: 1.1rem;
-`;
-
-const ActivityDetails = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(60px, 1fr));
-  gap: 0.5rem;
-  color: #666;
-  font-size: 0.9rem;
-`;
-
-const ActivityStat = styled.div<{ $statKey?: string; $value?: number | null }>`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 0.5rem;
-  border-radius: 4px;
-  min-height: 60px;
-  justify-content: center;
-  background-color: ${({ $statKey, $value }) => {
-    if ($value === null || $value === undefined) return '#f8f9fa'; // default gray
-
-    if ($statKey === 'decoupling') {
-      if ($value > 10) return '#fee2e2'; // red-100 for high decoupling
-      if ($value >= 5) return '#fef9c3'; // yellow-100 for moderate decoupling
-      return '#dcfce7'; // green-100 for low decoupling
-    }
-    
-    if ($statKey === 'negative_split') {
-      return $value > 0 ? '#fee2e2' : '#dcfce7'; // red-100 for positive, green-100 for negative
-    }
-
-    if ($statKey === 'hrv') {
-      if ($value < 35) return '#fee2e2'; // red-100
-      if ($value <= 37) return '#fef9c3'; // yellow-100
-      return '#dcfce7'; // green-100
-    }
-
-    if ($statKey === 'aerobic_effect') {
-      if ($value < 2.0) return '#f8f9fa'; // gray - Minimal effect
-      if ($value < 3.0) return '#dbeafe'; // blue-100 - Aerobic benefit
-      if ($value < 4.0) return '#dcfce7'; // green-100 - High aerobic benefit
-      if ($value < 5.0) return '#fef9c3'; // yellow-100 - Very high aerobic benefit
-      return '#fee2e2'; // red-100 - Overreaching
-    }
-
-    if ($statKey === 'anaerobic_effect') {
-      if ($value < 2.0) return '#f8f9fa'; // gray - Minimal effect
-      if ($value < 3.0) return '#dbeafe'; // blue-100 - Anaerobic benefit
-      if ($value < 4.0) return '#dcfce7'; // green-100 - High anaerobic benefit
-      if ($value < 5.0) return '#fef9c3'; // yellow-100 - Very high anaerobic benefit
-      return '#fee2e2'; // red-100 - Overreaching
-    }
-
-    if ($statKey === 'tss') {
-      if ($value < 50) return '#f8f9fa'; // gray - Very low load
-      if ($value < 100) return '#dbeafe'; // blue-100 - Low load
-      if ($value < 200) return '#dcfce7'; // green-100 - Moderate load
-      if ($value < 300) return '#fef9c3'; // yellow-100 - High load
-      if ($value < 400) return '#fee2e2'; // red-100 - Very high load
-      return '#7f1d1d'; // red-900 - Extremely high load
-    }
-
-    if ($statKey === 'power') {
-      if (!$value || $value <= 0) return '#f8f9fa'; // gray - No power data
-      if ($value < 200) return '#dbeafe'; // blue-100 - Low power
-      if ($value < 300) return '#dcfce7'; // green-100 - Moderate power
-      if ($value < 400) return '#fef9c3'; // yellow-100 - High power
-      if ($value < 500) return '#fee2e2'; // red-100 - Very high power
-      return '#7f1d1d'; // red-900 - Extremely high power
-    }
-
-    return '#f8f9fa'; // default gray
-  }};
-`;
-
-const StatLabel = styled.span`
-  font-size: 0.75rem;
-  color: #666;
-  margin-bottom: 0.25rem;
-  font-weight: 500;
-  text-align: center;
-`;
-
-const StatValue = styled.span`
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: #333;
-  text-align: center;
-`;
+import { Activity } from '../types';
 
 // Utility functions
 const formatDate = (dateString: string) => {
@@ -185,7 +76,7 @@ const formatLactateThreshold = (lactateSpeed?: number) => {
   const paceMinPerKm = 60 / (lactateSpeed * 3.6);
   const minutes = Math.floor(paceMinPerKm);
   const seconds = Math.round((paceMinPerKm - minutes) * 60);
-  return `${minutes}:${seconds.toString().padStart(2, '0')} min/km`;
+  return `${minutes}:${seconds.toString().padStart(2, '0')} m/km`;
 };
 
 const calculatePace = (distance?: number, duration?: number) => {
@@ -203,7 +94,7 @@ const formatPace = (pace?: number) => {
   const minutes = Math.floor(pace);
   const seconds = Math.round((pace - minutes) * 60);
   
-  return `${minutes}:${seconds.toString().padStart(2, '0')} min/km`;
+  return `${minutes}:${seconds.toString().padStart(2, '0')} m/km`;
 };
 
 const formatNegativeSplit = (negativeSplitPercent?: number) => {
@@ -220,6 +111,100 @@ const formatDecoupling = (decouplingPercent?: number) => {
   return `${sign}${decouplingPercent.toFixed(1)}%`;
 };
 
+const formatActivityType = (typeKey?: string) => {
+  if (!typeKey) return null;
+  const map: Record<string, string> = {
+    running: 'Løping',
+    treadmill_running: 'Tredemølle',
+    cycling: 'Sykling',
+    trail_running: 'Terrengløp',
+    walking: 'Gåing',
+    hiking: 'Fottur',
+  };
+  return map[typeKey] ?? typeKey.replace(/_/g, ' ');
+};
+
+const getStatTone = (statKey: string, value?: number | null) => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return {
+      backgroundColor: '#e2e8f0', // slate-200
+      color: '#1e293b',
+      border: '1px solid #cbd5f5',
+    };
+  }
+
+  const toneMap: Record<'emerald' | 'amber' | 'rose' | 'sky' | 'orange' | 'slate', { backgroundColor: string; color: string; border: string }> = {
+    emerald: {
+      backgroundColor: '#d1fae5',
+      color: '#065f46',
+      border: '1px solid #a7f3d0',
+    },
+    amber: {
+      backgroundColor: '#fef3c7',
+      color: '#92400e',
+      border: '1px solid #fde68a',
+    },
+    rose: {
+      backgroundColor: '#ffe4e6',
+      color: '#9f1239',
+      border: '1px solid #fecdd3',
+    },
+    sky: {
+      backgroundColor: '#e0f2fe',
+      color: '#075985',
+      border: '1px solid #bae6fd',
+    },
+    orange: {
+      backgroundColor: '#ffedd5',
+      color: '#9a3412',
+      border: '1px solid #fed7aa',
+    },
+    slate: {
+      backgroundColor: '#e2e8f0',
+      color: '#1e293b',
+      border: '1px solid #cbd5f5',
+    },
+  };
+
+  const accent = (tone: keyof typeof toneMap) => toneMap[tone];
+
+  switch (statKey) {
+    case 'decoupling':
+      if (value > 10) return accent('rose');
+      if (value >= 5) return accent('amber');
+      return accent('emerald');
+    case 'negative_split':
+      return value > 0 ? accent('rose') : accent('emerald');
+    case 'hrv':
+      if (value < 35) return accent('rose');
+      if (value <= 37) return accent('amber');
+      return accent('emerald');
+    case 'aerobic_effect':
+    case 'anaerobic_effect':
+      if (value < 2) return accent('slate');
+      if (value < 3) return accent('sky');
+      if (value < 4) return accent('emerald');
+      if (value < 5) return accent('amber');
+      return accent('rose');
+    case 'tss':
+      if (value < 50) return accent('slate');
+      if (value < 100) return accent('sky');
+      if (value < 200) return accent('emerald');
+      if (value < 300) return accent('amber');
+      if (value < 400) return accent('orange');
+      return accent('rose');
+    case 'power':
+      if (value <= 0) return accent('slate');
+      if (value < 200) return accent('sky');
+      if (value < 300) return accent('emerald');
+      if (value < 400) return accent('amber');
+      if (value < 500) return accent('orange');
+      return accent('rose');
+    default:
+      return accent('slate');
+  }
+};
+
 interface ActivityCardProps {
   activity: Activity;
   hrvValue?: number | null;
@@ -233,12 +218,9 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
     router.push(`/activities/${activity.activityId}`);
   };
 
+  const activityTypeLabel = formatActivityType(activity.activityType?.typeKey);
+
   const stats = [
-    {
-      key: 'date',
-      label: 'Dato',
-      value: formatDate(activity.startTimeLocal)
-    },
     {
       key: 'distance',
       label: 'Distanse',
@@ -266,7 +248,7 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
     },
     {
       key: 'running_economy',
-      label: 'Løpsøkonomi',
+      label: 'Løps-\nøkonomi',
       value: formatRunningEconomy(calculateRunningEconomy(activity.averageSpeed, activity.averageHR, activity.activityType), activity.activityType)
     },
     {
@@ -320,21 +302,88 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
   ];
 
   return (
-    <ActivityCardWrapper onClick={handleClick}>
-      <ActivityTitle>{activity.activityName}</ActivityTitle>
-      <ActivityDetails>
-        {stats.map(stat => (
-          <ActivityStat 
-            key={stat.key} 
-            $statKey={stat.key}
-            $value={stat.rawValue as number | undefined}
-          >
-            <StatLabel>{stat.label}</StatLabel>
-            <StatValue>{stat.value}</StatValue>
-          </ActivityStat>
-        ))}
-      </ActivityDetails>
-    </ActivityCardWrapper>
+    <div
+      onClick={handleClick}
+      className="group cursor-pointer transition hover:bg-accent/30"
+      style={{
+        marginBottom: '0.25rem',
+        padding: '0.5rem 0',
+        borderBottom: '1px solid rgba(226, 232, 240, 0.6)',
+      }}
+    >
+      <div className="mb-1.5 flex items-center">
+        <span
+          className="text-sm font-semibold"
+          style={{ color: '#475569', whiteSpace: 'nowrap', fontSize: '0.875rem', marginRight: '1rem', fontWeight: 600 }}
+        >
+          {formatDate(activity.startTimeLocal)}
+        </span>
+        <span
+          className="flex-1 text-base font-semibold tracking-tight"
+          style={{ fontSize: '0.95rem', fontWeight: 600, color: '#0f172a' }}
+        >
+          {activity.activityName}
+        </span>
+      </div>
+      <div style={{ padding: '0' }}>
+        <div
+          className="grid gap-2"
+          style={{
+            display: 'grid',
+            gap: '8px',
+            gridTemplateColumns: 'repeat(14, minmax(0, 1fr))',
+            paddingBottom: '0.25rem',
+          }}
+        >
+          {stats.map((stat) => (
+            <div
+              key={stat.key}
+              className="min-h-[64px] rounded-lg px-2 py-2 text-xs shadow-sm transition duration-150"
+              style={{
+                display: 'grid',
+                gridTemplateRows: 'repeat(3, minmax(0, 1fr))',
+                ...getStatTone(stat.key, stat.rawValue as number | null | undefined),
+              }}
+            >
+              <div
+                className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
+                style={{
+                  fontSize: '0.625rem',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  color: '#475569',
+                  letterSpacing: '0.05em',
+                  marginBottom: '0.2rem',
+                  whiteSpace: 'pre-line',
+                  lineHeight: 1.2,
+                  display: 'block',
+                  gridRow: '1 / span 2',
+                  alignSelf: 'start',
+                }}
+              >
+                {stat.label}
+              </div>
+              <div
+                className="text-xs font-semibold"
+                style={{
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: '#0f172a',
+                  lineHeight: 1.25,
+                  wordBreak: 'break-word',
+                  whiteSpace: 'normal',
+                  display: 'block',
+                  gridRow: '3 / span 1',
+                  alignSelf: 'end',
+                }}
+              >
+                {stat.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -346,6 +395,7 @@ export default memo(ActivityCard, (prevProps, nextProps) => {
     prevProps.isLoadingHrv === nextProps.isLoadingHrv
   );
 });
+
 
 
 
