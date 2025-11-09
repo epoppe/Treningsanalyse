@@ -8,7 +8,6 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
-  Legend,
   ResponsiveContainer
 } from 'recharts';
 import { Activity } from '../store/slices/activitiesSlice';
@@ -43,23 +42,23 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
   if (activities.length === 0) {
     return (
       <Card
-        className="h-[420px]"
+        className="h-[280px]"
         style={{
           border: '1px solid rgba(226, 232, 240, 0.9)',
           borderRadius: '18px',
           background: '#fff',
           marginBottom: '1rem',
-          height: '420px',
+          height: '280px',
         }}
       >
-        <CardHeader style={{ padding: '1.25rem 1.25rem 0.5rem 1.25rem' }}>
+        <CardHeader style={{ padding: '1rem 1rem 0.15rem 1rem' }}>
           <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
             {title}
           </CardTitle>
         </CardHeader>
         <CardContent
           className="flex h-full items-center justify-center text-sm text-muted-foreground"
-          style={{ padding: '0 1.25rem 1.25rem 1.25rem', color: '#475569', fontSize: '0.95rem' }}
+          style={{ padding: '0 1rem 0.4rem 1rem', color: '#475569', fontSize: '0.95rem' }}
         >
           Ingen data å vise for denne perioden.
         </CardContent>
@@ -186,21 +185,21 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
 
   return (
     <Card
-      className="h-[420px]"
+      className="h-[280px]"
       style={{
         border: '1px solid rgba(226, 232, 240, 0.9)',
         borderRadius: '18px',
         background: '#fff',
         marginBottom: '1rem',
-        height: '420px',
+        height: '280px',
       }}
     >
-      <CardHeader className="pb-3" style={{ padding: '1.25rem 1.25rem 0.5rem 1.25rem' }}>
+      <CardHeader className="pb-2" style={{ padding: '1rem 1rem 0.15rem 1rem' }}>
         <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
           {title} {groupingTitle}
         </CardTitle>
       </CardHeader>
-      <CardContent className="h-[340px]" style={{ padding: '0 1.25rem 1.25rem 1.25rem', height: '340px' }}>
+      <CardContent className="h-[260px]" style={{ padding: '0 1rem 0.4rem 1rem', height: '260px' }}>
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={chartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
@@ -240,7 +239,6 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
                 return null;
               }}
             />
-            <Legend />
             <Bar
               dataKey={metric}
               fill="hsl(var(--primary))"

@@ -20,16 +20,9 @@ const MainContainer = styled.div`
 
 
 
-const FiltersContainer = styled.div`
-  margin-bottom: 0.25rem;
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: flex-start;
-`;
-
 const FilterSection = styled.div`
+  width: 100%;
+  box-sizing: border-box;
   background: white;
   padding: 0.5rem;
   border-radius: 8px;
@@ -406,40 +399,38 @@ export default function Home() {
 
   return (
     <MainContainer>
-      <ActivityViewControls 
-        onTimeFilterChange={handleTimeFilterChange}
-        currentTimeFilter={timeFilter}
-        onRefreshActivities={handleRefreshActivities}
-        isRefreshing={status === 'loading'}
-        activityCount={totalCount !== null ? `Viser ${filteredActivities.length} av ${loadedCount} aktiviteter` : undefined}
-      />
+      <div style={{ width: '100%', marginBottom: '0.25rem' }}>
+        <ActivityViewControls 
+          onTimeFilterChange={handleTimeFilterChange}
+          currentTimeFilter={timeFilter}
+          onRefreshActivities={handleRefreshActivities}
+          isRefreshing={status === 'loading'}
+          activityCount={totalCount !== null ? `Viser ${filteredActivities.length} av ${loadedCount} aktiviteter` : undefined}
+        />
+      </div>
       
       
-      
-      
-      <FiltersContainer>
-        <FilterSection>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <FilterTitle style={{ margin: 0 }}>Velg aktivitetstyper</FilterTitle>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <SelectAllButton onClick={handleSelectAll}>Velg alle</SelectAllButton>
-              <ClearAllButton onClick={handleClearAll}>Fjern alle</ClearAllButton>
-            </div>
+      <FilterSection style={{ width: '100%', boxSizing: 'border-box', marginBottom: '0.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+          <FilterTitle style={{ margin: 0 }}>Velg aktivitetstyper</FilterTitle>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <SelectAllButton onClick={handleSelectAll}>Velg alle</SelectAllButton>
+            <ClearAllButton onClick={handleClearAll}>Fjern alle</ClearAllButton>
           </div>
-          <CheckboxContainer>
-            {activityTypes.map(([typeKey, readableName]) => (
-              <CheckboxLabel key={typeKey}>
-                <Checkbox
-                  type="checkbox"
-                  checked={selectedActivityTypes.includes(typeKey)}
-                  onChange={(e) => handleActivityTypeChange(typeKey, e.target.checked)}
-                />
-                <CheckboxText>{readableName}</CheckboxText>
-              </CheckboxLabel>
-            ))}
-          </CheckboxContainer>
-        </FilterSection>
-      </FiltersContainer>
+        </div>
+        <CheckboxContainer>
+          {activityTypes.map(([typeKey, readableName]) => (
+            <CheckboxLabel key={typeKey}>
+              <Checkbox
+                type="checkbox"
+                checked={selectedActivityTypes.includes(typeKey)}
+                onChange={(e) => handleActivityTypeChange(typeKey, e.target.checked)}
+              />
+              <CheckboxText>{readableName}</CheckboxText>
+            </CheckboxLabel>
+          ))}
+        </CheckboxContainer>
+      </FilterSection>
 
 
       <ActivityChart 

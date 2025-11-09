@@ -306,12 +306,12 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
       onClick={handleClick}
       className="group cursor-pointer transition hover:bg-accent/30"
       style={{
-        marginBottom: '0.25rem',
-        padding: '0.5rem 0',
+        marginBottom: '0.125rem',
+        padding: '0.25rem 0',
         borderBottom: '1px solid rgba(226, 232, 240, 0.6)',
       }}
     >
-      <div className="mb-1.5 flex items-center">
+      <div className="mb-1 flex items-center">
         <span
           className="text-sm font-semibold"
           style={{ color: '#475569', whiteSpace: 'nowrap', fontSize: '0.875rem', marginRight: '1rem', fontWeight: 600 }}

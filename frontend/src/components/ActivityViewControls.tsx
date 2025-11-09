@@ -28,6 +28,7 @@ const ActivityViewControls: React.FC<ActivityViewControlsProps> = ({
       style={{
         display: 'flex',
         width: '100%',
+        boxSizing: 'border-box',
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'nowrap',
