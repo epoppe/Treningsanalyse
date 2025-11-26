@@ -193,7 +193,7 @@ const BodyBatteryPage: React.FC = () => {
     setError(null);
     
     try {
-      const response = await api.getBodyBatteryData(startDate, endDate);
+      const response = await api.getBodyBatteryData(startDate, endDate) as BodyBatteryResponse;
       setData(response.body_battery_data || []);
     } catch (err: any) {
       setError(err.message || 'Feil ved henting av Body Battery-data');
@@ -205,7 +205,7 @@ const BodyBatteryPage: React.FC = () => {
 
   const fetchStatistics = async () => {
     try {
-      const response = await api.getBodyBatteryStatistics();
+      const response = await api.getBodyBatteryStatistics() as BodyBatteryStatistics;
       setStatistics(response);
     } catch (err: any) {
       console.error('Feil ved henting av Body Battery-statistikk:', err);

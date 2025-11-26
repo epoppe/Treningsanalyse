@@ -48,7 +48,7 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
         
         // Hent negativ split data
         try {
-          const negativeSplitData = await analysisApi.getNegativeSplit(activityId);
+          const negativeSplitData = await analysisApi.getNegativeSplit(activityId) as NegativeSplitData;
           setNegativeSplit(negativeSplitData);
         } catch (err) {
           console.log('Negative split ikke tilgjengelig for denne aktiviteten');
@@ -56,7 +56,7 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
 
         // Hent decoupling data
         try {
-          const decouplingData = await analysisApi.getDecoupling(activityId);
+          const decouplingData = await analysisApi.getDecoupling(activityId) as DecouplingData;
           setDecoupling(decouplingData);
         } catch (err) {
           console.log('Decoupling ikke tilgjengelig for denne aktiviteten');

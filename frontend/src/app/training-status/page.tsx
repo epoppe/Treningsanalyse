@@ -168,7 +168,7 @@ export default function TrainingStatusPage() {
     setError(null);
     
     try {
-      const response = await analysisApi.getTrainingOverview(selectedPeriod);
+      const response = await analysisApi.getTrainingOverview(selectedPeriod) as TrainingOverview;
       console.log('Training Overview Response:', response);
       setData(response);
     } catch (err: any) {

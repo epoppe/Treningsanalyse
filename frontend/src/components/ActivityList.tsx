@@ -10,7 +10,7 @@ interface ActivityListProps {
 }
 
 const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
-  const [hrvData, setHrvData] = useState<{[activityId: string]: number | null}>({});
+  const [hrvData, setHrvData] = useState<{[activityId: string]: number | null | undefined}>({});
   const [isLoadingHrv, setIsLoadingHrv] = useState(false);
 
   // Fetch HRV data progressively
@@ -33,7 +33,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
         console.log(`[HRV] 🚀 Progressive HRV-loading: ${activitiesNeedingHrv.length} aktiviteter trenger HRV (av ${activities.length} totalt)`);
 
         if (activitiesNeedingHrv.length === 0) {
-          const hrvResults: {[activityId: string]: number | null} = {};
+          const hrvResults: {[activityId: string]: number | null | undefined} = {};
           activities.forEach(activity => {
             hrvResults[activity.activityId] = null;
           });
@@ -43,7 +43,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
         }
 
         // Initialize result object with null for all
-        const hrvResults: {[activityId: string]: number | null} = {};
+        const hrvResults: {[activityId: string]: number | null | undefined} = {};
         activities.forEach(activity => {
           const activityDate = new Date(activity.startTimeLocal);
           hrvResults[activity.activityId] = activityDate.getFullYear() < 2023 ? null : undefined;
@@ -64,7 +64,8 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
             // Update result object with new data
             Object.entries(hrvResponse.hrv_data).forEach(([activityId, hrvData]) => {
               if (hrvData && typeof hrvData === 'object' && 'last_night_avg' in hrvData) {
-                hrvResults[activityId] = hrvData.last_night_avg;
+                const last = (hrvData as any).last_night_avg as number | null | undefined;
+                hrvResults[activityId] = last ?? null;
               } else {
                 hrvResults[activityId] = null;
               }
@@ -90,7 +91,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
         
       } catch (error) {
         console.error('[HRV] ❌ Feil ved henting av HRV-data:', error);
-        const hrvResults: {[activityId: string]: number | null} = {};
+        const hrvResults: {[activityId: string]: number | null | undefined} = {};
         activities.forEach(activity => {
           hrvResults[activity.activityId] = null;
         });

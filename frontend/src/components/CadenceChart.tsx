@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
 
@@ -113,6 +113,9 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
   }
 
   const dates = activitiesWithCadence.map(a => parseISO(a.startTimeLocal));
+  const timestamps = dates.map(d => d.getTime());
+  const minDate = new Date(Math.min(...timestamps));
+  const maxDate = new Date(Math.max(...timestamps));
 
   const showPerActivity = timeFilter === '3m';
   const groupByWeek = !showPerActivity; // Alltid ukeverdier når ikke per aktivitet
@@ -132,8 +135,7 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
         date: format(parseISO(activity.startTimeLocal), 'dd.MM.yy'),
         cadence: activity.averageRunningCadenceInStepsPerMinute,
         activityId: activity.activityId
-      }))
-      .sort((a, b) => (a.activityId && b.activityId) ? a.activityId - b.activityId : 0);
+      }));
   } else {
     // Alltid ukeverdier
     const weeklyDataMap = activitiesWithCadence.reduce((acc, activity) => {
@@ -154,7 +156,7 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
       return acc;
     }, {} as Record<string, any>);
 
-    const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });
+    const allWeeks = eachWeekOfInterval({ start: minDate, end: maxDate }, { weekStartsOn: 1 });
     
     chartData = allWeeks.map(weekStart => {
       const year = getYear(weekStart);
@@ -209,7 +211,7 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
           <YAxis
             label={{ value: 'Skritt/min', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
-            tickFormatter={(tick) => Math.round(tick)}
+            tickFormatter={(tick) => String(Math.round(tick))}
           />
           <Tooltip
             contentStyle={{ 

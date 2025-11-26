@@ -25,7 +25,7 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialiserer applikasjonen ved oppstart."""
-    logger.info("Starte applikasjonen...")
+    logger.info("Starte applikasjonen... (v2 - med nye normaliseringer)")
     
     # Logg konfigurasjonsdetaljer
     logger.info(f"Bruker Garmin e-post: {settings.GARMIN_EMAIL[:4]}...")

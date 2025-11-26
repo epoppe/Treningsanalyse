@@ -16,6 +16,7 @@ const ActivityDetailPage = () => {
     const params = useParams();
     const id = Number(params.id);
     const [detailsReady, setDetailsReady] = useState(false);
+    const [detailsData, setDetailsData] = useState<any[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -27,6 +28,8 @@ const ActivityDetailPage = () => {
                 if (!response.ok) {
                     throw new Error(`Klarte ikke hente detaljer: ${response.statusText}`);
                 }
+                const data = await response.json();
+                setDetailsData(data);
                 // Dataene er nå hentet og lagret på serveren. Vi kan nå laste grafene.
                 setDetailsReady(true);
             } catch (err) {
@@ -67,19 +70,37 @@ const ActivityDetailPage = () => {
 
             <Card className="mt-6">
                 <div className="h-96">
-                   <PlotlyChart activityId={id} chartType="pulse" />
+                    <PlotlyChart
+                        data={detailsData}
+                        xKey="timestamp"
+                        yKeys={['heart_rate']}
+                        title="Puls over tid"
+                        yAxisTitle="Puls (bpm)"
+                    />
                 </div>
             </Card>
 
             <Card className="mt-6">
                  <div className="h-96">
-                    <PlotlyChart activityId={id} chartType="pace" />
+                    <PlotlyChart
+                        data={detailsData}
+                        xKey="elapsed_time"
+                        yKeys={['speed']}
+                        title="Fart over tid"
+                        yAxisTitle="Fart (km/t)"
+                    />
                 </div>
             </Card>
 
             <Card className="mt-6">
                 <div className="h-96">
-                    <PlotlyChart activityId={id} chartType="altitude" />
+                    <PlotlyChart
+                        data={detailsData}
+                        xKey="timestamp"
+                        yKeys={['altitude']}
+                        title="Høydeprofil"
+                        yAxisTitle="Høydemeter (moh)"
+                    />
                 </div>
             </Card>
         </main>

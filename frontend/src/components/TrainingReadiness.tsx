@@ -321,19 +321,19 @@ export default function TrainingReadiness({ date, showDetails = true }: Training
           <ComponentCard>
             <ComponentTitle>Søvn</ComponentTitle>
             <ComponentScore>{Math.round(components.sleep_score)}</ComponentScore>
-            <ComponentWeight>30% vekt</ComponentWeight>
+            <ComponentWeight>15% vekt</ComponentWeight>
           </ComponentCard>
           
           <ComponentCard>
             <ComponentTitle>HRV</ComponentTitle>
             <ComponentScore>{Math.round(components.hrv_score)}</ComponentScore>
-            <ComponentWeight>20% vekt</ComponentWeight>
+            <ComponentWeight>15% vekt</ComponentWeight>
           </ComponentCard>
           
           <ComponentCard>
             <ComponentTitle>Form / TSB</ComponentTitle>
             <ComponentScore>{Math.round(components.form_score)}</ComponentScore>
-            <ComponentWeight>50% vekt</ComponentWeight>
+            <ComponentWeight>70% vekt</ComponentWeight>
             {readinessData.details?.form_value !== undefined && (
               <FormValueInfo>
                 TSB: {readinessData.details.form_value.toFixed(1)}

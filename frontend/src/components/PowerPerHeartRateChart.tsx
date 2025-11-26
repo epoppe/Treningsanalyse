@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
 
@@ -139,7 +139,7 @@ export default function PowerPerHeartRateChart({
         }
         return null;
       })
-      .filter((e) => e !== null && isFinite(e));
+      .filter((e): e is number => e !== null && isFinite(e as number));
 
     if (powerPerHRValues.length === 0) return null;
     return powerPerHRValues.reduce((a, b) => a + b, 0) / powerPerHRValues.length;
@@ -158,12 +158,15 @@ export default function PowerPerHeartRateChart({
   } else {
     // Gruppering per uke eller måned
     const dates = runningActivities.map(a => parseISO(a.startTimeLocal));
-    const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
+    const timestamps = dates.map(d => d.getTime());
+    const minDate = new Date(Math.min(...timestamps));
+    const maxDate = new Date(Math.max(...timestamps));
+    const yearSpan = differenceInYears(maxDate, minDate);
     const groupByMonth = yearSpan >= 2;
 
     if (groupByMonth) {
       groupingTitle = '(per måned)';
-      const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
+      const allMonths = eachMonthOfInterval({ start: minDate, end: maxDate });
       
       chartData = allMonths.map(monthStart => {
         const year = getYear(monthStart);
@@ -186,7 +189,7 @@ export default function PowerPerHeartRateChart({
       });
     } else {
       groupingTitle = '(per uke)';
-      const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });
+      const allWeeks = eachWeekOfInterval({ start: minDate, end: maxDate }, { weekStartsOn: 1 });
       
       chartData = allWeeks.map(weekStart => {
         const year = getYear(weekStart);

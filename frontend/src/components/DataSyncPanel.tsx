@@ -198,7 +198,7 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
             }
             setStatusMessage(message);
             // Hent nye aktiviteter og trigger oppdatering av statistikk
-            dispatch(fetchActivities());
+            dispatch(fetchActivities({}));
             setTimeout(() => setStatusMessage(''), 8000); // Fjerner melding etter 8 sek
           } else {
             setStatusMessage(`Feil under synkronisering: ${statusData.error}`);
@@ -221,7 +221,7 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
     }
     try {
       setStatusMessage('Starter synkronisering...');
-      const response = await api.syncActivities(startDate, endDate);
+      const response = await api.syncActivities(startDate, endDate) as any;
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Synkroniseringsfeil:', err);
@@ -232,7 +232,12 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
   const handleSync30Days = async () => {
     try {
       setStatusMessage('Starter synkronisering for siste 30 dager...');
-      const response = await api.syncRecentActivities();
+      const end = new Date();
+      const start = new Date();
+      start.setDate(end.getDate() - 30);
+      const startStr = start.toISOString().split('T')[0];
+      const endStr = end.toISOString().split('T')[0];
+      const response = await api.syncActivities(startStr, endStr) as any;
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Feil ved synkronisering av siste 30 dager:', err);

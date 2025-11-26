@@ -2,7 +2,7 @@
 Training Readiness API Router.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 from typing import Optional
 from datetime import date
@@ -23,6 +23,7 @@ def get_training_readiness_service():
 
 @router.get("/training-readiness")
 async def get_training_readiness(
+    response: Response,
     target_date: Optional[date] = Query(None, description="Dato for training readiness (YYYY-MM-DD)"),
     service: TrainingReadinessService = Depends(get_training_readiness_service)
 ):
@@ -30,6 +31,11 @@ async def get_training_readiness(
     Hent training readiness score for en gitt dato.
     Hvis ingen dato er spesifisert, brukes dagens dato.
     """
+    # Disable caching
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    
     try:
         readiness = service.calculate_training_readiness(target_date)
         logger.info(f"DEBUG - Readiness components: {readiness.get('components', {})}")

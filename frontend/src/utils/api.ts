@@ -229,7 +229,8 @@ export const activitiesApi = {
 
   // Training Readiness API
   getTrainingReadiness: async (date?: string) => {
-    const params = date ? `?target_date=${date}` : '';
+    const timestamp = new Date().getTime();
+    const params = date ? `?target_date=${date}&_t=${timestamp}` : `?_t=${timestamp}`;
     const response = await apiClient.get<ApiResponse<any>>(`/training-readiness${params}`);
     return response.data;
   },

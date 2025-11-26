@@ -141,10 +141,10 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
     const windowData = sortedData.slice(Math.max(0, index - 6), index + 1);
     const validValues = windowData
       .map(d => d.overall_score)
-      .filter(v => v !== null && v !== undefined && !isNaN(v));
+      .filter((v): v is number => v !== null && v !== undefined && !isNaN(v as number));
     
     if (validValues.length >= 4) {
-      const avg = validValues.reduce((sum, v) => sum + v!, 0) / validValues.length;
+      const avg = validValues.reduce((sum, v) => sum + v, 0) / validValues.length;
       return { ...item, rolling_avg_7d: avg };
     }
     
@@ -156,7 +156,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
     const allValues = dataWithRollingAvg.flatMap(d => [
       d.overall_score,
       d.rolling_avg_7d
-    ]).filter(v => v !== null && v !== undefined && !isNaN(v));
+    ]).filter((v): v is number => v !== null && v !== undefined && !isNaN(v as number));
     
     if (allValues.length === 0) return [0, 100];
 
@@ -170,10 +170,10 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
   // Beregn statistikk
   const validScores = dataWithRollingAvg
     .map(d => d.overall_score)
-    .filter(v => v !== null && v !== undefined && !isNaN(v));
+    .filter((v): v is number => v !== null && v !== undefined && !isNaN(v as number));
   
   const avgScore = validScores.length > 0 
-    ? validScores.reduce((sum, v) => sum + v!, 0) / validScores.length 
+    ? validScores.reduce((sum, v) => sum + v, 0) / validScores.length 
     : 0;
   
   const latestScore = dataWithRollingAvg[dataWithRollingAvg.length - 1]?.overall_score;
@@ -212,7 +212,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
           <YAxis
             label={{ value: 'Overall Score', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
-            tickFormatter={(tick) => Math.round(tick)}
+            tickFormatter={(tick) => String(Math.round(tick))}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend />

@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
 
@@ -153,12 +153,15 @@ export default function RunningEconomyChart({
       return {
         date: format(parseISO(a.startTimeLocal), 'dd.MM.yy'),
         economy,
-        name: a.name,
+        name: a.activityName,
       };
     });
   } else {
     const dates = runningActivities.map((a) => parseISO(a.startTimeLocal));
-    const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
+    const timestamps = dates.map(d => d.getTime());
+    const minDate = new Date(Math.min(...timestamps));
+    const maxDate = new Date(Math.max(...timestamps));
+    const yearSpan = differenceInYears(maxDate, minDate);
     const groupByMonth = yearSpan >= 2;
     groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
     
@@ -182,8 +185,8 @@ export default function RunningEconomyChart({
       }, {} as Record<string, any>);
   
       const allMonths = eachMonthOfInterval({
-        start: Math.min(...dates),
-        end: Math.max(...dates),
+        start: minDate,
+        end: maxDate,
       });
   
       chartData = allMonths.map((monthStart) => {
@@ -221,7 +224,7 @@ export default function RunningEconomyChart({
       }, {} as Record<string, any>);
   
       const allWeeks = eachWeekOfInterval(
-        { start: Math.min(...dates), end: Math.max(...dates) },
+        { start: minDate, end: maxDate },
         { weekStartsOn: 1 }
       );
   

@@ -742,9 +742,10 @@ const TrainingStressPage: React.FC = () => {
                       ticks: {
                         color: '#666',
                         callback: function(value) {
-                          if (value >= 10) return `${value} (God form)`;
-                          if (value >= 0) return `${value} (Nøytral)`;
-                          return `${value} (Tretthet)`;
+                          const numericValue = Number(value);
+                          if (numericValue >= 10) return `${numericValue} (God form)`;
+                          if (numericValue >= 0) return `${numericValue} (Nøytral)`;
+                          return `${numericValue} (Tretthet)`;
                         }
                       },
                       title: {

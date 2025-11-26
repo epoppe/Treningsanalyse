@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import { Text } from '@tremor/react';
 
-const Plot = dynamic(() => import('react-plotly.js'), {
+const Plot = dynamic<any>(() => import('react-plotly.js'), {
     ssr: false,
 });
 

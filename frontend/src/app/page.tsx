@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchNewActivities, setLoadedCount, Activity } from '../store/slices/activitiesSlice';
+import { fetchActivities, fetchMoreActivities, fetchActivityCount, fetchNewActivities, setLoadedCount } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { selectAllActivities, selectActivitiesStatus, selectActivitiesError, selectActivitiesTotalCount, selectActivitiesLoadedCount } from '../store/slices/activitiesSlice';
 import ActivityList from '../components/ActivityList';
 import ActivityChart from '../components/ActivityChart';
@@ -102,6 +103,7 @@ export default function Home() {
   const error = useAppSelector(selectActivitiesError);
   const totalCount = useAppSelector(selectActivitiesTotalCount);
   const loadedCount = useAppSelector(selectActivitiesLoadedCount);
+  const isRefreshing = status === 'loading';
   const [filteredActivities, setFilteredActivities] = useState<Activity[]>([]);
   const [selectedActivityTypes, setSelectedActivityTypes] = useState<string[]>([]);
   const [hasInitializedTypes, setHasInitializedTypes] = useState(false);
@@ -122,7 +124,8 @@ export default function Home() {
     dispatch(fetchActivityCount());
 
     syncRefreshTimeout.current = setTimeout(() => {
-      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 1000, offset: 50 }));
+      // Øk limit til 5000 for å sikre at vi får alle aktiviteter
+      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
       syncRefreshTimeout.current = null;
     }, 500);
   }, [dispatch]);
@@ -165,8 +168,24 @@ export default function Home() {
       }
     };
 
+    // Håndter visibilitychange for å oppdatere når brukeren navigerer tilbake til fanen
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && hasRestoredFromStorage) {
+        console.log('[Home] Side ble synlig, tvinger full oppdatering...');
+        dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+        dispatch(fetchActivityCount());
+        setTimeout(() => {
+          dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
+        }, 500);
+      }
+    };
+
     window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [dispatch, activities.length, hasRestoredFromStorage]);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
@@ -217,7 +236,7 @@ export default function Home() {
       console.log('[Home] 🚀 Progressive loading: Henter første 50 aktiviteter...');
       
       // 1. Last FØRST 50 aktiviteter for rask visning (uten details for ytelse)
-      dispatch(fetchActivities({ limit: 50, offset: 0 }));
+      dispatch(fetchActivities({ limit: 50 }));
       dispatch(setLoadedCount(50));
       
       // 2. Hent total count
@@ -226,7 +245,8 @@ export default function Home() {
       // 3. Last resten i bakgrunnen etter kort pause
       setTimeout(() => {
         console.log('[Home] 📥 Laster resten av aktivitetene i bakgrunnen...');
-        dispatch(fetchMoreActivities({ limit: 1000, offset: 50 }));
+        // Øk limit til 5000 for å sikre at vi får alle aktiviteter
+        dispatch(fetchMoreActivities({ limit: 5000, offset: 50 }));
       }, 500); // 500ms pause slik at bruker får se siden først
       
       setHasRestoredFromStorage(true);
@@ -274,22 +294,29 @@ export default function Home() {
     if (selectedActivityTypes.length === 0) {
       tempActivities = [];
     } else {
-      tempActivities = tempActivities.filter(activity => 
-        selectedActivityTypes.includes(activity.activityType?.typeKey || '')
-      );
+      tempActivities = tempActivities.filter(activity => {
+        const typeKey = activity.activityType?.typeKey;
+        // Hvis aktivitet mangler type (f.eks. eldre økter eller aktiviteter som ikke har blitt mappet riktig),
+        // så viser vi den uansett så lenge brukeren har minst én type valgt.
+        // Dette sikrer at tredemølle-økter og andre «ukjente» typer ikke faller ut av aktivitetslisten.
+        if (!typeKey) {
+          return true;
+        }
+        return selectedActivityTypes.includes(typeKey);
+      });
     }
 
     // Filtrer på tid
     tempActivities = getFilteredActivitiesByTime(tempActivities);
 
     setFilteredActivities(tempActivities);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activities, selectedActivityTypes, loadedCount, timeFilter]);
 
   useEffect(() => {
     // Lagre loadedCount i localStorage når den endres
     if (loadedCount > 0) {
       localStorage.setItem('activitiesLoadedCount', loadedCount.toString());
-      console.log('[Home] Lagret loadedCount i localStorage:', loadedCount);
     }
   }, [loadedCount]);
 
@@ -323,7 +350,8 @@ export default function Home() {
     dispatch(fetchActivityCount());
 
     syncRefreshTimeout.current = setTimeout(() => {
-      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 1000, offset: 50 }));
+      // Øk limit til 5000 for å sikre at vi får alle aktiviteter
+      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
       syncRefreshTimeout.current = null;
     }, 500);
     
@@ -404,7 +432,7 @@ export default function Home() {
           onTimeFilterChange={handleTimeFilterChange}
           currentTimeFilter={timeFilter}
           onRefreshActivities={handleRefreshActivities}
-          isRefreshing={status === 'loading'}
+          isRefreshing={isRefreshing}
           activityCount={totalCount !== null ? `Viser ${filteredActivities.length} av ${loadedCount} aktiviteter` : undefined}
         />
       </div>
@@ -432,15 +460,17 @@ export default function Home() {
         </CheckboxContainer>
       </FilterSection>
 
-
       <ActivityChart 
         activities={filteredActivities} 
         metric="distance" 
         title="Distanse over tid" 
         useDynamicYAxis={timeFilter !== 'all'}
       />
-      <RunningEconomyTable activities={filteredActivities} />
-      <ActivityList activities={filteredActivities} />
+      
+      {/* Activity list section */}
+      <div style={{ marginTop: '2rem' }}>
+        <ActivityList activities={filteredActivities} />
+      </div>
     </MainContainer>
   );
 }

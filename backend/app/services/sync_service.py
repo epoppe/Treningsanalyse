@@ -454,17 +454,30 @@ class SyncService:
                 if activity_start_time.tzinfo is None:
                     activity_start_time = activity_start_time.replace(tzinfo=timezone.utc)
                 is_recent = activity_start_time >= recent_cutoff
-                should_skip = (activity_id in existing_ids and 
-                              not (force_refresh_recent and is_recent))
+                
+                # Hvis ignore_sync_state er True (brukt ved manuell synk av valgt periode),
+                # skal vi alltid overskrive eksisterende aktiviteter i perioden
+                if ignore_sync_state:
+                    should_skip = False
+                    if activity_id in existing_ids:
+                        logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (ignore_sync_state=True, overskriver alltid).")
+                        existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+                        if existing_activity:
+                            self.db.delete(existing_activity)
+                else:
+                    # Normal logikk: hopp over hvis ikke nylig, eller oppdater hvis force_refresh_recent
+                    should_skip = (activity_id in existing_ids and 
+                                  not (force_refresh_recent and is_recent))
+                    
+                    if activity_id in existing_ids and force_refresh_recent and is_recent:
+                        logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (force_refresh_recent=True).")
+                        # Slett eksisterende aktivitet først
+                        existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+                        if existing_activity:
+                            self.db.delete(existing_activity)
                 
                 if should_skip:
                     continue
-                elif activity_id in existing_ids and force_refresh_recent and is_recent:
-                    logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (force_refresh_recent=True).")
-                    # Slett eksisterende aktivitet først
-                    existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
-                    if existing_activity:
-                        self.db.delete(existing_activity)
 
                 # Hent detaljerte data (FIT-fil) - kun for nylige aktiviteter for å unngå timeout
                 details_json = None

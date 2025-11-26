@@ -143,9 +143,9 @@ export default function DagligReadinessPage() {
             <div className="grid grid-cols-1 gap-2 mt-4">
               {Object.entries(readinessData.components).map(([component, score]) => {
                 const componentNames: {[key: string]: string} = {
-                  'sleep_score': 'Søvn (30% vekt)',
-                  'hrv_score': 'HRV (20% vekt)',
-                  'form_score': 'Form/TSB (50% vekt)'
+                  'sleep_score': 'Søvn (15% vekt)',
+                  'hrv_score': 'HRV (15% vekt)',
+                  'form_score': 'Form/TSB (70% vekt)'
                 };
                 return (
                   <div key={component} className="flex justify-between p-2 bg-gray-50 rounded">
@@ -180,7 +180,7 @@ export default function DagligReadinessPage() {
             Dato: {formatDate(readinessData.date)}
           </h3>
           <p className="text-gray-600">
-            Daglig readiness score beregnet basert på søvn (40%), HRV (35%), og Form/TSB (25%) - Training Stress Balance fra de siste 60 dagene.
+            Daglig readiness score beregnet basert på søvn (15%), HRV (15%), og Form/TSB (70%) - Training Stress Balance fra de siste 60 dagene.
           </p>
         </div>
       )}

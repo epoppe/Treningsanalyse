@@ -11,7 +11,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
 
@@ -145,12 +145,15 @@ export default function VO2MaxChart({
       return {
         date: format(parseISO(a.startTimeLocal), 'dd.MM.yy'),
         vo2Max: a.vO2MaxValue,
-        name: a.name,
+        name: a.activityName,
       };
     });
   } else {
     const dates = runningActivities.map((a) => parseISO(a.startTimeLocal));
-    const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
+    const timestamps = dates.map(d => d.getTime());
+    const minDate = new Date(Math.min(...timestamps));
+    const maxDate = new Date(Math.max(...timestamps));
+    const yearSpan = differenceInYears(maxDate, minDate);
     const groupByMonth = yearSpan >= 2;
     groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
     
@@ -174,8 +177,8 @@ export default function VO2MaxChart({
       }, {} as Record<string, any>);
   
       const allMonths = eachMonthOfInterval({
-        start: Math.min(...dates),
-        end: Math.max(...dates),
+        start: minDate,
+        end: maxDate,
       });
   
       chartData = allMonths.map((monthStart) => {
@@ -212,8 +215,8 @@ export default function VO2MaxChart({
       }, {} as Record<string, any>);
 
       const allWeeks = eachWeekOfInterval({
-        start: Math.min(...dates),
-        end: Math.max(...dates),
+        start: minDate,
+        end: maxDate,
       }, { weekStartsOn: 1 });
 
       chartData = allWeeks.map((weekStart) => {
@@ -237,7 +240,9 @@ export default function VO2MaxChart({
   const dataWithMovingAverage = calculateMovingAverage(chartData, 4);
 
   // Beregn y-akse domene
-  const vo2MaxValues = chartData.map(d => d.vo2Max).filter(v => v !== null);
+  const vo2MaxValues = chartData
+    .map(d => d.vo2Max)
+    .filter((v): v is number => v !== null && v !== undefined);
   const yAxisDomain = () => {
     if (vo2MaxValues.length === 0) return [0, 100];
     const min = Math.min(...vo2MaxValues);

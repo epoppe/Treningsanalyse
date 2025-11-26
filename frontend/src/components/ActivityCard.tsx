@@ -25,7 +25,7 @@ const calculateRunningEconomy = (averageSpeed?: number, averageHR?: number, acti
   return (speedInKmh / averageHR) * 100;
 };
 
-const formatRunningEconomy = (economy?: number, activityType?: any) => {
+const formatRunningEconomy = (economy?: number | null, activityType?: any) => {
   const isRunningActivity = activityType?.typeKey?.toLowerCase().includes('running') && 
                            !activityType?.typeKey?.toLowerCase().includes('treadmill');
   
@@ -88,8 +88,8 @@ const calculatePace = (distance?: number, duration?: number) => {
   return durationMin / distanceKm;
 };
 
-const formatPace = (pace?: number) => {
-  if (!pace) return 'N/A';
+const formatPace = (pace?: number | null) => {
+  if (pace === null || pace === undefined || Number.isNaN(pace)) return 'N/A';
   
   const minutes = Math.floor(pace);
   const seconds = Math.round((pace - minutes) * 60);
@@ -236,10 +236,10 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
       label: 'Pace',
       value: formatPace(calculatePace(activity.distance, activity.duration))
     },
-    ...(activity.averageHR > 0 ? [{
+    ...((activity.averageHR ?? 0) > 0 ? [{
       key: 'average_hr',
       label: 'Snitt puls',
-      value: `${Math.round(activity.averageHR)} bpm`
+      value: `${Math.round(activity.averageHR!)} bpm`
     }] : []),
     {
       key: 'vo2_max',

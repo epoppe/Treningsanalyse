@@ -68,6 +68,7 @@ interface HrvData {
 interface HrvChartProps {
   data: HrvData[];
   title: string;
+  subtitle?: string;
 }
 
 // Tilpasset tooltip for HRV-data
@@ -122,7 +123,7 @@ const CustomAxisTick = ({ x, y, payload }: any) => {
   }
 };
 
-export default function HrvChart({ data, title }: HrvChartProps) {
+export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
   const [showTrend, setShowTrend] = useState(true);
   const [showBaselines, setShowBaselines] = useState(true);
 
@@ -178,7 +179,7 @@ export default function HrvChart({ data, title }: HrvChartProps) {
       d.rolling_avg_7d,
       showBaselines ? d.baseline_balanced_lower : null,
       showBaselines ? d.baseline_balanced_upper : null
-    ]).filter(v => v !== null && v !== undefined && !isNaN(v));
+    ]).filter((v): v is number => v !== null && v !== undefined && !isNaN(v as number));
     
     if (allValues.length === 0) return [0, 100];
 
@@ -197,6 +198,10 @@ export default function HrvChart({ data, title }: HrvChartProps) {
 
   return (
     <ChartContainer>
+      <InfoPanel style={{ marginBottom: '0.5rem' }}>
+        <div><strong>{title}</strong></div>
+        {subtitle && <div style={{ marginTop: '0.25rem' }}>{subtitle}</div>}
+      </InfoPanel>
       <InfoPanel style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <strong>Statistikk:</strong> 
@@ -227,7 +232,7 @@ export default function HrvChart({ data, title }: HrvChartProps) {
           <YAxis
             label={{ value: 'HRV (ms)', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
-            tickFormatter={(tick) => Math.round(tick)}
+            tickFormatter={(tick) => String(Math.round(tick))}
           />
           <Tooltip content={<CustomTooltip />} />
           <Legend />

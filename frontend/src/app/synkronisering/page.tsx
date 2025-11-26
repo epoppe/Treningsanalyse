@@ -6,6 +6,8 @@ import { format, subDays, startOfDay, endOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 import { api } from '../../utils/api';
 import CacheCalculationPanel from '../../components/CacheCalculationPanel';
+import { useAppDispatch } from '@/store/hooks';
+import { fetchActivities, fetchMoreActivities, fetchActivityCount } from '@/store/slices/activitiesSlice';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -193,6 +195,7 @@ export default function SynkroniseringPage() {
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [activeJobs, setActiveJobs] = useState<Record<string, SyncJob>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const dispatch = useAppDispatch();
 
   const startSync = async (syncFunction: () => Promise<any>, jobId?: string) => {
     setIsLoading(true);
@@ -229,6 +232,15 @@ export default function SynkroniseringPage() {
           window.dispatchEvent(new CustomEvent('syncCompleted', { 
             detail: { jobId, status } 
           }));
+
+          // Oppdater også aktivitetstilstanden direkte i Redux,
+          // slik at aktivitetslisten er oppdatert neste gang du åpner forsiden.
+          dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+          dispatch(fetchActivityCount());
+          setTimeout(() => {
+            // Øk limit til 5000 for å sikre at vi får alle aktiviteter
+            dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
+          }, 500);
         }
       } catch (error) {
         console.error('Feil ved polling av jobb-status:', error);
@@ -329,7 +341,7 @@ export default function SynkroniseringPage() {
         </div>
         
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
-          ⚠️ "Synk alle" vil synkronisere aktiviteter og FIT-data fra 2008, helsedata fra 2020. Kan ta lang tid.
+          ⚠️ &quot;Synk alle&quot; vil synkronisere aktiviteter og FIT-data fra 2008, helsedata fra 2020. Kan ta lang tid.
         </p>
       </SyncSection>
 
@@ -395,9 +407,9 @@ export default function SynkroniseringPage() {
           
           <p><strong>Tips:</strong></p>
           <ul>
-            <li><strong>"Synk nye aktiviteter"</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
-            <li><strong>"Synk valgt periode"</strong> for å synkronisere en spesifikk tidsperiode</li>
-            <li><strong>"Synk alle"</strong> for full synkronisering av alle aktiviteter fra 2008 og helsedata fra 2020 (kan ta lang tid)</li>
+            <li><strong>&quot;Synk nye aktiviteter&quot;</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
+            <li><strong>&quot;Synk valgt periode&quot;</strong> for å synkronisere en spesifikk tidsperiode</li>
+            <li><strong>&quot;Synk alle&quot;</strong> for full synkronisering av alle aktiviteter fra 2008 og helsedata fra 2020 (kan ta lang tid)</li>
             <li>Du kan lukke denne siden - synkroniseringen fortsetter i bakgrunnen</li>
             <li>Sjekk status på jobbene nedenfor for å følge fremgangen</li>
           </ul>

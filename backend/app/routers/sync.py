@@ -612,7 +612,16 @@ async def run_calculations_only(job_id: str, storage: DataStorage, start_date: d
             db_session.close()
 
 async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage):
-    """Kjører synkronisering av nye aktiviteter i bakgrunnen."""
+    """
+    Kjører synkronisering av nye aktiviteter i bakgrunnen.
+
+    Viktig:
+    - Når vi synkroniserer nye aktiviteter, skal vi alltid hente ALLE treningsaktiviteter
+      fra og med datoen til siste lagrede aktivitet og frem til i dag.
+    - Vi baserer oss kun på faktisk lagrede aktiviteter i databasen, ikke på SyncState
+      for aktiviteter eller helsedata, slik at vi ikke risikerer å hoppe over økter
+      hvis SyncState er kommet lenger enn dataene i databasen.
+    """
     db_session = None
     try:
         sync_jobs[job_id]["status"] = "processing"
@@ -624,10 +633,18 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
         latest_activity = db_session.query(Activity).order_by(Activity.start_time.desc()).first()
         
         if latest_activity:
-            # Bruk siste aktivitets start_time som startdato
-            start_date = latest_activity.start_time
-            if start_date.tzinfo is None:
-                start_date = start_date.replace(tzinfo=timezone.utc)
+            # Bruk DATOEN til siste aktivitet som startdato (fra og med denne dagen)
+            # Dette sikrer at vi får med alle økter den dagen, også hvis noen mangler
+            # eller har tidligere tidspunkt enn siste lagrede aktivitet.
+            last_activity_time = latest_activity.start_time
+            if last_activity_time.tzinfo is None:
+                last_activity_time = last_activity_time.replace(tzinfo=timezone.utc)
+
+            start_date = datetime.combine(
+                last_activity_time.date(),
+                datetime.min.time(),
+                tzinfo=timezone.utc,
+            )
             
             sync_jobs[job_id]["message"] = f"Synkroniserer fra {start_date.strftime('%Y-%m-%d %H:%M')} til nå..."
             logger.info(f"Starter synkronisering av nye aktiviteter fra {start_date} til nå")
@@ -642,8 +659,18 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
         sync_service = SyncService(garmin_client, storage, db_session)
         
         # 1. Synkroniser aktiviteter med FIT-data
+        #    Her ignorerer vi SyncState og tvinger refresh for nylige data,
+        #    slik at vi ALDRI hopper over økter fordi helsedata eller andre
+        #    sync-states står lenger frem i tid enn selve aktivitetsdataene.
         sync_jobs[job_id]["message"] = "Synkroniserer nye aktiviteter og FIT-data..."
-        activity_result = await sync_service.sync_activities_with_fit_data(start_date, end_date)
+        activity_result = await sync_service.sync_activities_with_fit_data(
+            start_date,
+            end_date,
+            force_refresh_recent=True,
+            fit_data_limit=150,
+            ignore_sync_state=True,
+            fit_download_mode="chunked",
+        )
         
         # 2. Synkroniser helsedata
         sync_jobs[job_id]["message"] = "Synkroniserer helsedata..."

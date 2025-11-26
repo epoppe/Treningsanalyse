@@ -220,7 +220,7 @@ export default function StressPage() {
     setError(null);
     
     try {
-      const response = await api.getStressRange(startDate, endDate);
+      const response = await api.getStressRange(startDate, endDate) as StressData[];
       setData(response || []);
     } catch (err: any) {
       setError(err.message || 'Feil ved henting av stress-data');

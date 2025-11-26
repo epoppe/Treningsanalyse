@@ -162,71 +162,47 @@ class TrainingReadinessService:
         ]
     
     def _calculate_sleep_score(self, sleep_data: List[Dict[str, Any]]) -> float:
-        """Beregn søvnscore (0-100) basert på siste 3 netter."""
+        """
+        Beregn søvnscore (0-100) basert på siste 3 netter.
+        
+        Normalisering: Garmin sleep score svinger mellom 65-100
+        - 65 eller lavere → 0
+        - 100 → 100
+        - Lineær skalering mellom
+        """
+        print("=== NY SLEEP BEREGNING KJØRER ===")
         if not sleep_data:
             return 50.0  # Middels score hvis ingen data
         
         # Fokuser på de siste 3 nettene (mest relevant for dagens readiness)
         recent_sleep = sorted(sleep_data, key=lambda x: x['date'], reverse=True)[:3]
         
-        total_score = 0
-        count = 0
-        
+        scores = []
         for sleep in recent_sleep:
-            score = 0
-            has_data = False
-            
-            # Søvnvarighet (0-40 poeng)
-            if sleep.get('total_sleep_time'):
-                has_data = True
-                sleep_hours = sleep['total_sleep_time'] / 3600
-                if 7 <= sleep_hours <= 9:
-                    score += 40
-                elif 6 <= sleep_hours <= 10:
-                    score += 30
-                elif 5 <= sleep_hours <= 11:
-                    score += 20
-                else:
-                    score += 10
-            
-            # Søvnscore/Overall score (0-30 poeng) - prioriter overall_score hvis tilgjengelig
-            overall_score = sleep.get('overall_score') or sleep.get('sleep_score')
-            if overall_score:
-                has_data = True
-                score += (overall_score / 100) * 30
-            
-            # Søvneffektivitet (0-20 poeng)
-            if sleep.get('sleep_efficiency'):
-                has_data = True
-                efficiency = sleep['sleep_efficiency']
-                if efficiency >= 90:
-                    score += 20
-                elif efficiency >= 85:
-                    score += 15
-                elif efficiency >= 80:
-                    score += 10
-                else:
-                    score += 5
-            
-            # Stress score (0-10 poeng)
-            if sleep.get('stress_score'):
-                has_data = True
-                stress = sleep['stress_score']
-                if stress <= 25:
-                    score += 10
-                elif stress <= 50:
-                    score += 5
-                elif stress <= 75:
-                    score += 2
-            
-            if has_data:
-                total_score += score
-                count += 1
+            # Bruk overall_score eller sleep_score fra Garmin
+            garmin_score = sleep.get('overall_score') or sleep.get('sleep_score')
+            if garmin_score:
+                # Normaliser fra 65-100 til 0-100
+                # Formel: (garmin_score - 65) / (100 - 65) * 100
+                normalized = max(0, min(100, (garmin_score - 65) / 35 * 100))
+                scores.append(normalized)
         
-        return total_score / count if count > 0 else 50.0
+        if scores:
+            avg_score = sum(scores) / len(scores)
+            logger.info(f"Sleep score: Garmin scores={[sleep.get('overall_score') or sleep.get('sleep_score') for sleep in recent_sleep]}, Normalized={avg_score:.1f}")
+            return round(avg_score, 1)
+        
+        return 50.0
     
     def _calculate_hrv_score(self, hrv_data: List[Dict[str, Any]]) -> float:
-        """Beregn HRV-score (0-100)."""
+        """
+        Beregn HRV-score (0-100).
+        
+        Normalisering: HRV (RMSSD) svinger mellom 35-43 ms
+        - 35 eller lavere → 0
+        - 43 eller høyere → 100
+        - Lineær skalering mellom
+        """
         if not hrv_data:
             return 50.0  # Middels score hvis ingen data
         
@@ -244,17 +220,12 @@ class TrainingReadinessService:
         
         avg_rmssd = sum(rmssd_values) / len(rmssd_values)
         
-        # Score basert på RMSSD (forenklet)
-        if avg_rmssd >= 50:
-            return 90.0
-        elif avg_rmssd >= 40:
-            return 80.0
-        elif avg_rmssd >= 30:
-            return 70.0
-        elif avg_rmssd >= 20:
-            return 60.0
-        else:
-            return 40.0
+        # Normaliser fra 35-43 til 0-100
+        # Formel: (avg_rmssd - 35) / (43 - 35) * 100
+        normalized = max(0, min(100, (avg_rmssd - 35) / 8 * 100))
+        
+        logger.info(f"HRV score: Raw RMSSD={avg_rmssd:.1f} ms, Normalized={normalized:.1f}")
+        return round(normalized, 1)
     
     def _calculate_activity_score(self, activity_data: List[Dict[str, Any]]) -> float:
         """Beregn aktivitetsscore (0-100)."""
@@ -384,24 +355,21 @@ class TrainingReadinessService:
     
     def _calculate_form_score(self, form_value: float) -> float:
         """
-        Konverter Training Stress Balance (Form) til readiness score (0-100).
+        Konverter Training Stress Balance (Form/TSB) til readiness score (0-100).
         
-        Form-verdier:
-        - Negativ (-30 til 0): Fatigue/Overreaching → lavere readiness
-        - Rundt 0 (-5 til +5): Balanced → medium readiness
-        - Positiv (0 til +30): Fresh/Peaked → høyere readiness
+        Normalisering: Form svinger mellom -40 til +40
+        - -40 eller lavere → 0 (høy fatigue)
+        - +40 eller høyere → 100 (meget frisk)
+        - 0 (balanced) → 50
+        - Lineær skalering mellom
         
-        Formel: score = 70 + (form * 1.5)
-        - form = -20 → 40 (veldig sliten)
-        - form = -8.5 → 57.25 (moderat sliten)
-        - form = 0 → 70 (balanced)
-        - form = +10 → 85 (godt restituert)
-        - form = +20 → 100 (meget frisk)
+        Formel: (form_value + 40) / 80 * 100
         """
-        score = 70 + (form_value * 1.5)
+        # Normaliser fra -40 til +40 til 0-100
+        normalized = max(0, min(100, (form_value + 40) / 80 * 100))
         
-        # Clamp til 0-100
-        return max(0, min(100, score))
+        logger.info(f"Form score: Raw TSB={form_value:.1f}, Normalized={normalized:.1f}")
+        return round(normalized, 1)
     
     def _calculate_total_score(self, sleep_score: float, hrv_score: float, 
                              form_score: float) -> float:
@@ -409,17 +377,20 @@ class TrainingReadinessService:
         Beregn total training readiness score.
         
         Vektet gjennomsnitt:
-        - Søvn: 30% (viktig for recovery)
-        - HRV: 20% (indikator på recovery)
-        - Form (TSB): 50% (treningsmengde vs recovery - mest kritisk)
+        - Søvn: 15% (viktig for recovery)
+        - HRV: 15% (indikator på recovery)
+        - Form (TSB): 70% (treningsmengde vs recovery - mest kritisk)
         """
         total_score = (
-            sleep_score * 0.30 +
-            hrv_score * 0.20 +
-            form_score * 0.50
+            sleep_score * 0.15 +
+            hrv_score * 0.15 +
+            form_score * 0.70
         )
         
+        logger.info(f"Training Readiness: Sleep={sleep_score:.1f} (15%), HRV={hrv_score:.1f} (15%), Form={form_score:.1f} (70%) => Total={total_score:.1f}")
+        
         return round(total_score, 1)
+        # Endring for å trigge reload
     
     def _get_readiness_status(self, score: float) -> str:
         """Bestem readiness status basert på score."""

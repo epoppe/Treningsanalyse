@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { fetchAllActivities, fetchNewActivities, Activity } from '../../store/slices/activitiesSlice';
+import { fetchAllActivities, fetchNewActivities } from '../../store/slices/activitiesSlice';
+import { Activity } from '../../types';
 import styled from 'styled-components';
 import ActivityChart from '../../components/ActivityChart';
 import MonthlyComparisonChart from '../../components/MonthlyComparisonChart';

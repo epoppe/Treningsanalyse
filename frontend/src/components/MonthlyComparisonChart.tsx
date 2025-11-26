@@ -11,7 +11,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import styled from 'styled-components';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { useEffect, useMemo, useState } from 'react';
 
 const ChartContainer = styled.div`
@@ -79,18 +79,9 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
     fetchSummaries();
   }, [useServerSummaries, JSON.stringify(activityTypes)]);
 
-  if (!useServerSummaries && activities.length === 0) {
-    return (
-      <ChartContainer>
-        <Title>{title}</Title>
-        <p>Ingen data å vise for denne perioden.</p>
-      </ChartContainer>
-    );
-  }
-
   // Vis data fra 2022 til inneværende år
   const currentYear = new Date().getFullYear();
-  const years = [];
+  const years: number[] = [];
   for (let year = 2022; year <= currentYear; year++) {
     years.push(year);
   }
@@ -178,54 +169,65 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
   const baseColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#8dd1e1', '#d084d0', '#82d982'];
   const yearColors = baseColors.slice(0, years.length);
 
+  const showNoData = !useServerSummaries && activities.length === 0;
+
   return (
     <ChartContainer>
       <Title>{title}</Title>
       {loading && <p>Henter serverdata...</p>}
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="month" />
-          <YAxis
-            label={{
-              value: getYAxisLabel(),
-              angle: -90,
-              position: 'insideLeft'
-            }}
-          />
-          <Tooltip
-            content={({ active, payload, label }) => {
-              if (active && payload && payload.length) {
-                return (
-                  <div style={{
-                    background: 'white',
-                    padding: '0.5rem',
-                    border: '1px solid #ddd',
-                    borderRadius: '4px'
-                  }}>
-                    <p><strong>{label}</strong></p>
-                    {payload.map((entry, index) => (
-                      <p key={index} style={{ color: entry.color }}>
-                        {`${entry.dataKey}: ${entry.value?.toFixed(1)} ${getYAxisLabel().toLowerCase()}`}
-                      </p>
-                    ))}
-                  </div>
-                );
-              }
-              return null;
-            }}
-          />
-          <Legend />
-          {years.map((year, index) => (
-            <Bar 
-              key={year}
-              dataKey={year.toString()}
-              fill={yearColors[index]}
-              name={year.toString()}
+      {showNoData ? (
+        <p>Ingen data å vise for denne perioden.</p>
+      ) : (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="month" />
+            <YAxis
+              label={{
+                value: getYAxisLabel(),
+                angle: -90,
+                position: 'insideLeft'
+              }}
             />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
+            <Tooltip
+              content={({ active, payload, label }) => {
+                if (active && payload && payload.length) {
+                  return (
+                    <div style={{
+                      background: 'white',
+                      padding: '0.5rem',
+                      border: '1px solid #ddd',
+                      borderRadius: '4px'
+                    }}>
+                      <p><strong>{label}</strong></p>
+                    {payload.map((entry, index) => {
+                      const rawValue = entry.value as number | string | undefined;
+                      const formattedValue =
+                        typeof rawValue === 'number' ? rawValue.toFixed(1) : String(rawValue ?? '');
+                      return (
+                        <p key={index} style={{ color: entry.color }}>
+                          {`${entry.dataKey}: ${formattedValue} ${getYAxisLabel().toLowerCase()}`}
+                        </p>
+                      );
+                    })}
+                    </div>
+                  );
+                }
+                return null;
+              }}
+            />
+            <Legend />
+            {years.map((year, index) => (
+              <Bar 
+                key={year}
+                dataKey={year.toString()}
+                fill={yearColors[index]}
+                name={year.toString()}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </ChartContainer>
   );
 } 

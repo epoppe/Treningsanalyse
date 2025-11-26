@@ -10,7 +10,7 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
-import { Activity } from '../store/slices/activitiesSlice';
+import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -67,7 +67,10 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
   }
 
   const dates = activities.map(a => parseISO(a.startTimeLocal));
-  const yearSpan = differenceInYears(Math.max(...dates), Math.min(...dates));
+  const timestamps = dates.map(d => d.getTime());
+  const maxDate = new Date(Math.max(...timestamps));
+  const minDate = new Date(Math.min(...timestamps));
+  const yearSpan = differenceInYears(maxDate, minDate);
   const groupByMonth = yearSpan >= 2;
 
   let chartData;
@@ -101,7 +104,7 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
     }
 
     // Deretter, generer en komplett liste over alle måneder i tidsrommet
-    const allMonths = eachMonthOfInterval({ start: Math.min(...dates), end: Math.max(...dates) });
+    const allMonths = eachMonthOfInterval({ start: minDate, end: maxDate });
 
     chartData = allMonths.map(monthStart => {
       const year = getYear(monthStart);
@@ -143,7 +146,7 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
     }
 
     // Deretter, generer en komplett liste over alle uker i tidsrommet
-    const allWeeks = eachWeekOfInterval({ start: Math.min(...dates), end: Math.max(...dates) }, { weekStartsOn: 1 });
+    const allWeeks = eachWeekOfInterval({ start: minDate, end: maxDate }, { weekStartsOn: 1 });
     
     chartData = allWeeks.map(weekStart => {
       const year = getYear(weekStart);
