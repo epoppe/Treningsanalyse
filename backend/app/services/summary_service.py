@@ -316,6 +316,7 @@ class SummaryService:
         total_distance = sum(a.distance or 0 for a in activities)
         total_duration = sum(a.duration or 0 for a in activities)
         total_calories = sum(a.calories or 0 for a in activities)
+        total_tss = sum(a.training_stress_score or 0 for a in activities)
         total_ascent = sum(a.total_ascent or 0 for a in activities)
         total_descent = sum(a.total_descent or 0 for a in activities)
         
@@ -422,6 +423,7 @@ class SummaryService:
             existing_summary.total_distance = total_distance
             existing_summary.total_duration = total_duration
             existing_summary.total_calories = total_calories
+            existing_summary.total_tss = total_tss
             existing_summary.total_ascent = total_ascent
             existing_summary.total_descent = total_descent
             existing_summary.avg_heart_rate = avg_heart_rate
@@ -452,6 +454,7 @@ class SummaryService:
                 total_distance=total_distance,
                 total_duration=total_duration,
                 total_calories=total_calories,
+                total_tss=total_tss,
                 total_ascent=total_ascent,
                 total_descent=total_descent,
                 avg_heart_rate=avg_heart_rate,

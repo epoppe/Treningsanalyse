@@ -95,6 +95,7 @@ class MonthlySummary(Base):
     total_distance = Column(Float, default=0.0)  # meter
     total_duration = Column(Float, default=0.0)  # sekunder
     total_calories = Column(Float, default=0.0)
+    total_tss = Column(Float, default=0.0)  # Training Stress Score
     total_ascent = Column(Float, default=0.0)  # meter
     total_descent = Column(Float, default=0.0)  # meter
     

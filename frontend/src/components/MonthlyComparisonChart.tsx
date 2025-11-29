@@ -30,7 +30,7 @@ const Title = styled.h3`
 
 interface MonthlyComparisonChartProps {
   activities: Activity[];
-  metric: 'distance' | 'time';
+  metric: 'distance' | 'time' | 'tss';
   title: string;
   useServerSummaries?: boolean;
   activityTypes?: string[];
@@ -109,6 +109,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
         let value = 0;
         if (metric === 'distance') value = (activity.distance || 0) / 1000;
         else if (metric === 'time') value = (activity.duration || 0) / 60;
+        else if (metric === 'tss') value = activity.trainingStressScore || 0;
         base[monthKey][year] += value;
       }
     });
@@ -123,6 +124,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
           let value = 0;
           if (metric === 'distance') value = (m.total_distance || 0) / 1000;
           else if (metric === 'time') value = (m.total_duration || 0) / 60; // minutter
+          else if (metric === 'tss') value = m.total_tss || 0;
           base[monthKey][y] = value; // overstyr
         }
       });
@@ -149,12 +151,14 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
         return 'Kilometer';
       case 'time':
         return 'Timer';
+      case 'tss':
+        return 'TSS';
       default:
         return '';
     }
   };
 
-  // Konverter tid til timer hvis nødvendig
+  // Konverter tid til timer hvis nødvendig (TSS trenger ingen konvertering)
   const finalChartData = chartData.map(data => {
     const newData = { ...data };
     if (metric === 'time') {
@@ -162,6 +166,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
         newData[year.toString()] = newData[year.toString()] / 60; // Konverter minutter til timer
       });
     }
+    // TSS brukes direkte uten konvertering
     return newData;
   });
 
@@ -202,11 +207,16 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
                       <p><strong>{label}</strong></p>
                     {payload.map((entry, index) => {
                       const rawValue = entry.value as number | string | undefined;
-                      const formattedValue =
-                        typeof rawValue === 'number' ? rawValue.toFixed(1) : String(rawValue ?? '');
+                      let formattedValue: string;
+                      if (metric === 'tss') {
+                        formattedValue = typeof rawValue === 'number' ? Math.round(rawValue).toString() : String(rawValue ?? '0');
+                      } else {
+                        formattedValue = typeof rawValue === 'number' ? rawValue.toFixed(1) : String(rawValue ?? '');
+                      }
+                      const unit = metric === 'tss' ? '' : ` ${getYAxisLabel().toLowerCase()}`;
                       return (
                         <p key={index} style={{ color: entry.color }}>
-                          {`${entry.dataKey}: ${formattedValue} ${getYAxisLabel().toLowerCase()}`}
+                          {`${entry.dataKey}: ${formattedValue}${unit}`}
                         </p>
                       );
                     })}

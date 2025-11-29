@@ -451,11 +451,14 @@ class GarminClient:
                     "anaerobic_training_effect": summary.get('anaerobicTrainingEffect'),
                     "training_effect_label": summary.get('trainingEffectLabel'),
                     "aerobic_te_message": summary.get('aerobicTrainingEffectMessage'),
-                    "anaerobic_te_message": summary.get('anaerobicTrainingEffectMessage')
+                    "anaerobic_te_message": summary.get('anaerobicTrainingEffectMessage'),
+                    "elevation_gain": summary.get('elevationGain') or summary.get('totalElevationGain'),
+                    "elevation_loss": summary.get('elevationLoss') or summary.get('totalElevationLoss')
                 }
                 
                 logger.info(f"Hentet EPOC data for aktivitet {activity_id}: "
-                           f"Training Load={epoc_data['activity_training_load']}")
+                           f"Training Load={epoc_data['activity_training_load']}, "
+                           f"Elevation Gain={epoc_data['elevation_gain']}")
                 
                 return epoc_data
             else:

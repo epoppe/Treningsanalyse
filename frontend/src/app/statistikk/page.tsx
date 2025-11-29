@@ -696,6 +696,13 @@ const StatistikkPage = () => {
           <ChartsContainer>
             <MonthlyComparisonChart 
               activities={allFilteredActivities} 
+              metric="tss"
+              title="Månedlig TSS fra 2022 (valgte aktivitetstyper)"
+              useServerSummaries
+              activityTypes={selectedActivityTypes}
+            />
+            <MonthlyComparisonChart 
+              activities={allFilteredActivities} 
               metric="distance"
               title="Månedlig distanse fra 2022 (valgte aktivitetstyper)"
               useServerSummaries

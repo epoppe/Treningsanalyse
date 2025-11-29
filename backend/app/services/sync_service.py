@@ -86,6 +86,18 @@ class SyncService:
             fitfile = FitFile(io.BytesIO(fit_data))
             
             records = []
+            total_ascent = None
+            total_descent = None
+            
+            # Hent elevation gain fra session-meldingen
+            for message in fitfile.get_messages("session"):
+                for field in message.fields:
+                    if field.name == 'total_ascent':
+                        total_ascent = field.value
+                    elif field.name == 'total_descent':
+                        total_descent = field.value
+            
+            # Hent records
             for record in fitfile.get_messages("record"):
                 parsed_record = {}
                 for field in record.fields:
@@ -101,8 +113,14 @@ class SyncService:
                 
                 records.append(parsed_record)
             
-            logger.info(f"Parsed {len(records)} FIT-records")
-            return {"records": records}
+            result = {"records": records}
+            if total_ascent is not None:
+                result["total_ascent"] = total_ascent
+            if total_descent is not None:
+                result["total_descent"] = total_descent
+            
+            logger.info(f"Parsed {len(records)} FIT-records, total_ascent={total_ascent}, total_descent={total_descent}")
+            return result
             
         except ImportError:
             logger.error("fitparse-biblioteket er ikke installert. Kan ikke parse FIT-data.")
@@ -566,6 +584,36 @@ class SyncService:
                 except Exception as e:
                     logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
 
+                # Hent elevation gain fra Garmin API (kan være i ulike felter)
+                elevation_gain = (
+                    act_data.get('elevationGain') or 
+                    act_data.get('totalElevationGain') or 
+                    act_data.get('elevationGainMeters') or
+                    None
+                )
+                elevation_loss = (
+                    act_data.get('elevationLoss') or 
+                    act_data.get('totalElevationLoss') or 
+                    act_data.get('elevationLossMeters') or
+                    None
+                )
+                
+                # Hvis elevation gain ikke er i aktivitetslisten, prøv å hente fra FIT-data
+                if elevation_gain is None and details_json:
+                    elevation_gain = details_json.get('total_ascent') or details_json.get('elevation_gain')
+                if elevation_loss is None and details_json:
+                    elevation_loss = details_json.get('total_descent') or details_json.get('elevation_loss')
+                
+                # Hvis elevation gain fortsatt mangler, prøv å hente fra activity-service
+                if elevation_gain is None and is_recent:
+                    try:
+                        epoc_data = await self.garmin_client.get_activity_epoc_data(activity_id)
+                        if epoc_data:
+                            elevation_gain = epoc_data.get('elevation_gain')
+                            elevation_loss = elevation_loss or epoc_data.get('elevation_loss')
+                    except Exception as e:
+                        logger.debug(f"Kunne ikke hente elevation gain fra activity-service for {activity_id}: {e}")
+
                 new_activity = Activity(
                     activity_id=activity_id,
                     activity_name=act_data.get('activityName'),
@@ -583,12 +631,20 @@ class SyncService:
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                     epoc=act_data.get('activityTrainingLoad'),  # EPOC data
                     lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
+                    total_ascent=elevation_gain,  # Elevation gain i meter
+                    total_descent=elevation_loss,  # Elevation loss i meter
                     detailed_metrics=details_json
                 )
                 self.db.add(new_activity)
                 added_count += 1
 
             self.db.commit()
+
+            # Oppdater lactate threshold for alle løpeaktiviteter hvis det er en ny verdi
+            try:
+                await self._update_lactate_threshold_for_all_running_activities()
+            except Exception as e:
+                logger.warning(f"Feil ved oppdatering av lactate threshold for løpeaktiviteter: {e}")
 
             # Oppdater SyncState for aktiviteter
             try:
@@ -1358,4 +1414,69 @@ class SyncService:
             logger.error(f"Generell feil ved beregning av metrics for aktivitet {activity_id}: {e}")
             results["errors"].append(f"Generell feil: {str(e)}")
         
-        return results 
+        return results
+
+    async def _update_lactate_threshold_for_all_running_activities(self):
+        """
+        Oppdaterer lactate threshold for alle løpeaktiviteter når en ny verdi oppdages.
+        Hvis det er en ny verdi fra Garmin, oppdateres alle løpeaktiviteter som mangler eller har en annen verdi.
+        """
+        try:
+            # Hent den nåværende lactate threshold verdien fra Garmin
+            current_lactate_threshold = await self.garmin_client.get_lactate_threshold_speed()
+            
+            if current_lactate_threshold is None:
+                logger.debug("Ingen lactate threshold verdi tilgjengelig fra Garmin, hopper over oppdatering")
+                return
+            
+            logger.info(f"🔍 Sjekker lactate threshold oppdatering. Nåværende verdi fra Garmin: {current_lactate_threshold} m/s")
+            
+            # Finn alle løpeaktiviteter (inkluderer running, treadmill_running, trail_running, etc.)
+            from sqlalchemy import or_
+            running_activities = self.db.query(Activity).join(ActivityType).filter(
+                or_(
+                    ActivityType.type_key == 'running',
+                    ActivityType.type_key == 'treadmill_running',
+                    ActivityType.type_key == 'trail_running',
+                    ActivityType.type_key == 'street_running',
+                    ActivityType.parent_type_key == 'running'
+                )
+            ).all()
+            
+            if not running_activities:
+                logger.debug("Ingen løpeaktiviteter funnet")
+                return
+            
+            # Finn aktiviteter som mangler lactate threshold eller har en annen verdi
+            activities_to_update = []
+            for activity in running_activities:
+                if activity.lactate_threshold_speed is None:
+                    activities_to_update.append(activity)
+                elif abs(activity.lactate_threshold_speed - current_lactate_threshold) > 0.0001:
+                    # Verdi er forskjellig (med en liten toleranse for flyttall)
+                    activities_to_update.append(activity)
+            
+            if not activities_to_update:
+                logger.debug(f"Alle {len(running_activities)} løpeaktiviteter har allerede riktig lactate threshold verdi ({current_lactate_threshold} m/s)")
+                return
+            
+            logger.info(f"📝 Oppdaterer lactate threshold for {len(activities_to_update)} løpeaktiviteter til {current_lactate_threshold} m/s")
+            
+            # Oppdater alle aktiviteter
+            updated_count = 0
+            for activity in activities_to_update:
+                old_value = activity.lactate_threshold_speed
+                activity.lactate_threshold_speed = current_lactate_threshold
+                updated_count += 1
+                
+                if updated_count <= 5:  # Logg de første 5 for debugging
+                    logger.info(f"  - Aktivitet {activity.activity_id} ({activity.start_time.date()}): {old_value} -> {current_lactate_threshold} m/s")
+            
+            # Commit endringene
+            self.db.commit()
+            logger.info(f"✅ Oppdatert lactate threshold for {updated_count} løpeaktiviteter til {current_lactate_threshold} m/s")
+            
+        except Exception as e:
+            logger.error(f"Feil ved oppdatering av lactate threshold for løpeaktiviteter: {e}", exc_info=True)
+            self.db.rollback()
+            raise 

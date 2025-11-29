@@ -150,6 +150,7 @@ interface MonthlySummary {
   avg_heart_rate: number;
   avg_pace: number;
   total_calories: number;
+  total_tss: number;
   activities_per_day: number;
   activities_per_week: number;
 }
@@ -228,9 +229,21 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
   const fetchMonthlyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=12');
-      const response = await fetch(`http://localhost:8000/api/analysis/monthly-summaries?${queryParams}`);
+      // Legg til timestamp for å unngå caching
+      const timestamp = new Date().getTime();
+      const url = `http://localhost:8000/api/analysis/monthly-summaries?${queryParams}&_t=${timestamp}`;
+      const response = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache'
+        }
+      });
       if (!response.ok) throw new Error('Failed to fetch monthly summaries');
       const data = await response.json();
+      console.log('[SummaryTables] Hentet månedlige sammendrag:', data.length, 'måneder');
+      if (data.length > 0) {
+        console.log('[SummaryTables] Første måned total_tss:', data[0].total_tss);
+      }
       setMonthlyData(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'En ukjent feil oppstod');
@@ -301,6 +314,13 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
 
   const formatCalories = (calories: number) => {
     return calories ? `${Math.round(calories)} kcal` : '-';
+  };
+
+  const formatTSS = (tss: number | null | undefined) => {
+    if (tss === null || tss === undefined || isNaN(tss)) {
+      return '-';
+    }
+    return Math.round(tss).toString();
   };
 
   const formatElevation = (elevation: number) => {
@@ -392,7 +412,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
             <TableHeader>Snitt tempo</TableHeader>
             <TableHeader>Akt/dag</TableHeader>
             <TableHeader>Akt/uke</TableHeader>
-            <TableHeader>Kalorier</TableHeader>
+            <TableHeader>Sum TSS</TableHeader>
           </tr>
         </thead>
         <tbody>
@@ -409,7 +429,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
               <TableCell>{formatPace(month.avg_pace)}</TableCell>
               <TableCell>{month.activities_per_day?.toFixed(1) || '-'}</TableCell>
               <TableCell>{month.activities_per_week?.toFixed(1) || '-'}</TableCell>
-              <TableCell>{formatCalories(month.total_calories)}</TableCell>
+              <TableCell>{formatTSS(month.total_tss)}</TableCell>
             </TableRow>
           ))}
         </tbody>

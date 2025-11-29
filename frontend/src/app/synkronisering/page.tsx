@@ -235,12 +235,14 @@ export default function SynkroniseringPage() {
 
           // Oppdater også aktivitetstilstanden direkte i Redux,
           // slik at aktivitetslisten er oppdatert neste gang du åpner forsiden.
-          dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+          // Hent først de første 100 for rask visning (inkluderer flere nye aktiviteter)
+          dispatch(fetchActivities({ forceRefresh: true, limit: 100 }));
           dispatch(fetchActivityCount());
           setTimeout(() => {
-            // Øk limit til 5000 for å sikre at vi får alle aktiviteter
-            dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
-          }, 500);
+            // Hent alle resterende aktiviteter (opp til 5000)
+            console.log('[Synkronisering] Henter resten av aktivitetene...');
+            dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 100 }));
+          }, 1500);
         }
       } catch (error) {
         console.error('Feil ved polling av jobb-status:', error);

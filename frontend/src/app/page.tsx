@@ -120,14 +120,17 @@ export default function Home() {
     }
 
     // Kjør en full oppfriskning av aktivitetslisten med force refresh
-    dispatch(fetchActivities({ forceRefresh: true, limit: 50 }));
+    // Hent først de første 100 for rask visning (inkluderer flere nye aktiviteter)
+    dispatch(fetchActivities({ forceRefresh: true, limit: 100 }));
     dispatch(fetchActivityCount());
-
+    
+    // Vent litt lenger (1500ms) for å sikre at første batch er ferdig før vi henter resten
     syncRefreshTimeout.current = setTimeout(() => {
-      // Øk limit til 5000 for å sikre at vi får alle aktiviteter
-      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 50 }));
+      console.log('[Home] Henter resten av aktivitetene etter synkronisering...');
+      // Hent alle resterende aktiviteter (opp til 5000)
+      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 100 }));
       syncRefreshTimeout.current = null;
-    }, 500);
+    }, 1500);
   }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
