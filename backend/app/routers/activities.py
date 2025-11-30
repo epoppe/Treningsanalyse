@@ -60,14 +60,16 @@ def get_activities_by_date_range(
         
         # Konverter string til datetime
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        # Legg til en dag til end_dt for å inkludere hele sluttdagen
+        from datetime import timedelta
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
         
         # Hent aktiviteter i perioden med eager loading av activity_type
         activities = db.query(Activity).options(
             joinedload(Activity.activity_type)
         ).filter(
             Activity.start_time >= start_dt,
-            Activity.start_time <= end_dt
+            Activity.start_time < end_dt  # Bruk < i stedet for <= for å unngå å inkludere neste dag
         ).order_by(Activity.start_time.desc()).all()
         
         # Initialiser PowerService kun hvis vi trenger å beregne power
