@@ -126,10 +126,35 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
     );
   }
 
+  // Beregn forrige gyldige VO2 Max-verdi for hver aktivitet
+  const getPreviousValidVO2Max = (currentIndex: number): number | undefined => {
+    // Gå bakover gjennom aktivitetene for å finne forrige gyldige VO2 Max-verdi
+    for (let i = currentIndex - 1; i >= 0; i--) {
+      const prevActivity = activities[i];
+      const typeKey = prevActivity.activityType?.typeKey?.toLowerCase() || '';
+      const isRunningActivity = typeKey === 'running' || typeKey === 'treadmill_running';
+      
+      if (isRunningActivity && prevActivity.vO2MaxValue != null && prevActivity.vO2MaxValue > 0) {
+        return prevActivity.vO2MaxValue;
+      }
+    }
+    return undefined;
+  };
+
   return (
     <div className="space-y-3" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      {activities.map((activity) => {
+      {activities.map((activity, index) => {
         const hrvValue = hrvData[activity.activityId];
+        const previousValidVO2Max = getPreviousValidVO2Max(index);
+        
+        // Debug logging for VO2 Max
+        if (activity.activityType?.typeKey === 'running' && index < 5) {
+          console.log(`[VO2Max Debug] Activity ${activity.activityId} (${activity.startTimeLocal}):`, {
+            vO2MaxValue: activity.vO2MaxValue,
+            previousValidVO2Max: previousValidVO2Max,
+            activityType: activity.activityType?.typeKey
+          });
+        }
 
         return (
           <ActivityCard 
@@ -137,6 +162,7 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
             activity={activity}
             hrvValue={hrvValue}
             isLoadingHrv={isLoadingHrv}
+            previousValidVO2Max={previousValidVO2Max}
           />
         );
       })}

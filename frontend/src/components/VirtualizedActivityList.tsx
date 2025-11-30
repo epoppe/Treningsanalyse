@@ -169,6 +169,21 @@ const VirtualizedActivityList: React.FC<VirtualizedActivityListProps> = ({ activ
     );
   }
 
+  // Beregn forrige gyldige VO2 Max-verdi for hver aktivitet
+  const getPreviousValidVO2Max = (currentIndex: number): number | undefined => {
+    // Gå bakover gjennom aktivitetene for å finne forrige gyldige VO2 Max-verdi
+    for (let i = currentIndex - 1; i >= 0; i--) {
+      const prevActivity = activities[i];
+      const typeKey = prevActivity.activityType?.typeKey?.toLowerCase() || '';
+      const isRunningActivity = typeKey === 'running' || typeKey === 'treadmill_running';
+      
+      if (isRunningActivity && prevActivity.vO2MaxValue != null && prevActivity.vO2MaxValue > 0) {
+        return prevActivity.vO2MaxValue;
+      }
+    }
+    return undefined;
+  };
+
   const items = rowVirtualizer.getVirtualItems();
 
   return (
@@ -178,6 +193,7 @@ const VirtualizedActivityList: React.FC<VirtualizedActivityListProps> = ({ activ
           {items.map((virtualRow) => {
             const activity = activities[virtualRow.index];
             const hrvValue = hrvData[activity.activityId];
+            const previousValidVO2Max = getPreviousValidVO2Max(virtualRow.index);
             
             return (
               <VirtualRow
@@ -190,6 +206,7 @@ const VirtualizedActivityList: React.FC<VirtualizedActivityListProps> = ({ activ
                   activity={activity}
                   hrvValue={hrvValue}
                   isLoadingHrv={isLoadingHrv}
+                  previousValidVO2Max={previousValidVO2Max}
                 />
               </VirtualRow>
             );

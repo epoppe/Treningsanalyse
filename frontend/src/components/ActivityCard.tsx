@@ -34,13 +34,31 @@ const formatRunningEconomy = (economy?: number | null, activityType?: any) => {
   return `${economy.toFixed(2)}`;
 };
 
-const formatVO2Max = (vo2Max?: number, activityType?: any) => {
-  const isRunningActivity = activityType?.typeKey?.toLowerCase().includes('running') && 
-                           !activityType?.typeKey?.toLowerCase().includes('treadmill');
+const formatVO2Max = (vo2Max?: number | null, activityType?: any, previousValidValue?: number) => {
+  const typeKey = activityType?.typeKey?.toLowerCase() || '';
+  const isRunningActivity = typeKey === 'running' || typeKey === 'treadmill_running';
   
-  if (!isRunningActivity) return 'N/A';
-  if (!vo2Max || vo2Max <= 0) return 'N/A';
-  return Math.round(vo2Max).toString();
+  if (!isRunningActivity) {
+    console.log('[formatVO2Max] Ikke løpeaktivitet:', activityType?.typeKey);
+    return 'N/A';
+  }
+  
+  // Hvis nåværende verdi er gyldig, bruk den
+  if (vo2Max != null && vo2Max > 0) {
+    const result = Math.round(vo2Max).toString();
+    console.log('[formatVO2Max] Bruker nåværende verdi:', { vo2Max, result });
+    return result;
+  }
+  
+  // Hvis ingen nåværende verdi, bruk forrige gyldige verdi hvis tilgjengelig
+  if (previousValidValue != null && previousValidValue > 0) {
+    const result = Math.round(previousValidValue).toString();
+    console.log('[formatVO2Max] Bruker forrige verdi:', { previousValidValue, result });
+    return result;
+  }
+  
+  console.log('[formatVO2Max] Ingen verdi, returnerer N/A:', { vo2Max, previousValidValue });
+  return 'N/A';
 };
 
 const formatHrv = (hrv?: number | null) => {
@@ -49,12 +67,12 @@ const formatHrv = (hrv?: number | null) => {
 };
 
 const formatAerobicEffect = (aerobicEffect?: number) => {
-  if (!aerobicEffect || aerobicEffect <= 0) return 'N/A';
+  if (!aerobicEffect || aerobicEffect <= 0) return '0';
   return aerobicEffect.toFixed(1);
 };
 
 const formatAnaerobicEffect = (anaerobicEffect?: number) => {
-  if (!anaerobicEffect || anaerobicEffect <= 0) return 'N/A';
+  if (!anaerobicEffect || anaerobicEffect <= 0) return '0';
   return anaerobicEffect.toFixed(1);
 };
 
@@ -209,9 +227,10 @@ interface ActivityCardProps {
   activity: Activity;
   hrvValue?: number | null;
   isLoadingHrv?: boolean;
+  previousValidVO2Max?: number;
 }
 
-const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadingHrv }) => {
+const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadingHrv, previousValidVO2Max }) => {
   const router = useRouter();
 
   const handleClick = () => {
@@ -242,11 +261,6 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
       value: `${Math.round(activity.averageHR!)} bpm`
     }] : []),
     {
-      key: 'vo2_max',
-      label: 'VO2 Max',
-      value: formatVO2Max(activity.vO2MaxValue, activity.activityType)
-    },
-    {
       key: 'running_economy',
       label: 'Løps-\nøkonomi',
       value: formatRunningEconomy(calculateRunningEconomy(activity.averageSpeed, activity.averageHR, activity.activityType), activity.activityType)
@@ -262,12 +276,6 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
       label: 'Decoupling',
       value: formatDecoupling(activity.decouplingPercent),
       rawValue: activity.decouplingPercent
-    },
-    {
-      key: 'hrv',
-      label: 'HRV',
-      value: isLoadingHrv ? 'Laster...' : formatHrv(hrvValue),
-      rawValue: hrvValue
     },
     {
       key: 'aerobic_effect',
@@ -294,10 +302,22 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
       rawValue: activity.trainingStressScore ?? activity.epoc
     },
     {
+      key: 'hrv',
+      label: 'HRV',
+      value: isLoadingHrv ? 'Laster...' : formatHrv(hrvValue),
+      rawValue: hrvValue
+    },
+    {
       key: 'lactateThresholdSpeed',
       label: 'Lactate Threshold',
       value: formatLactateThreshold(activity.lactateThresholdSpeed),
       rawValue: activity.lactateThresholdSpeed
+    },
+    {
+      key: 'vo2_max',
+      label: 'VO2 Max',
+      value: formatVO2Max(activity.vO2MaxValue, activity.activityType, previousValidVO2Max),
+      rawValue: activity.vO2MaxValue
     },
   ];
 
