@@ -19,8 +19,22 @@ const NavContainer = styled.div`
 
 const NavLinks = styled.div`
   display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
+  gap: 1rem;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  
+  &::-webkit-scrollbar {
+    height: 4px;
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+  }
 `;
 
 const NavLink = styled(Link)<{ $active?: boolean }>`
@@ -78,7 +92,7 @@ export default function Navbar() {
             Treningstatus
           </NavLink>
           <NavLink href="/training-stress" prefetch={false} onClick={(e) => hardNavigate(e, '/training-stress') } $active={pathname === '/training-stress'}>
-            Training Stress Score
+            Training Stress
           </NavLink>
           <NavLink href="/synkronisering" prefetch={false} onClick={(e) => hardNavigate(e, '/synkronisering') } $active={pathname === '/synkronisering'}>
             Synkronisering
