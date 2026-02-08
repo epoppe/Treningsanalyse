@@ -245,6 +245,18 @@ export const activitiesApi = {
     const params = date ? `?target_date=${date}` : '';
     const response = await apiClient.get<ApiResponse<any>>(`/training-readiness/status${params}`);
     return response.data;
+  },
+
+  getReadinessChatResponse: async (message: string, date: string) => {
+    // Bruk Next.js API-rute /readiness-chat som fallback (backend chat gir 404 på noen systemer)
+    const res = await fetch('/readiness-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, date }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || data.response || 'Chat-feil');
+    return data.response;
   }
 };
 
@@ -266,9 +278,6 @@ const healthApi = {
   
   getHrvRange: (startDate: string, endDate: string) => 
     apiCall('get', `/health/hrv/range?start_date=${startDate}&end_date=${endDate}`),
-  
-  getMetricsSummary: (date: string) => 
-    apiCall('get', `/health/metrics/summary?date=${date}`),
 };
 
 export interface BodyBatteryByActivityResponse {

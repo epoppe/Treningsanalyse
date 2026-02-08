@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
@@ -877,3 +878,73 @@ async def get_training_overview(
     except Exception as e:
         logger.error(f"Feil ved henting av treningsoversikt: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# Readiness chat - plassert her for å unngå 404 med training_readiness-router
+class ReadinessChatRequest(BaseModel):
+    message: str
+    date: str  # YYYY-MM-DD
+
+
+def _readiness_recommendation(status: str) -> str:
+    recommendations = {
+        "optimal": "Du er klar for intensiv trening. Gå for det!",
+        "good": "Du kan gjøre moderat til intensiv trening. Lytt til kroppen.",
+        "moderate": "Gjør lett til moderat trening. Fokuser på teknikk og form.",
+        "poor": "Gjør lett trening eller hvile. Prioriter recovery.",
+        "very_poor": "Ta en hviledag. Fokuser på søvn og recovery.",
+        "unknown": "Ikke nok data til å gi anbefaling."
+    }
+    return recommendations.get(status, "Ingen anbefaling tilgjengelig.")
+
+
+@router.post("/readiness-chat")
+async def readiness_chat(body: ReadinessChatRequest):
+    """Chat-endepunkt for spørsmål om training readiness."""
+    from ..services.training_readiness_service import TrainingReadinessService
+    try:
+        target = date.fromisoformat(body.date) if body.date else date.today()
+        service = TrainingReadinessService()
+        readiness = service.calculate_training_readiness(target)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Ugyldig datoformat (bruk YYYY-MM-DD)")
+    except Exception as e:
+        logger.error(f"Feil ved henting av readiness for chat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    msg = body.message.lower().strip()
+    score = readiness.get("total_score", 0)
+    status = readiness.get("readiness_status", "unknown")
+    components = readiness.get("components", {})
+    rec = _readiness_recommendation(status)
+
+    if any(k in msg for k in ["søvn", "sleep", "sovn"]):
+        s = components.get("sleep_score")
+        if s is not None:
+            return {"response": f"Søvnscore for {body.date} er {round(s)}/100. " + (
+                "God søvnkvalitet." if s >= 70 else "Moderat søvn." if s >= 50 else "Søvn kan forbedres – prioriter recovery."
+            )}
+        return {"response": "Ingen søvndata tilgjengelig for denne datoen."}
+
+    if any(k in msg for k in ["hrv", "hjerte", "heart"]):
+        s = components.get("hrv_score")
+        if s is not None:
+            return {"response": f"HRV-score er {round(s)}/100. " + (
+                "HRV er innenfor normalt område." if s >= 70 else "HRV kan indikere økt stress eller tretthet." if s >= 50 else "Lav HRV – vurder hvile og recovery."
+            )}
+        return {"response": "Ingen HRV-data tilgjengelig for denne datoen."}
+
+    if any(k in msg for k in ["form", "tsb", "fatigue", "utmattelse"]):
+        s = components.get("form_score")
+        if s is not None:
+            return {"response": f"Form/TSB-score er {round(s)}/100. " + rec}
+        return {"response": f"Form-data ikke tilgjengelig. Anbefaling: {rec}"}
+
+    if any(k in msg for k in ["klar", "ready", "anbefal", "anbefaling", "trening", "tren", "hva", "hvordan", "er jeg", "begrunn"]):
+        return {"response": (
+            f"Readiness for {body.date}: {round(score)}/100 ({status}). {rec} "
+            f"Komponenter: Søvn {round(components.get('sleep_score', 0))}, "
+            f"HRV {round(components.get('hrv_score', 0))}, Form {round(components.get('form_score', 0))}."
+        )}
+
+    return {"response": f"Readiness-score: {round(score)}/100. {rec}"}

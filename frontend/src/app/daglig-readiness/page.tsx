@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { activitiesApi } from '../../utils/api';
 import { useAppSelector } from '../../store/hooks';
+import ReadinessChat from '../../components/ReadinessChat';
 
 const getStatusText = (status: string): string => {
   const statusMap: { [key: string]: string } = {
@@ -299,6 +300,17 @@ export default function DagligReadinessPage() {
               })}
             </div>
           </div>
+        </div>
+      )}
+
+      {!loading && (
+        <div className="mt-8">
+          <ReadinessChat
+            selectedDate={selectedDate}
+            onSendMessage={async (message, date) => {
+              return await activitiesApi.getReadinessChatResponse(message, date);
+            }}
+          />
         </div>
       )}
 
