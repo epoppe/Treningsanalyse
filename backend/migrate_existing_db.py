@@ -10,9 +10,10 @@ from datetime import datetime
 
 def backup_database():
     """Create a backup of the existing database."""
-    db_path = Path("data/treningsanalyse.db")
+    backend_dir = Path(__file__).parent
+    db_path = backend_dir / "data" / "treningsanalyse.db"
     if db_path.exists():
-        backup_path = Path(f"data/treningsanalyse_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+        backup_path = backend_dir / "data" / f"treningsanalyse_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         shutil.copy2(db_path, backup_path)
         print(f"✓ Database backup created: {backup_path}")
         return backup_path
@@ -20,7 +21,7 @@ def backup_database():
 
 def migrate_activities_table():
     """Migrate activities table to new structure."""
-    db_path = Path("data/treningsanalyse.db")
+    db_path = Path(__file__).parent / "data" / "treningsanalyse.db"
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     
@@ -117,7 +118,7 @@ def migrate_activities_table():
 
 def migrate_activity_types_table():
     """Add missing columns to activity_types table."""
-    db_path = Path("data/treningsanalyse.db")
+    db_path = Path(__file__).parent / "data" / "treningsanalyse.db"
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     

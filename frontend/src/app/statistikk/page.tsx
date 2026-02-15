@@ -368,7 +368,7 @@ const StatistikkPage = () => {
     
     // Oppdater sammendragstabeller i backend
     try {
-      const response = await fetch('http://localhost:8000/api/analysis/refresh-summaries', {
+      const response = await fetch('/api/analysis/refresh-summaries', {
         method: 'POST',
       });
       if (response.ok) {
@@ -512,8 +512,7 @@ const StatistikkPage = () => {
         if (selectedActivityTypes.length > 0) {
           selectedActivityTypes.forEach(t => params.append('activity_types', t));
         }
-        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${base}/api/analysis/monthly-comparison?${params.toString()}`);
+        const res = await fetch(`/api/analysis/monthly-comparison?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
           setMonthlyComparison(Array.isArray(data) ? data : []);

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from dotenv import load_dotenv
@@ -69,7 +70,10 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",  # Frontend-adressen
         "http://localhost:3001",
+        "http://localhost:3002",
         "http://127.0.0.1:3000",
+        "http://127.0.0.1:3001",
+        "http://127.0.0.1:3002",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -95,3 +99,16 @@ app.include_router(bulk.router, prefix="/api", tags=["Bulk Operations"])
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Treningsanalyse API"}
+
+
+@app.get("/api/debug/db-info")
+def debug_db_info(db: Session = Depends(get_db)):
+    """Debug: vis hvilken database som brukes og antall aktiviteter."""
+    from .database.models.activity import Activity
+    from .config import settings
+    count = db.query(Activity).count()
+    return {
+        "database_url": settings.DATABASE_URL[:80] + "..." if len(settings.DATABASE_URL) > 80 else settings.DATABASE_URL,
+        "activity_count": count,
+        "data_dir": settings.DATA_DIR,
+    }

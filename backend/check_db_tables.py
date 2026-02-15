@@ -3,11 +3,12 @@
 Script for å sjekke hvilke tabeller som finnes i SQLite-databasen
 """
 
-import os
 import sqlite3
+from pathlib import Path
 
 def check_tables():
-    conn = sqlite3.connect('treningsanalyse.db')
+    db_path = Path(__file__).parent / 'data' / 'treningsanalyse.db'
+    conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
     
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")

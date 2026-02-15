@@ -153,13 +153,14 @@ class ExportService:
         backup_path = self.export_dir / backup_filename
         
         with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Backup database
-            db_path = Path("treningsanalyse.db")
+            # Backup database (portabel sti: backend/data/treningsanalyse.db)
+            backend_dir = Path(__file__).resolve().parent.parent.parent
+            db_path = backend_dir / "data" / "treningsanalyse.db"
             if db_path.exists():
                 zipf.write(db_path, "database/treningsanalyse.db")
             
             # Backup data-filer
-            data_dir = Path("data")
+            data_dir = backend_dir / "data"
             if data_dir.exists():
                 for file_path in data_dir.rglob("*"):
                     if file_path.is_file():

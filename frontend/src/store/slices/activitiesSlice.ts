@@ -92,7 +92,7 @@ export const fetchActivitiesByDateRange = createAsyncThunk(
   }, { rejectWithValue }) => {
     try {
       const response = await activitiesApi.getActivitiesByDateRange(startDate, endDate, forceRefresh);
-      return response.activities || [];
+      return response?.activities || [];
     } catch (error) {
       const errorInfo = errorHandler(error);
       return rejectWithValue(errorInfo.error);
@@ -219,6 +219,21 @@ const activitiesSlice = createSlice({
       .addCase(fetchActivityCount.rejected, (state, action) => {
         // Ikke endre hovedstatus for count-kall
         state.error = action.payload as string || 'Kunne ikke hente aktivitetsantall';
+      })
+      // fetchActivitiesByDateRange
+      .addCase(fetchActivitiesByDateRange.pending, (state) => {
+        state.status = 'loading';
+        state.error = null;
+      })
+      .addCase(fetchActivitiesByDateRange.fulfilled, (state, action: PayloadAction<Activity[]>) => {
+        state.status = 'succeeded';
+        state.items = action.payload;
+        state.loadedCount = action.payload.length;
+        state.lastSync = new Date().toISOString();
+      })
+      .addCase(fetchActivitiesByDateRange.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string || 'Kunne ikke hente aktiviteter for perioden';
       })
       // fetchAllActivities
       .addCase(fetchAllActivities.pending, (state) => {

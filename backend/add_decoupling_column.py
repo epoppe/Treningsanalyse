@@ -9,7 +9,7 @@ import sqlite3
 def add_decoupling_column():
     """Legger til decoupling kolonne i activities-tabellen"""
     
-    db_path = os.path.join(os.path.dirname(__file__), "data", "activities.db")
+    db_path = os.path.join(os.path.dirname(__file__), "data", "treningsanalyse.db")
     
     if not os.path.exists(db_path):
         print(f"❌ Database ikke funnet: {db_path}")

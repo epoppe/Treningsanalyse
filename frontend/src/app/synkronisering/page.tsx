@@ -272,6 +272,10 @@ export default function SynkroniseringPage() {
     startSync(() => api.syncBodyBatteryData(startDate, endDate));
   };
 
+  const refreshTrainingEffect = () => {
+    startSync(() => api.refreshTrainingEffect(false));
+  };
+
   const getStatusText = (status: string) => {
     switch (status) {
       case 'completed': return 'Fullført';
@@ -312,6 +316,13 @@ export default function SynkroniseringPage() {
             disabled={isLoading}
           >
             Synk Body Battery
+          </QuickActionButton>
+
+          <QuickActionButton 
+            onClick={refreshTrainingEffect}
+            disabled={isLoading}
+          >
+            Hent aerob/anaerob effekt
           </QuickActionButton>
           
           <DangerButton 

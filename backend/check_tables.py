@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-db_path = Path("data/treningsanalyse.db")
+db_path = Path(__file__).parent / "data" / "treningsanalyse.db"
 
 if db_path.exists():
     conn = sqlite3.connect(str(db_path))

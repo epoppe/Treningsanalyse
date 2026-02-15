@@ -1,8 +1,8 @@
 import sqlite3
 from pathlib import Path
 
-# Finn database-filen
-db_path = Path("data/treningsanalyse.db")
+# Finn database-filen (portabel sti)
+db_path = Path(__file__).parent / "data" / "treningsanalyse.db"
 
 def reset_body_battery_cache():
     """

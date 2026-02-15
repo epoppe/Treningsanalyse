@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { useSelector, useDispatch } from 'react-redux';
 import styled from 'styled-components';
-import { fetchActivities, fetchNewActivities, fetchAllActivities, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
+import { fetchActivitiesByDateRange, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
 import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
 import { useSyncListener } from '../../hooks/useSyncListener';
@@ -51,55 +51,41 @@ export default function RunningEconomyPage() {
 
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(() => {
-    console.log('[RunningEconomy] Synkronisering fullført, henter alle aktiviteter på nytt...');
-    
-    // Etter synkronisering, hent ALLE aktiviteter på nytt (inkludert historiske)
-    dispatch(fetchAllActivities({ forceRefresh: true, count: 1000 }));
+    console.log('[RunningEconomy] Synkronisering fullført, henter aktiviteter fra 2010...');
+    const end = new Date();
+    dispatch(fetchActivitiesByDateRange({
+      startDate: '2010-01-01',
+      endDate: end.toISOString().split('T')[0],
+      forceRefresh: true,
+    }));
   }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
 
-  // Automatisk sjekk for nye aktiviteter når siden lastes
+  // Hent aktiviteter fra 2010 for løpsøkonomi-visualisering
   useEffect(() => {
-    const checkForNewActivities = () => {
-      console.log('[RunningEconomy] Sjekker for nye aktiviteter ved sideinnlasting...');
-      
-      if (activities.length > 0) {
-        // Finn den nyeste aktiviteten
-        const latestActivity = activities.reduce((latest, current) => {
-          return new Date(current.startTimeLocal) > new Date(latest.startTimeLocal) ? current : latest;
-        });
-        
-        const latestDate = new Date(latestActivity.startTimeLocal);
-        const sinceDate = latestDate.toISOString().split('T')[0];
-        
-        console.log('[RunningEconomy] Henter nye aktiviteter siden', sinceDate);
-        dispatch(fetchNewActivities({ since: sinceDate, forceRefresh: false }));
-      } else {
-        console.log('[RunningEconomy] Ingen eksisterende aktiviteter, henter alle (1000)');
-        dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
-      }
+    const loadActivities = () => {
+      const end = new Date();
+      const endStr = end.toISOString().split('T')[0];
+      console.log('[RunningEconomy] Henter aktiviteter fra 2010-01-01 til', endStr);
+      dispatch(fetchActivitiesByDateRange({
+        startDate: '2010-01-01',
+        endDate: endStr,
+        forceRefresh: false,
+      }));
     };
 
-    // Sjekk for nye aktiviteter når komponenten mountes
-    checkForNewActivities();
+    loadActivities();
 
-    // Sjekk også når siden får fokus (bruker kommer tilbake til siden)
     const handleFocus = () => {
-      console.log('[RunningEconomy] Side fikk fokus, sjekker for nye aktiviteter...');
-      checkForNewActivities();
+      console.log('[RunningEconomy] Side fikk fokus, oppdaterer aktiviteter fra 2010...');
+      loadActivities();
     };
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [dispatch, activities.length]);
-
-  useEffect(() => {
-    if (status === 'idle') {
-      dispatch(fetchAllActivities({ forceRefresh: false, count: 1000 }));
-    }
-  }, [status, dispatch]);
+  }, [dispatch]);
 
   const filteredActivities = useMemo(() => {
     const now = new Date();

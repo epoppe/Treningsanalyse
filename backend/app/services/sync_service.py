@@ -15,6 +15,7 @@ from .analysis_service import AnalysisService
 from ..storage import DataStorage, DateTimeEncoder
 from ..database.models.activity import Activity, ActivityType
 from ..database.models.sync_state import SyncState
+from ..database.models.health_data_missing import HealthDataMissing
 
 logger = logging.getLogger(__name__)
 
@@ -794,6 +795,15 @@ class SyncService:
         except Exception:
             pass
 
+        # Hent datoer vi allerede vet ikke har HRV-data (sparer Garmin-kall)
+        hrv_missing_dates = {
+            r.missing_date for r in self.db.query(HealthDataMissing.missing_date).filter(
+                HealthDataMissing.data_type == "hrv",
+                HealthDataMissing.missing_date >= hrv_start_date.date(),
+                HealthDataMissing.missing_date <= end_date.date()
+            ).all()
+        }
+
         current_date = hrv_start_date
         while current_date <= end_date:
             date_str = current_date.strftime("%Y-%m-%d")
@@ -807,6 +817,10 @@ class SyncService:
                 logger.info(f"Hopper over HRV-data for {date_str} (finnes allerede).")
                 current_date += timedelta(days=1)
                 continue
+            if current_date.date() in hrv_missing_dates:
+                logger.info(f"Hopper over HRV-data for {date_str} (ingen data sist gang).")
+                current_date += timedelta(days=1)
+                continue
             elif current_date.date() in existing_dates and force_refresh_recent and is_recent:
                 logger.info(f"Oppdaterer eksisterende HRV-data for {date_str} (force_refresh_recent=True).")
 
@@ -817,6 +831,17 @@ class SyncService:
                     normalized_hrv = self._normalize_hrv_data(hrv_data, date_str)
                     if normalized_hrv:
                         all_hrv_data.append(normalized_hrv)
+                    # (Ikke lagre som manglende – vi fant data)
+                else:
+                    # Lagre at vi prøvde og fant ingenting
+                    try:
+                        existing = self.db.query(HealthDataMissing).filter_by(data_type="hrv", missing_date=current_date.date()).first()
+                        if not existing:
+                            self.db.add(HealthDataMissing(data_type="hrv", missing_date=current_date.date()))
+                            self.db.commit()
+                        hrv_missing_dates.add(current_date.date())
+                    except Exception as add_e:
+                        logger.debug(f"Kunne ikke lagre HRV manglende dato {date_str}: {add_e}")
                 
                 # Liten pause for å unngå rate limiting
                 await asyncio.sleep(1)
@@ -880,10 +905,28 @@ class SyncService:
             if sleep_state and sleep_state.last_synced_date:
                 sleep_start_date = max(sleep_start_date, datetime.combine(sleep_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
 
+            existing_sleep_dates = {s.sleep_date for s in self.db.query(Sleep.sleep_date).filter(
+                Sleep.sleep_date >= sleep_start_date.date(),
+                Sleep.sleep_date <= end_date.date()
+            ).all()}
+            sleep_missing_dates = {
+                r.missing_date for r in self.db.query(HealthDataMissing.missing_date).filter(
+                    HealthDataMissing.data_type == "sleep",
+                    HealthDataMissing.missing_date >= sleep_start_date.date(),
+                    HealthDataMissing.missing_date <= end_date.date()
+                ).all()
+            }
+
             logger.info(f"Starter søvn-synk: {sleep_start_date.date()} -> {end_date.date()}")
             current_date = sleep_start_date
             saved = 0
             while current_date <= end_date:
+                if current_date.date() in existing_sleep_dates:
+                    current_date += timedelta(days=1)
+                    continue
+                if current_date.date() in sleep_missing_dates:
+                    current_date += timedelta(days=1)
+                    continue
                 try:
                     data = await self.garmin_client.get_sleep_data(current_date)
                     if data and any(data.get(k) for k in ["sleep_time","total_sleep","deep_sleep","light_sleep","rem_sleep","sleep_score"]):
@@ -910,6 +953,15 @@ class SyncService:
                         from sqlalchemy.sql import func
                         row.updated_at = func.now()
                         saved += 1
+                    else:
+                        try:
+                            existing = self.db.query(HealthDataMissing).filter_by(data_type="sleep", missing_date=current_date.date()).first()
+                            if not existing:
+                                self.db.add(HealthDataMissing(data_type="sleep", missing_date=current_date.date()))
+                                self.db.commit()
+                            sleep_missing_dates.add(current_date.date())
+                        except Exception as add_e:
+                            logger.debug(f"Kunne ikke lagre søvn manglende dato {current_date.date()}: {add_e}")
                 except Exception as e:
                     logger.debug(f"Søvn-dag feilet {current_date.date()}: {e}")
                 current_date += timedelta(days=1)
@@ -926,6 +978,82 @@ class SyncService:
                 logger.info(f"Søvn-synk lagret {saved} dager")
         except Exception as e:
             logger.warning(f"Søvn synk feilet: {e}")
+
+        # Stress inkrementell synk til database (for rask grafvisning)
+        try:
+            from ..database.models import Stress
+            stress_state = self.db.query(SyncState).filter_by(key="stress").first()
+            stress_start_date = max(start_date, datetime(2020, 1, 1, tzinfo=timezone.utc))
+            if stress_state and stress_state.last_synced_date:
+                stress_start_date = max(stress_start_date, datetime.combine(stress_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1))
+
+            existing_stress_dates = {s.stress_date for s in self.db.query(Stress.stress_date).filter(
+                Stress.stress_date >= stress_start_date.date(),
+                Stress.stress_date <= end_date.date()
+            ).all()}
+            stress_missing_dates = {
+                r.missing_date for r in self.db.query(HealthDataMissing.missing_date).filter(
+                    HealthDataMissing.data_type == "stress",
+                    HealthDataMissing.missing_date >= stress_start_date.date(),
+                    HealthDataMissing.missing_date <= end_date.date()
+                ).all()
+            }
+
+            logger.info(f"Starter stress-synk: {stress_start_date.date()} -> {end_date.date()} (mangler {max(0, (end_date - stress_start_date).days + 1 - len(existing_stress_dates) - len(stress_missing_dates))} dager)")
+            current_date = stress_start_date
+            saved = 0
+            while current_date <= end_date:
+                if current_date.date() in existing_stress_dates:
+                    current_date += timedelta(days=1)
+                    continue
+                if current_date.date() in stress_missing_dates:
+                    current_date += timedelta(days=1)
+                    continue
+                try:
+                    stress_data = await self.garmin_client.get_stress_data(current_date)
+                    if stress_data and (stress_data.get('stress_time') or stress_data.get('rest_time')):
+                        def to_sec(m):
+                            if m is None: return None
+                            return float(m) * 60.0
+                        row = Stress(
+                            stress_date=current_date.date(),
+                            stress_level=stress_data.get('stress_level'),
+                            total_time=to_sec(stress_data.get('total_time')),
+                            stress_time=to_sec(stress_data.get('stress_time')),
+                            rest_time=to_sec(stress_data.get('rest_time')),
+                            low_stress_time=to_sec(stress_data.get('low_stress_time')),
+                            medium_stress_time=to_sec(stress_data.get('medium_stress_time')),
+                            high_stress_time=to_sec(stress_data.get('high_stress_time')),
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow(),
+                        )
+                        self.db.add(row)
+                        saved += 1
+                    else:
+                        try:
+                            existing = self.db.query(HealthDataMissing).filter_by(data_type="stress", missing_date=current_date.date()).first()
+                            if not existing:
+                                self.db.add(HealthDataMissing(data_type="stress", missing_date=current_date.date()))
+                                self.db.commit()
+                            stress_missing_dates.add(current_date.date())
+                        except Exception as add_e:
+                            logger.debug(f"Kunne ikke lagre stress manglende dato {current_date.date()}: {add_e}")
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Stress-dag feilet {current_date.date()}: {e}")
+                current_date += timedelta(days=1)
+
+            if saved > 0:
+                self.db.commit()
+                if not stress_state:
+                    stress_state = SyncState(key="stress")
+                    self.db.add(stress_state)
+                stress_state.last_synced_date = end_date.date()
+                stress_state.last_synced_at = datetime.utcnow()
+                self.db.commit()
+                logger.info(f"Stress-synk lagret {saved} dager")
+        except Exception as e:
+            logger.warning(f"Stress synk feilet: {e}")
 
     async def _download_and_store_fit_file(self, activity_id: int):
         """Hjelpefunksjon for å laste ned og lagre en FIT-fil for en gitt aktivitet."""
@@ -1166,26 +1294,33 @@ class SyncService:
             logger.error(f"Feil under FIT-data nedlasting for periode: {e}")
             return {"status": "Feil", "message": str(e)} 
 
-    async def sync_training_effect_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False) -> dict:
+    async def sync_training_effect_data(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+        ignore_sync_state: bool = False,
+    ) -> dict:
         """
         Synkroniserer Training Effect data for aktiviteter i en gitt periode.
-        
+
         Args:
             start_date: Startdato for synkronisering
             end_date: Sluttdato for synkronisering
             force_refresh_recent: Om nylige data skal oppdateres selv om de eksisterer
+            ignore_sync_state: Bruk hele perioden (ikke inkrementell), viktig ved full resync
         """
-        # Inkrementell startdato basert på SyncState
         effective_start = start_date
-        try:
-            te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
-            if te_state and te_state.last_synced_date and not force_refresh_recent:
-                effective_start = max(
-                    effective_start,
-                    datetime.combine(te_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
-                )
-        except Exception as e:
-            logger.debug(f"Kunne ikke lese SyncState for training_effect: {e}")
+        if not ignore_sync_state:
+            try:
+                te_state = self.db.query(SyncState).filter_by(key="training_effect").first()
+                if te_state and te_state.last_synced_date and not force_refresh_recent:
+                    effective_start = max(
+                        effective_start,
+                        datetime.combine(te_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1)
+                    )
+            except Exception as e:
+                logger.debug(f"Kunne ikke lese SyncState for training_effect: {e}")
 
         logger.info(f"Starter Training Effect synkronisering for perioden {effective_start.date()} til {end_date.date()}")
         
@@ -1223,13 +1358,15 @@ class SyncService:
                 if activity_start_time.tzinfo is None:
                     activity_start_time = activity_start_time.replace(tzinfo=timezone.utc)
                 is_recent = activity_start_time >= recent_cutoff
-                has_training_effect = (activity.total_training_effect is not None or 
-                                     activity.total_anaerobic_training_effect is not None)
-                
                 # Ikke hopp over hvis dette er aller siste aktivitet (skal alltid oppdateres)
                 is_latest = (latest_activity_id is not None and activity_id == latest_activity_id)
-                # Skip hvis aktiviteten allerede har Training Effect data og ikke er nylig og ikke er siste aktivitet
-                if has_training_effect and not (force_refresh_recent and is_recent) and not is_latest:
+                # Behandle 0 som manglende – gyldig TE er 1.0–5.0
+                has_valid_te = (
+                    (activity.total_training_effect is not None and activity.total_training_effect > 0) or
+                    (activity.total_anaerobic_training_effect is not None and activity.total_anaerobic_training_effect > 0)
+                )
+                # Skip hvis aktiviteten har gyldig TE og ikke er nylig og ikke er siste aktivitet
+                if has_valid_te and not (force_refresh_recent and is_recent) and not is_latest:
                     skipped_count += 1
                     continue
                 
@@ -1287,6 +1424,55 @@ class SyncService:
             
         except Exception as e:
             logger.error(f"Feil under Training Effect synkronisering: {e}")
+            return {"status": "Feil", "message": str(e)}
+
+    async def sync_training_effect_for_missing(self, force: bool = False) -> dict:
+        """
+        Henter Training Effect fra Garmin for aktiviteter som mangler eller har 0.
+        Gyldig TE er 1.0–5.0. Brukes for å fikse aktiviteter som viser 0 i frontend.
+        """
+        from sqlalchemy import or_, desc
+        try:
+            if not await self.garmin_client.initialize():
+                return {"status": "Feil", "message": "Kunne ikke autentisere mot Garmin"}
+            if force:
+                activities = self.db.query(Activity).order_by(desc(Activity.start_time)).all()
+            else:
+                activities = self.db.query(Activity).filter(
+                    or_(
+                        or_(
+                            Activity.total_training_effect.is_(None),
+                            Activity.total_training_effect <= 0,
+                        ),
+                        or_(
+                            Activity.total_anaerobic_training_effect.is_(None),
+                            Activity.total_anaerobic_training_effect <= 0,
+                        ),
+                    )
+                ).order_by(desc(Activity.start_time)).all()
+            updated = 0
+            failed = 0
+            for i, act in enumerate(activities, 1):
+                try:
+                    te_data = await self.garmin_client.get_activity_training_effect(str(act.activity_id))
+                    if te_data:
+                        act.total_training_effect = te_data.get("aerobic_training_effect")
+                        act.total_anaerobic_training_effect = te_data.get("anaerobic_training_effect")
+                        updated += 1
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    logger.warning(f"TE feil for {act.activity_id}: {e}")
+                    failed += 1
+            self.db.commit()
+            return {
+                "status": "Fullført",
+                "message": f"{updated} oppdatert, {failed} feilet",
+                "updated_count": updated,
+                "failed_count": failed,
+                "total_processed": len(activities),
+            }
+        except Exception as e:
+            logger.error(f"Feil ved TE-for-missing sync: {e}", exc_info=True)
             return {"status": "Feil", "message": str(e)}
 
     def _calculate_metrics_for_new_activity(self, activity_id: str) -> dict:

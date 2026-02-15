@@ -739,11 +739,9 @@ async def get_vo2max_history(
             Activity.vo2_max > 0
         )
         
-        # Filtrer på aktivitetstype - kun løping (ikke treadmill)
+        # Filtrer på aktivitetstype - alle løpetyper (Garmin gir VO2max for disse)
         query = query.join(ActivityType).filter(
-            ActivityType.type_key.in_(['running', 'trail_running'])
-        ).filter(
-            ~ActivityType.type_key.like('%treadmill%')
+            ActivityType.type_key.in_(['running', 'trail_running', 'treadmill_running', 'street_running'])
         )
         
         if start_date:
@@ -758,8 +756,7 @@ async def get_vo2max_history(
         
         result = []
         for act in activities:
-            # Filtrer bort treadmill i Python også for sikkerhet
-            if act.activity_type and 'treadmill' not in act.activity_type.type_key.lower():
+            if act.activity_type:
                 result.append({
                     "date": act.start_time.date().isoformat(),
                     "datetime": act.start_time.isoformat(),

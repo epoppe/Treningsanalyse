@@ -134,6 +134,22 @@ async def run_fit_data_download(job_id: str, garmin_client: GarminClient, storag
         if db_session:
             db_session.close()
 
+async def run_training_effect_refresh(job_id: str, garmin_client: GarminClient, storage: DataStorage, force: bool = False):
+    """Kjører Training Effect-henting for aktiviteter som mangler eller har 0."""
+    db_session = None
+    try:
+        sync_jobs[job_id]["status"] = "processing"
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.sync_training_effect_for_missing(force=force)
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i Training Effect refresh (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 async def run_fit_data_download_period(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
     """Kjører FIT-data nedlasting for en periode i bakgrunnen."""
     db_session = None
@@ -322,6 +338,22 @@ async def trigger_fit_data_download_period_endpoint(
     
     return {"message": f"FIT-data nedlasting for periode {request.start_date} til {request.end_date} startet.", "job_id": job_id}
 
+@router.post("/training-effect/refresh", status_code=202)
+async def trigger_training_effect_refresh(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Oppdater ALLE aktiviteter (også de med verdier)"),
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client),
+):
+    """Henter aerob/anaerob effekt fra Garmin for aktiviteter som mangler eller viser 0."""
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    background_tasks.add_task(run_training_effect_refresh, job_id, garmin_client, storage, force)
+    msg = "Henter Training Effect for aktiviteter som mangler eller har 0."
+    if force:
+        msg = "Henter Training Effect for ALLE aktiviteter (force)."
+    return {"message": msg, "job_id": job_id}
+
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(
     start_year: int, 
@@ -427,8 +459,11 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
         
         # 3. Synkroniser Training Effect data (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
-        # Tving re-beregning for siste aktivitet for å sikre komplette verdier
-        await sync_service.sync_training_effect_data(health_start_date, end_date, force_refresh_recent=True)
+        await sync_service.sync_training_effect_data(
+            health_start_date, end_date,
+            force_refresh_recent=True,
+            ignore_sync_state=ignore_sync_state,
+        )
         
         # 4. Synkroniser HRV-data til database (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."

@@ -19,9 +19,10 @@ from app.database.session import SessionLocal, engine
 
 def backup_database():
     """Create a backup of the existing database."""
-    db_path = Path("treningsanalyse.db")
+    backend_dir = Path(__file__).parent
+    db_path = backend_dir / "data" / "treningsanalyse.db"
     if db_path.exists():
-        backup_path = Path(f"treningsanalyse_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db")
+        backup_path = backend_dir / f"treningsanalyse_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
         import shutil
         shutil.copy2(db_path, backup_path)
         print(f"Database backup created: {backup_path}")
@@ -33,7 +34,7 @@ def migrate_existing_data():
     print("Starting data migration...")
     
     # Create connection to check existing structure
-    conn = sqlite3.connect("treningsanalyse.db")
+    conn = sqlite3.connect(str(Path(__file__).parent / "data" / "treningsanalyse.db"))
     cursor = conn.cursor()
     
     # Check if old 'activities' table exists

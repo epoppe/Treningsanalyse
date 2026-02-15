@@ -18,7 +18,7 @@ def check_2018_2021_activities():
     """Sjekk aktiviteter fra 2018-2021 og identifiser manglende FIT-data"""
     
     # Hent database-tilkobling
-    db_path = os.path.join(os.path.dirname(__file__), "data", "activities.db")
+    db_path = os.path.join(os.path.dirname(__file__), "data", "treningsanalyse.db")
     conn = sqlite3.connect(db_path)
     
     # Finn alle aktiviteter fra 2018-2021

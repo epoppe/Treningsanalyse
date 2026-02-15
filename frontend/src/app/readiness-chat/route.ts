@@ -13,9 +13,9 @@ const DEFAULT_DAYS = 50;
 // LLM velger moduler basert på spørsmålet. Sett USE_LLM_MODULE_SELECTOR=false for raskere regelbasert valg.
 const USE_LLM_MODULE_SELECTOR = process.env.USE_LLM_MODULE_SELECTOR !== 'false';
 
-type ModuleKey = 'overview' | 'tss' | 'daily' | 'stress' | 'hrv' | 'bodyBattery' | 'sleep' | 'activities' | 'readiness';
+type ModuleKey = 'overview' | 'tss' | 'daily' | 'stress' | 'hrv' | 'bodyBattery' | 'sleep' | 'activities' | 'readiness' | 'vo2max';
 
-const ALL_MODULES: ModuleKey[] = ['overview', 'tss', 'daily', 'stress', 'hrv', 'bodyBattery', 'sleep', 'activities', 'readiness'];
+const ALL_MODULES: ModuleKey[] = ['overview', 'tss', 'daily', 'stress', 'hrv', 'bodyBattery', 'sleep', 'activities', 'readiness', 'vo2max'];
 
 /** Systemprompt som får LLM til å vurdere hvilke datamoduler som trengs for spørsmålet. */
 const SYSTEM_PROMPT_MODULE_SELECTOR = `Du er en datamodul-velger for en treningsassistent. Brukeren stiller et spørsmål om sine Garmin-treningsdata.
@@ -30,8 +30,9 @@ Tilgjengelige datamoduler (velg kun de som er relevante for spørsmålet):
 - sleep: Søvndata per dag (timer, kvalitet)
 - activities: Full aktivitetsliste med dato, type, navn, distanse, varighet, pace, puls, TSS
 - readiness: Training readiness score (søvn+HRV+form)
+- vo2max: Full VO2max-historie (alle løpeaktiviteter med målinger for perioden)
 
-Svar KUN med en JSON-liste over modulnavn du trenger, f.eks. ["activities","daily"] eller ["sleep","readiness","hrv"].
+Svar KUN med en JSON-liste over modulnavn du trenger, f.eks. ["activities","daily"] eller ["vo2max","overview"].
 Ingen annen tekst, forklaring eller markdown. Kun JSON-array.`;
 
 /** Regelbasert modulvalg – rask, ingen ekstra LLM-kall. */
@@ -67,9 +68,10 @@ function selectModulesByRules(message: string): Set<ModuleKey> {
     modules.add('readiness');
     modules.add('tss');
   }
-  // VO2max, fitness
-  if (/\b(vo2|vo2max|fitness|form)\b/.test(m)) {
+  // VO2max, fitness – hent både oversikt og full historikk
+  if (/\b(vo2|vo2max|fitness)\b/.test(m)) {
     modules.add('overview');
+    modules.add('vo2max');
   }
   // Generelle/spørsmål – hent bredt
   if (/\b(hvordan|hva|er jeg|begrunn|oppsummer|sammendrag)\b/.test(m)) {
@@ -124,6 +126,11 @@ async function selectModulesViaLLM(message: string): Promise<Set<ModuleKey>> {
   }
 }
 
+/** Ord-til-tall for norsk (brukes av år-parsing). */
+const NORWEGIAN_NUMBERS: Record<string, number> = {
+  en: 1, ett: 1, to: 2, tre: 3, fire: 4, fem: 5, seks: 6, sju: 7, syv: 7, åtte: 8, ni: 9, ti: 10,
+};
+
 function parseDaysFromMessage(message: string): number {
   const m = message.toLowerCase();
   const weekMatch = m.match(/(\d+)\s*(uke|uker)/);
@@ -132,6 +139,10 @@ function parseDaysFromMessage(message: string): number {
   if (dayMatch) return parseInt(dayMatch[1], 10);
   const monthMatch = m.match(/(\d+)\s*(måned|måneder)\b/);
   if (monthMatch) return parseInt(monthMatch[1], 10) * 30;
+  const yearNumMatch = m.match(/(\d+)\s*(år|årene)\b/);
+  if (yearNumMatch) return parseInt(yearNumMatch[1], 10) * 365;
+  const yearWordMatch = m.match(/\b(to|tre|fire|fem|seks|sju|syv|åtte|ni|ti)\s*(år|årene)\b/);
+  if (yearWordMatch) return (NORWEGIAN_NUMBERS[yearWordMatch[1]] ?? 1) * 365;
   return DEFAULT_DAYS;
 }
 
@@ -178,6 +189,7 @@ export async function POST(request: NextRequest) {
     if (modules.has('sleep')) fetches.push(fetchJson<any[]>(`${base}/health/sleep/range?start_date=${startStr}&end_date=${endStr}`).then((r) => ['sleep', r]));
     if (modules.has('activities')) fetches.push(fetchJson<any>(`${base}/activities/date-range?start_date=${startStr}&end_date=${endStr}&force_refresh=false`).then((r) => ['activities', r]));
     if (modules.has('readiness')) fetches.push(fetchJson<any>(`${base}/training-readiness/weekly?end_date=${endStr}`).then((r) => ['readiness', r]));
+    if (modules.has('vo2max')) fetches.push(fetchJson<any>(`${base}/analysis/vo2max/history?start_date=${startStr}&end_date=${endStr}`).then((r) => ['vo2max', r]));
 
     const results = await Promise.all(fetches);
     const data: Record<ModuleKey, unknown> = {} as Record<ModuleKey, unknown>;
@@ -192,6 +204,7 @@ export async function POST(request: NextRequest) {
     const sleepRange = data.sleep as any[];
     const activitiesResp = data.activities as any;
     const readinessWeekly = data.readiness as any;
+    const vo2maxHistory = data.vo2max as { vo2max_history?: Array<{ date: string; vo2max: number; activity_name?: string }> } | null;
 
     const dataBlob: string[] = [];
 
@@ -264,6 +277,14 @@ export async function POST(request: NextRequest) {
     if (readinessWeekly?.data?.length) {
       const latest = readinessWeekly.data.slice(-7);
       dataBlob.push(`## Readiness (siste 7 dager)\n${latest.map((r: any) => `${r.date}: ${r.total_score}/100 (${r.readiness_status})`).join('\n')}`);
+    }
+    if (vo2maxHistory?.vo2max_history?.length) {
+      const hist = vo2maxHistory.vo2max_history;
+      const validVals = hist.filter((h: any) => h.vo2max != null && h.vo2max > 0).map((h: any) => h.vo2max);
+      const avg = validVals.length ? validVals.reduce((a: number, b: number) => a + b, 0) / validVals.length : 0;
+      const lines = hist.map((h: any) => `${h.date}: VO2max ${h.vo2max} ml/kg/min${h.activity_name ? ` (${h.activity_name})` : ''}`).join('\n');
+      const latestVal = hist[hist.length - 1]?.vo2max ?? '-';
+      dataBlob.push(`## VO2max historikk (${hist.length} målinger)\nSnitt: ${avg.toFixed(1)} ml/kg/min. Siste: ${latestVal} ml/kg/min.\n\nListe:\n${lines}`);
     }
 
     const contextText = dataBlob.length

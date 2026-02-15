@@ -110,6 +110,7 @@ export default function Home() {
   const [hasRestoredFromStorage, setHasRestoredFromStorage] = useState(false);
   const [timeFilter, setTimeFilter] = useState<'all' | '12months' | '3months'>('all');
   const syncRefreshTimeout = useRef<NodeJS.Timeout | null>(null);
+  const [loadingTimeout, setLoadingTimeout] = useState(false);
 
   // Callback for å oppdatere data når synkronisering er fullført
   const handleSyncComplete = useCallback(() => {
@@ -256,6 +257,16 @@ export default function Home() {
     }
   }, [dispatch, status, hasRestoredFromStorage]);
 
+  // Vis feilmelding hvis lasting tar for lang tid (f.eks. backend nede)
+  useEffect(() => {
+    if (status !== 'loading') return;
+    const t = setTimeout(() => setLoadingTimeout(true), 12000);
+    return () => clearTimeout(t);
+  }, [status]);
+  useEffect(() => {
+    if (status !== 'loading') setLoadingTimeout(false);
+  }, [status]);
+
 
 
   useEffect(() => {
@@ -392,6 +403,32 @@ export default function Home() {
       <MainContainer>
         <SkeletonLoader type="chart" />
         <SkeletonLoader type="list" count={5} />
+        {loadingTimeout && (
+          <div style={{
+            marginTop: '1rem',
+            padding: '1rem',
+            background: '#fff3cd',
+            borderRadius: 8,
+            color: '#856404',
+          }}>
+            <strong>Laster lenger enn forventet.</strong> Sjekk at backend kjører på port 8000.
+            <br />
+            <button
+              onClick={() => window.location.reload()}
+              style={{
+                marginTop: '0.5rem',
+                padding: '0.5rem 1rem',
+                background: '#856404',
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              Prøv igjen
+            </button>
+          </div>
+        )}
       </MainContainer>
     );
   }

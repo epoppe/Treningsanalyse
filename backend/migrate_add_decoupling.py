@@ -21,7 +21,7 @@ def migrate_add_decoupling_column():
     print("🔄 Starter database-migrasjon for decoupling_percent...")
     
     # Hent database-tilkobling
-    db_path = os.path.join(os.path.dirname(__file__), "data", "activities.db")
+    db_path = os.path.join(os.path.dirname(__file__), "data", "treningsanalyse.db")
     
     if not os.path.exists(db_path):
         print(f"❌ Database ikke funnet: {db_path}")

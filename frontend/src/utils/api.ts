@@ -1,13 +1,15 @@
 import axios from 'axios';
 import { Activity } from '../types';
 
-export const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// Bruk relativ URL slik at Next.js proxy (rewrite) sender til backend – unngår CORS
+export const BASE_URL = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
 
 const apiClient = axios.create({
-  baseURL: `${BASE_URL}/api`,
+  baseURL: typeof window !== 'undefined' ? '/api' : `${BASE_URL}/api`,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 15000,
 });
 
 async function apiCall<T>(method: string, url: string, options: any = {}): Promise<T> {
@@ -20,8 +22,15 @@ async function apiCall<T>(method: string, url: string, options: any = {}): Promi
         ? (Object.keys(options || {}).length > 0 && !options.params ? options : undefined)
         : undefined;
     const params = options?.params;
+    const timeout = options?.timeout;
 
-    const response = await apiClient({ url, method, data, params });
+    const response = await apiClient({
+      url,
+      method,
+      data,
+      params,
+      ...(timeout != null && { timeout }),
+    });
     return response.data;
   } catch (error: any) {
     // For HRV endepunkter, er 404 forventet når det ikke finnes HRV-data
@@ -266,18 +275,18 @@ const healthApi = {
   
   // Nye metrics basert på Garmy
   getBodyBattery: (date: string) => apiCall('get', `/health/body-battery/${date}`),
-  getBodyBatteryRange: (startDate: string, endDate: string) => 
-    apiCall('get', `/health/body-battery/range?start_date=${startDate}&end_date=${endDate}`),
+  getBodyBatteryRange: (startDate: string, endDate: string) =>
+    apiCall('get', `/health/body-battery/range?start_date=${startDate}&end_date=${endDate}`, { timeout: 90000 }),
   
   getSleep: (date: string) => apiCall('get', `/health/sleep/${date}`),
-  getSleepRange: (startDate: string, endDate: string) => 
-    apiCall('get', `/health/sleep/range?start_date=${startDate}&end_date=${endDate}`),
+  getSleepRange: (startDate: string, endDate: string) =>
+    apiCall('get', `/health/sleep/range?start_date=${startDate}&end_date=${endDate}`, { timeout: 90000 }),
   
-  getStressRange: (startDate: string, endDate: string) => 
-    apiCall('get', `/health/stress/range?start_date=${startDate}&end_date=${endDate}`),
+  getStressRange: (startDate: string, endDate: string) =>
+    apiCall('get', `/health/stress/range?start_date=${startDate}&end_date=${endDate}`, { timeout: 90000 }),
   
-  getHrvRange: (startDate: string, endDate: string) => 
-    apiCall('get', `/health/hrv/range?start_date=${startDate}&end_date=${endDate}`),
+  getHrvRange: (startDate: string, endDate: string) =>
+    apiCall('get', `/health/hrv/range?start_date=${startDate}&end_date=${endDate}`, { timeout: 90000 }),
 };
 
 export interface BodyBatteryByActivityResponse {
@@ -341,6 +350,10 @@ export const syncApi = {
     return apiCall('post', url);
   },
   
+  // --- Training Effect (aerob/anaerob effekt) ---
+  refreshTrainingEffect: (force?: boolean) =>
+    apiCall('post', `/sync/training-effect/refresh${force ? '?force=true' : ''}`),
+
   // --- Body Battery ---
   syncBodyBatteryData: (startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();

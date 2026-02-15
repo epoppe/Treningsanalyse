@@ -205,7 +205,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
   const fetchDailyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=30');
-      const response = await fetch(`http://localhost:8000/api/analysis/daily-summaries?${queryParams}`);
+      const response = await fetch(`/api/analysis/daily-summaries?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch daily summaries');
       const data = await response.json();
       setDailyData(data);
@@ -217,7 +217,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
   const fetchWeeklyData = useCallback(async () => {
     try {
       const queryParams = memoizedBuildQueryParams('limit=12');
-      const response = await fetch(`http://localhost:8000/api/analysis/weekly-summaries?${queryParams}`);
+      const response = await fetch(`/api/analysis/weekly-summaries?${queryParams}`);
       if (!response.ok) throw new Error('Failed to fetch weekly summaries');
       const data = await response.json();
       setWeeklyData(data);
@@ -231,7 +231,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
       const queryParams = memoizedBuildQueryParams('limit=12');
       // Legg til timestamp for å unngå caching
       const timestamp = new Date().getTime();
-      const url = `http://localhost:8000/api/analysis/monthly-summaries?${queryParams}&_t=${timestamp}`;
+      const url = `/api/analysis/monthly-summaries?${queryParams}&_t=${timestamp}`;
       const response = await fetch(url, {
         cache: 'no-store',
         headers: {
@@ -252,7 +252,7 @@ const SummaryTables: React.FC<SummaryTablesProps> = ({ selectedActivityTypes = [
 
   const fetchStats = useCallback(async () => {
     try {
-      const response = await fetch('http://localhost:8000/api/analysis/summary-stats');
+      const response = await fetch('/api/analysis/summary-stats');
       if (!response.ok) throw new Error('Failed to fetch summary stats');
       const data = await response.json();
       setStats(data);

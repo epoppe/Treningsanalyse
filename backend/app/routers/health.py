@@ -9,6 +9,7 @@ from ..dependencies import get_garmin_client, get_db, get_data_storage
 from ..storage import DataStorage
 from ..database.models import HRV, Sleep, BodyBattery, Stress
 from ..database.models.sync_state import SyncState
+from ..database.models.health_data_missing import HealthDataMissing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,73 +20,77 @@ router = APIRouter()
 async def get_stress_range_endpoint(
     start_date: date = Query(..., description="Startdato (YYYY-MM-DD)"),
     end_date: date = Query(..., description="Sluttdato (YYYY-MM-DD)"),
+    fill_gaps: bool = Query(False, description="Hent manglende dager fra Garmin (treg). Bruk synk for å fylle database."),
     garmin_client: GarminClient = Depends(get_garmin_client),
     db: Session = Depends(get_db)
 ):
-    """Henter stressdata for en datoperiode med intelligent database-caching."""
-    logger.info(f"😰 Stress: Forespørsel om stressdata fra {start_date} til {end_date}")
+    """Henter stressdata for en datoperiode. Returnerer raskt fra database. Bruk fill_gaps=true for å hente manglende (treg)."""
+    logger.info(f"😰 Stress: Forespørsel fra {start_date} til {end_date}, fill_gaps={fill_gaps}")
     
     try:
-        # 1. Sjekk hvilke datoer som finnes i database
-        existing_stress = db.query(Stress).filter(
-            Stress.stress_date >= start_date,
-            Stress.stress_date <= end_date
-        ).all()
-        
-        existing_dates = {s.stress_date for s in existing_stress}
-        logger.info(f"💾 Stress: Fant {len(existing_dates)} dager i database")
-        
-        # 2. Finn manglende datoer
-        current = start_date
-        missing_dates = []
-        while current <= end_date:
-            if current not in existing_dates:
-                missing_dates.append(current)
-            current += timedelta(days=1)
-        
-        logger.info(f"📥 Stress: {len(missing_dates)} dager mangler, henter fra Garmin...")
-        
-        # 3. Hent manglende data fra Garmin og lagre i database
-        if missing_dates:
-            for missing_date in missing_dates:
-                try:
-                    stress_data = await garmin_client.get_stress_data(datetime.combine(missing_date, datetime.min.time()))
-                    if stress_data and (stress_data.get('stress_time') or stress_data.get('rest_time')):
-                        # Konverter minutter til sekunder
-                        def to_sec(minutes_val):
-                            if minutes_val is None:
-                                return None
-                            return float(minutes_val) * 60.0
-                        
-                        # Lagre i database
-                        new_stress = Stress(
-                            stress_date=missing_date,
-                            stress_level=stress_data.get('stress_level'),
-                            total_time=to_sec(stress_data.get('total_time')),
-                            stress_time=to_sec(stress_data.get('stress_time')),
-                            rest_time=to_sec(stress_data.get('rest_time')),
-                            low_stress_time=to_sec(stress_data.get('low_stress_time')),
-                            medium_stress_time=to_sec(stress_data.get('medium_stress_time')),
-                            high_stress_time=to_sec(stress_data.get('high_stress_time')),
-                            created_at=datetime.utcnow(),
-                            updated_at=datetime.utcnow()
-                        )
-                        db.add(new_stress)
-                        logger.debug(f"✅ Stress: Lagret data for {missing_date}")
-                except Exception as e:
-                    logger.debug(f"⚠️ Stress: Ingen data for {missing_date}: {e}")
-            
-            # Commit alle nye stress-records
-            db.commit()
-            logger.info(f"💾 Stress: Lagret nye data i database")
-        
-        # 4. Hent all data fra database (nå komplett)
+        # 1. Hent data fra database
         all_stress = db.query(Stress).filter(
             Stress.stress_date >= start_date,
             Stress.stress_date <= end_date
         ).order_by(Stress.stress_date).all()
         
-        # 5. Returner formatert data (konverter tilbake til minutter)
+        existing_dates = {s.stress_date for s in all_stress}
+        logger.info(f"💾 Stress: Fant {len(existing_dates)} dager i database")
+        
+        # 2. Hent manglende fra Garmin kun hvis fill_gaps (ellers returner kun DB for rask visning)
+        if fill_gaps:
+            stress_missing_recorded = {r.missing_date for r in db.query(HealthDataMissing.missing_date).filter(
+                HealthDataMissing.data_type == "stress",
+                HealthDataMissing.missing_date >= start_date,
+                HealthDataMissing.missing_date <= end_date
+            ).all()}
+            current = start_date
+            missing_dates = []
+            while current <= end_date:
+                if current not in existing_dates and current not in stress_missing_recorded:
+                    missing_dates.append(current)
+                current += timedelta(days=1)
+            
+            if missing_dates:
+                logger.info(f"📥 Stress: Henter {len(missing_dates)} manglende dager fra Garmin...")
+                for missing_date in missing_dates:
+                    try:
+                        stress_data = await garmin_client.get_stress_data(datetime.combine(missing_date, datetime.min.time()))
+                        if stress_data and (stress_data.get('stress_time') or stress_data.get('rest_time')):
+                            def to_sec(minutes_val):
+                                if minutes_val is None:
+                                    return None
+                                return float(minutes_val) * 60.0
+                            new_stress = Stress(
+                                stress_date=missing_date,
+                                stress_level=stress_data.get('stress_level'),
+                                total_time=to_sec(stress_data.get('total_time')),
+                                stress_time=to_sec(stress_data.get('stress_time')),
+                                rest_time=to_sec(stress_data.get('rest_time')),
+                                low_stress_time=to_sec(stress_data.get('low_stress_time')),
+                                medium_stress_time=to_sec(stress_data.get('medium_stress_time')),
+                                high_stress_time=to_sec(stress_data.get('high_stress_time')),
+                                created_at=datetime.utcnow(),
+                                updated_at=datetime.utcnow()
+                            )
+                            db.add(new_stress)
+                            all_stress.append(new_stress)
+                        else:
+                            try:
+                                existing_m = db.query(HealthDataMissing).filter_by(data_type="stress", missing_date=missing_date).first()
+                                if not existing_m:
+                                    db.add(HealthDataMissing(data_type="stress", missing_date=missing_date))
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        logger.debug(f"⚠️ Stress: Ingen data for {missing_date}: {e}")
+                db.commit()
+                all_stress = db.query(Stress).filter(
+                    Stress.stress_date >= start_date,
+                    Stress.stress_date <= end_date
+                ).order_by(Stress.stress_date).all()
+        
+        # 3. Returner formatert data (konverter tilbake til minutter)
         result = []
         for stress in all_stress:
             result.append({
@@ -129,11 +134,16 @@ async def get_hrv_range_endpoint(
         existing_dates = {h.measurement_date for h in existing_hrv}
         logger.info(f"💾 HRV: Fant {len(existing_dates)} dager i database")
         
-        # 2. Finn manglende datoer
+        # 2. Finn manglende datoer (ekskluder datoer vi allerede vet ikke har HRV)
+        hrv_missing_recorded = {r.missing_date for r in db.query(HealthDataMissing.missing_date).filter(
+            HealthDataMissing.data_type == "hrv",
+            HealthDataMissing.missing_date >= start_date,
+            HealthDataMissing.missing_date <= end_date
+        ).all()}
         current = start_date
         missing_dates = []
         while current <= end_date:
-            if current not in existing_dates:
+            if current not in existing_dates and current not in hrv_missing_recorded:
                 missing_dates.append(current)
             current += timedelta(days=1)
         
@@ -165,6 +175,13 @@ async def get_hrv_range_endpoint(
                             )
                             db.add(new_hrv)
                             logger.debug(f"✅ HRV: Lagret data for {missing_date} (baseline: {hrv_summary.get('baseline_balanced_lower')}-{hrv_summary.get('baseline_balanced_upper')})")
+                        else:
+                            try:
+                                existing_m = db.query(HealthDataMissing).filter_by(data_type="hrv", missing_date=missing_date).first()
+                                if not existing_m:
+                                    db.add(HealthDataMissing(data_type="hrv", missing_date=missing_date))
+                            except Exception:
+                                pass
                 except Exception as e:
                     logger.debug(f"⚠️ HRV: Ingen data for {missing_date}: {e}")
             
@@ -257,13 +274,18 @@ async def get_sleep_range_endpoint(
         existing_dates = {s.sleep_date for s in existing_sleep}
         logger.info(f"💾 Søvn: Fant {len(existing_dates)} dager i database")
         
-        # 2. Finn manglende datoer OG datoer uten overall_score
+        # 2. Finn manglende datoer OG datoer uten overall_score (ekskluder datoer vi vet ikke har søvn)
+        sleep_missing_recorded = {r.missing_date for r in db.query(HealthDataMissing.missing_date).filter(
+            HealthDataMissing.data_type == "sleep",
+            HealthDataMissing.missing_date >= start_date,
+            HealthDataMissing.missing_date <= end_date
+        ).all()}
         current = start_date
         missing_dates = []
         dates_without_overall_score = []
         
         while current <= end_date:
-            if current not in existing_dates:
+            if current not in existing_dates and current not in sleep_missing_recorded:
                 missing_dates.append(current)
             else:
                 # Sjekk om eksisterende record mangler overall_score
@@ -310,6 +332,14 @@ async def get_sleep_range_endpoint(
                                 existing_record.overall_score = sleep_data.get('overall_score')
                                 existing_record.updated_at = datetime.utcnow()
                                 logger.debug(f"✅ Søvn: Oppdatert overall_score for {fetch_date}: {sleep_data.get('overall_score')}")
+                        else:
+                            if fetch_date in missing_dates:
+                                try:
+                                    existing_m = db.query(HealthDataMissing).filter_by(data_type="sleep", missing_date=fetch_date).first()
+                                    if not existing_m:
+                                        db.add(HealthDataMissing(data_type="sleep", missing_date=fetch_date))
+                                except Exception:
+                                    pass
                 except Exception as e:
                     logger.debug(f"⚠️ Søvn: Ingen data for {fetch_date}: {e}")
             

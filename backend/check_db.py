@@ -2,7 +2,7 @@ import sqlite3
 from pathlib import Path
 
 def check_database():
-    db_path = Path('data/treningsanalyse.db')
+    db_path = Path(__file__).parent / 'data' / 'treningsanalyse.db'
     if not db_path.exists():
         print(f"Database file not found: {db_path}")
         return

@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-Script for å hente Training Effect data fra Garmin for alle aktiviteter som mangler det
+Script for å hente Training Effect data fra Garmin for alle aktiviteter som mangler
+eller har ugyldige verdier (0). Aerob/anaerob effekt er gyldig i området 1.0–5.0.
+Kjør: python -m fetch_all_training_effects
+Med --force: oppdaterer ALLE aktiviteter (også de med eksisterende verdier).
 """
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+import sys
 from app.services.garmin_client import GarminClient
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity
@@ -16,8 +19,9 @@ from sqlalchemy import desc, or_
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-async def fetch_all_training_effects():
-    """Henter Training Effect data fra Garmin for alle aktiviteter som mangler det"""
+
+async def fetch_all_training_effects(force: bool = False):
+    """Henter Training Effect fra Garmin for aktiviteter som mangler eller har 0."""
     
     garmin_client = GarminClient(
         email=settings.GARMIN_EMAIL,
@@ -28,34 +32,44 @@ async def fetch_all_training_effects():
     db = SessionLocal()
     
     try:
-        # Initialiser Garmin-klient
         if not await garmin_client.initialize():
             logger.error("❌ Kunne ikke autentisere med Garmin")
             return
         
         logger.info("✅ Autentisert med Garmin")
         
-        # Finn alle aktiviteter som mangler Training Effect verdier
-        activities_without_effects = db.query(Activity).filter(
-            or_(
-                Activity.total_training_effect.is_(None),
-                Activity.total_anaerobic_training_effect.is_(None)
-            )
-        ).order_by(desc(Activity.start_time)).all()
+        if force:
+            activities_to_process = db.query(Activity).order_by(desc(Activity.start_time)).all()
+            logger.info(f"📊 Force-modus: hentet {len(activities_to_process)} aktiviteter (alle)")
+        else:
+            # Manglende eller ugyldige (0) verdier – gyldig TE er 1.0–5.0
+            activities_to_process = db.query(Activity).filter(
+                or_(
+                    or_(
+                        Activity.total_training_effect.is_(None),
+                        Activity.total_training_effect <= 0,
+                    ),
+                    or_(
+                        Activity.total_anaerobic_training_effect.is_(None),
+                        Activity.total_anaerobic_training_effect <= 0,
+                    ),
+                )
+            ).order_by(desc(Activity.start_time)).all()
+            logger.info(f"📊 Fant {len(activities_to_process)} aktiviteter som mangler eller har 0 på aerob/anaerob effekt")
         
         logger.info(f"📊 Fant {len(activities_without_effects)} aktiviteter som mangler Training Effect verdier")
         
-        if not activities_without_effects:
-            logger.info("Alle aktiviteter har allerede Training Effect verdier")
+        if not activities_to_process:
+            logger.info("Alle aktiviteter har allerede gyldige Training Effect verdier (1.0–5.0)")
             return
         
         updated_count = 0
         failed_count = 0
         skipped_count = 0
         
-        for i, activity in enumerate(activities_without_effects, 1):
+        for i, activity in enumerate(activities_to_process, 1):
             activity_id = activity.activity_id
-            logger.info(f"Prosesserer aktivitet {i}/{len(activities_without_effects)}: {activity_id} - {activity.activity_name}")
+            logger.info(f"Prosesserer aktivitet {i}/{len(activities_to_process)}: {activity_id} - {activity.activity_name}")
             
             try:
                 # Hent Training Effect data fra Garmin
@@ -92,13 +106,13 @@ async def fetch_all_training_effects():
         
         # Vis et sammendrag av de oppdaterte verdiene
         logger.info(f"\n📊 SAMMENDRAG AV OPPDATERTE VERDIER:")
-        for activity in activities_without_effects[:10]:  # Vis første 10
+        for activity in activities_to_process[:10]:  # Vis første 10
             if activity.total_training_effect or activity.total_anaerobic_training_effect:
                 logger.info(f"  {activity.activity_id}: Aerobic={activity.total_training_effect}, "
                            f"Anaerobic={activity.total_anaerobic_training_effect}")
         
-        if len(activities_without_effects) > 10:
-            logger.info(f"  ... og {len(activities_without_effects) - 10} flere aktiviteter")
+        if len(activities_to_process) > 10:
+            logger.info(f"  ... og {len(activities_to_process) - 10} flere aktiviteter")
         
     except Exception as e:
         logger.error(f"Feil ved henting av Training Effects: {e}")
@@ -110,6 +124,10 @@ async def fetch_all_training_effects():
         db.close()
 
 if __name__ == "__main__":
-    logger.info("🚀 Starter henting av faktiske Training Effect verdier fra Garmin...")
-    asyncio.run(fetch_all_training_effects())
+    force = "--force" in sys.argv
+    if force:
+        logger.info("🚀 Force-modus: henter Training Effect for ALLE aktiviteter...")
+    else:
+        logger.info("🚀 Henter Training Effect for aktiviteter som mangler eller har 0...")
+    asyncio.run(fetch_all_training_effects(force=force))
     logger.info("✅ Ferdig!") 

@@ -10,8 +10,8 @@ from pathlib import Path
 def migrate_database():
     """Legger til training_readiness_score kolonne i activities-tabellen."""
     
-    # Finn database-filen i data-mappen
-    db_path = Path("data/treningsanalyse.db")
+    # Finn database-filen i data-mappen (portabel sti)
+    db_path = Path(__file__).parent / "data" / "treningsanalyse.db"
     if not db_path.exists():
         print("Database-fil ikke funnet i data-mappen.")
         return False

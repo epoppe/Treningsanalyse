@@ -14,7 +14,9 @@ load_dotenv(dotenv_path=ENV_FILE)
 
 # Standard data-mappe (relativt til backend-mappen hvis ikke absolutt sti er gitt i .env)
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
-DEFAULT_DATABASE_URL = f"sqlite:///{DEFAULT_DATA_DIR.absolute() / 'treningsanalyse.db'}"
+# Bruk absolutt sti med forward slashes – fungerer med SQLAlchemy/SQLite på Windows
+_db_path = (DEFAULT_DATA_DIR.absolute() / "treningsanalyse.db").resolve()
+DEFAULT_DATABASE_URL = "sqlite:///" + str(_db_path).replace("\\", "/")
 
 # Sett opp token-mappe
 TOKEN_DIR = BACKEND_DIR / "tokens"

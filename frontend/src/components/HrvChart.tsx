@@ -139,32 +139,15 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
 
   // Sorter data etter dato
   const sortedData = [...data].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  
-  // Filtrer data som har baseline-verdier for å vise normalområdet
-  const hasBaselineData = sortedData.some(d => 
-    d.baseline_balanced_lower !== null && 
-    d.baseline_balanced_lower !== undefined && 
-    !isNaN(d.baseline_balanced_lower) &&
-    d.baseline_balanced_upper !== null && 
-    d.baseline_balanced_upper !== undefined &&
-    !isNaN(d.baseline_balanced_upper)
-  );
-  
-  // Beregn gjennomsnittlig baseline for å vise statisk normalområde
+
+  // Beregn gjennomsnittlig baseline fra alle tilgjengelige verdier
   const baselineValues = sortedData
-    .filter(d => 
-      d.baseline_balanced_lower !== null && 
-      d.baseline_balanced_lower !== undefined && 
-      !isNaN(d.baseline_balanced_lower) &&
-      d.baseline_balanced_upper !== null && 
-      d.baseline_balanced_upper !== undefined &&
-      !isNaN(d.baseline_balanced_upper)
+    .filter(d =>
+      d.baseline_balanced_lower != null && !isNaN(d.baseline_balanced_lower) &&
+      d.baseline_balanced_upper != null && !isNaN(d.baseline_balanced_upper)
     )
-    .map(d => ({
-      lower: d.baseline_balanced_lower!,
-      upper: d.baseline_balanced_upper!,
-    }));
-  
+    .map(d => ({ lower: d.baseline_balanced_lower!, upper: d.baseline_balanced_upper! }));
+
   const avgBaselineLower = baselineValues.length > 0
     ? baselineValues.reduce((sum, v) => sum + v.lower, 0) / baselineValues.length
     : null;
@@ -172,15 +155,53 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
     ? baselineValues.reduce((sum, v) => sum + v.upper, 0) / baselineValues.length
     : null;
 
+  // Fyll inn manglende baseline-verdier (forward-fill) slik at linjene tegnes for hele grafen
+  const chartDataWithFilledBaselines = sortedData.map((d, i) => {
+    const hasBaseline = d.baseline_balanced_lower != null && !isNaN(d.baseline_balanced_lower) &&
+      d.baseline_balanced_upper != null && !isNaN(d.baseline_balanced_upper);
+    if (hasBaseline) return d;
+    // Forward-fill: bruk forrige datapunks verdi
+    let prevLower = avgBaselineLower;
+    let prevUpper = avgBaselineUpper;
+    for (let j = i - 1; j >= 0; j--) {
+      const p = sortedData[j];
+      if (p.baseline_balanced_lower != null && !isNaN(p.baseline_balanced_lower) &&
+          p.baseline_balanced_upper != null && !isNaN(p.baseline_balanced_upper)) {
+        prevLower = p.baseline_balanced_lower;
+        prevUpper = p.baseline_balanced_upper;
+        break;
+      }
+    }
+    // Backward-fill hvis ingen tidligere: bruk neste datapunk
+    if (prevLower == null || prevUpper == null) {
+      for (let j = i + 1; j < sortedData.length; j++) {
+        const n = sortedData[j];
+        if (n.baseline_balanced_lower != null && !isNaN(n.baseline_balanced_lower) &&
+            n.baseline_balanced_upper != null && !isNaN(n.baseline_balanced_upper)) {
+          prevLower = n.baseline_balanced_lower;
+          prevUpper = n.baseline_balanced_upper;
+          break;
+        }
+      }
+    }
+    return {
+      ...d,
+      baseline_balanced_lower: prevLower ?? avgBaselineLower ?? d.baseline_balanced_lower,
+      baseline_balanced_upper: prevUpper ?? avgBaselineUpper ?? d.baseline_balanced_upper,
+    };
+  });
+
+  const hasBaselineData = baselineValues.length > 0;
+
   // Beregn Y-akse domene basert på data
   const yAxisDomain = () => {
-    const allValues = sortedData.flatMap(d => [
+    const allValues = chartDataWithFilledBaselines.flatMap(d => [
       d.last_night_avg,
       d.rolling_avg_7d,
       showBaselines ? d.baseline_balanced_lower : null,
       showBaselines ? d.baseline_balanced_upper : null
-    ]).filter((v): v is number => v !== null && v !== undefined && !isNaN(v as number));
-    
+    ]).filter((v): v is number => v != null && !isNaN(v as number));
+
     if (allValues.length === 0) return [0, 100];
 
     const min = Math.min(...allValues);
@@ -195,6 +216,8 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
   const avgHrv = sortedData.reduce((sum, d) => sum + d.last_night_avg, 0) / sortedData.length;
   const latestHrv = sortedData[sortedData.length - 1]?.last_night_avg;
   const latestTrend = sortedData[sortedData.length - 1]?.rolling_avg_7d;
+
+  const chartData = chartDataWithFilledBaselines;
 
   return (
     <ChartContainer>
@@ -221,12 +244,12 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
       </InfoPanel>
 
       <ResponsiveContainer width="100%" height="75%">
-        <ComposedChart data={sortedData} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
+        <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
           <CartesianGrid strokeDasharray="3 3" vertical={false} />
           <XAxis 
             dataKey="date" 
             tick={<CustomAxisTick />}
-            interval={Math.max(1, Math.floor(sortedData.length / 15))}
+            interval={Math.max(1, Math.floor(chartData.length / 15))}
             height={80}
           />
           <YAxis
@@ -237,7 +260,7 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Legend />
           
-          {/* Normalområde (skyggelagt) - bruk ReferenceArea for statisk område */}
+          {/* Normalområde (skyggelagt) */}
           {showBaselines && avgBaselineLower !== null && avgBaselineUpper !== null && (
             <ReferenceArea
               y1={avgBaselineLower}
@@ -246,32 +269,6 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
               fillOpacity={0.3}
               label="Normalområde"
             />
-          )}
-          
-          {/* Dynamiske baseline-linjer hvis de varierer */}
-          {showBaselines && hasBaselineData && (
-            <>
-              <Line
-                type="monotone"
-                dataKey="baseline_balanced_lower"
-                stroke="#2e7d32"
-                strokeDasharray=""
-                dot={false}
-                name="Normalområde nedre grense"
-                strokeWidth={4.5}
-                connectNulls={false}
-              />
-              <Line
-                type="monotone"
-                dataKey="baseline_balanced_upper"
-                stroke="#2e7d32"
-                strokeDasharray=""
-                dot={false}
-                name="Normalområde øvre grense"
-                strokeWidth={4.5}
-                connectNulls={false}
-              />
-            </>
           )}
 
           {/* Daglige HRV-verdier */}
@@ -296,6 +293,32 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
               name="7-dagers snitt"
               connectNulls={false}
             />
+          )}
+
+          {/* Grønne grenselinjer tegnes sist (over) slik at de fremstår som heltrukne linjer */}
+          {showBaselines && hasBaselineData && (
+            <>
+              <Line
+                type="monotone"
+                dataKey="baseline_balanced_lower"
+                stroke="#2e7d32"
+                strokeDasharray=""
+                dot={false}
+                name="Normalområde nedre grense"
+                strokeWidth={4.5}
+                connectNulls={true}
+              />
+              <Line
+                type="monotone"
+                dataKey="baseline_balanced_upper"
+                stroke="#2e7d32"
+                strokeDasharray=""
+                dot={false}
+                name="Normalområde øvre grense"
+                strokeWidth={4.5}
+                connectNulls={true}
+              />
+            </>
           )}
         </ComposedChart>
       </ResponsiveContainer>

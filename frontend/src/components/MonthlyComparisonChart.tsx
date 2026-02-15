@@ -62,8 +62,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
         params.append('end_date', end);
         params.append('limit', '60');
         activityTypes.forEach(t => params.append('activity_types', t));
-        const base = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const res = await fetch(`${base}/api/analysis/monthly-summaries?${params.toString()}`);
+        const res = await fetch(`/api/analysis/monthly-summaries?${params.toString()}`);
         if (res.ok) {
           const data = await res.json();
           setServerData(data);
