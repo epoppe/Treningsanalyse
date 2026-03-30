@@ -46,6 +46,7 @@ npm run dev
 ## 📚 Dokumentasjon
 
 - **START_HERE.md** - trygg oppstart og repo-orientering
+- **REPO_NOTES.md** - observerte strukturnotater og lavrisiko vedlikeholdsnotater
 - **README.md** - kort prosjektoversikt
 
 ## 🔧 API-endepunkter
