@@ -1,0 +1,12 @@
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.32,<0.35
+SQLAlchemy>=2.0,<2.1
+pydantic>=2.10,<3
+pydantic-settings>=2.6,<3
+python-dotenv>=1.0,<2
+garth>=0.5,<0.6
+numpy>=1.26,<3
+pandas>=2.2,<3
+fitparse>=1.2,<2
+redis>=5.0,<6
+requests>=2.32,<3
