@@ -253,13 +253,13 @@ export async function POST(request: NextRequest) {
       }).join(', ');
       dataBlob.push(`## Søvn (snitt ${(avgMin / 60).toFixed(1)} timer) – per dag: ${lines}`);
     }
-    const activities = Array.isArray(activitiesResp) ? activitiesResp : (activitiesResp?.activities ?? []);
+    const activities: any[] = Array.isArray(activitiesResp) ? activitiesResp : (activitiesResp?.activities ?? []);
     if (activities.length) {
       const typeKey = (a: any) => a.activityType?.typeKey ?? a.activity_type?.typeKey ?? 'other';
-      const totalKm = activities.reduce((s, a) => s + (a.distance || 0) / 1000, 0);
-      const totalMin = activities.reduce((s, a) => s + (a.duration || 0) / 60, 0);
+      const totalKm = activities.reduce((s: number, a: any) => s + (a.distance || 0) / 1000, 0);
+      const totalMin = activities.reduce((s: number, a: any) => s + (a.duration || 0) / 60, 0);
       const byType: Record<string, number> = {};
-      activities.forEach((a) => { const t = typeKey(a); byType[t] = (byType[t] || 0) + 1; });
+      activities.forEach((a: any) => { const t = typeKey(a); byType[t] = (byType[t] || 0) + 1; });
       // Full aktivitetsliste – hver aktivitet med dato, navn, type, distanse, varighet, pace, puls, TSS
       const lines = activities.map((a: any) => {
         const dt = a.startTimeLocal ? new Date(a.startTimeLocal).toISOString().split('T')[0] : '?';

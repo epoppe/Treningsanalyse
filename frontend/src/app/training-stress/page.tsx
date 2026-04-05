@@ -712,7 +712,11 @@ const TrainingStressPage: React.FC = () => {
                         },
                         label: function(context) {
                           if (context.dataset.label === 'Form') {
-                            const value = context.parsed.y;
+                            const rawValue = context.parsed.y;
+                            if (rawValue == null) {
+                              return 'Form: –';
+                            }
+                            const value = Number(rawValue);
                             let status = '';
                             if (value >= 10) status = ' (God form)';
                             else if (value >= 0) status = ' (Nøytral)';

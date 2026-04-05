@@ -14,25 +14,46 @@ interface PlotlyChartProps {
     yKeys: string[];
     title: string;
     yAxisTitle: string;
+    /** Standard «Dato» for tidsserier; sett eksplisitt for f.eks. scatter mot andre X-verdier */
+    xAxisTitle?: string;
+    traceMode?: 'lines+markers' | 'markers' | 'lines';
+    /** Nøkkel per datapunkt for hover (f.eks. aktivitetsnavn + dato) */
+    textKey?: string;
 }
 
-const PlotlyChart = ({ data, xKey, yKeys, title, yAxisTitle }: PlotlyChartProps) => {
+const PlotlyChart = ({
+    data,
+    xKey,
+    yKeys,
+    title,
+    yAxisTitle,
+    xAxisTitle = 'Dato',
+    traceMode = 'lines+markers',
+    textKey,
+}: PlotlyChartProps) => {
     if (!data || data.length === 0) {
         return <Text>Ingen data tilgjengelig for å vise grafen.</Text>;
     }
+
+    const hoverTemplate = textKey
+        ? `%{text}<br>${xAxisTitle}: %{x}<br>${yAxisTitle}: %{y}<extra></extra>`
+        : undefined;
 
     const traces = yKeys.map(yKey => ({
         x: data.map(item => item[xKey]),
         y: data.map(item => item[yKey]),
         name: yKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()), // Prettify name
         type: 'scatter',
-        mode: 'lines+markers',
+        mode: traceMode,
+        ...(textKey
+            ? { text: data.map(item => String(item[textKey] ?? '')), hovertemplate: hoverTemplate }
+            : {}),
     }));
 
     const layout = {
         title: title,
         xaxis: {
-            title: 'Dato',
+            title: xAxisTitle,
         },
         yaxis: {
             title: yAxisTitle,

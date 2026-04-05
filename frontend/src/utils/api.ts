@@ -302,6 +302,30 @@ export interface BodyBatteryByActivityResponse {
   };
 }
 
+export interface FactorRelationshipsResponse {
+  x_metric: string;
+  y_metric: string;
+  days: number;
+  activity_type?: string | null;
+  point_count: number;
+  correlation: number | null;
+  correlation_strength: string;
+  x_meta: { label: string; unit: string };
+  y_meta: { label: string; unit: string };
+  summary: { avg_x: number | null; avg_y: number | null };
+  available_metrics: Record<string, { label: string; unit: string; source: string }>;
+  points: Array<{
+    activity_id: string;
+    activity_name?: string;
+    activity_type?: string;
+    date: string;
+    x: number;
+    y: number;
+    distance_km?: number;
+    duration_min?: number;
+  }>;
+}
+
 export const analysisApi = {
   getVo2MaxHistory: (startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
@@ -329,6 +353,37 @@ export const analysisApi = {
     return apiCall('get', url);
   },
   getBodyBatteryStatistics: () => apiCall('get', '/analysis/body-battery/statistics'),
+  getFactorRelationships: async (params: {
+    xMetric: string;
+    yMetric: string;
+    days: number;
+    activityType?: string;
+    minDistanceKm?: number;
+  }) => {
+    const search = new URLSearchParams();
+    search.append('x_metric', params.xMetric);
+    search.append('y_metric', params.yMetric);
+    search.append('days', String(params.days));
+    if (params.activityType) search.append('activity_type', params.activityType);
+    if (params.minDistanceKm != null) search.append('min_distance_km', String(params.minDistanceKm));
+    try {
+      const response = await apiClient.get<FactorRelationshipsResponse>(
+        `/analysis/factor-relationships?${search.toString()}`,
+      );
+      return response.data;
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      if (
+        error?.response?.status === 400
+        && detail
+        && typeof detail === 'object'
+        && detail.error === 'unknown_metric'
+      ) {
+        throw new Error('Ukjent måling på X- eller Y-aksen.');
+      }
+      throw error;
+    }
+  },
 };
 
 export const syncApi = {
