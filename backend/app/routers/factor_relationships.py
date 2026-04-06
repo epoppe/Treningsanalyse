@@ -2,15 +2,16 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from types import SimpleNamespace
+from typing import Any, Dict, List, Optional, Set, Tuple
 import math
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, load_only
 
 from ..database.session import get_db
-from ..database.models.activity import Activity
+from ..database.models.activity import Activity, ActivityType
 from ..database.models.sleep import HRV, Sleep
 from ..database.models.body_battery import BodyBattery
 from ..database.models.stress import Stress
@@ -37,6 +38,51 @@ METRICS: Dict[str, Dict[str, str]] = {
     "stress_avg": {"source": "health", "label": "Stress", "unit": "score"},
 }
 
+# Ekstra Activity-kolonner per aktivitetsmetrikk (unngår full aktivitetsrad + JSON).
+ACTIVITY_METRIC_COLUMNS: Dict[str, Tuple[Any, ...]] = {
+    "distance": (Activity.distance,),
+    "duration": (Activity.duration,),
+    "average_hr": (Activity.average_heart_rate,),
+    "average_power": (Activity.average_power,),
+    "training_stress_score": (Activity.training_stress_score,),
+    "epoc": (Activity.epoc,),
+    "total_training_effect": (Activity.total_training_effect,),
+    "total_anaerobic_training_effect": (Activity.total_anaerobic_training_effect,),
+    "negative_split_percent": (Activity.negative_split_percent,),
+    "decoupling_percent": (Activity.decoupling_percent,),
+    "training_readiness_score": (Activity.training_readiness_score,),
+    "body_battery_start": (Activity.body_battery_start,),
+}
+
+
+def _unique_orm_columns(columns: List[Any]) -> List[Any]:
+    seen: Set[str] = set()
+    out: List[Any] = []
+    for col in columns:
+        key = getattr(col, "key", None)
+        if key is None:
+            continue
+        if key not in seen:
+            seen.add(key)
+            out.append(col)
+    return out
+
+
+def _activity_load_columns(x_metric: str, y_metric: str) -> List[Any]:
+    cols: Set[Any] = {
+        Activity.activity_id,
+        Activity.activity_name,
+        Activity.start_time,
+        Activity.activity_type_id,
+        Activity.distance,
+        Activity.duration,
+    }
+    for metric in (x_metric, y_metric):
+        extra = ACTIVITY_METRIC_COLUMNS.get(metric)
+        if extra:
+            cols.update(extra)
+    return list(cols)
+
 
 def _safe_float(value: Any) -> Optional[float]:
     if value is None:
@@ -58,7 +104,7 @@ def _first_present_float(obj: Any, attr_names: List[str]) -> Optional[float]:
     return None
 
 
-def _avg_hrv_by_measurement_date(rows: List[HRV]) -> Dict[date, float]:
+def _avg_hrv_by_measurement_date(rows: List[Any]) -> Dict[date, float]:
     sums: Dict[date, float] = defaultdict(float)
     counts: Dict[date, int] = defaultdict(int)
     for row in rows:
@@ -112,23 +158,89 @@ def get_factor_relationships(
 
     start_dt = datetime.now() - timedelta(days=days)
     lookback_day = start_dt.date() - timedelta(days=1)
-    activities_query = db.query(Activity).filter(Activity.start_time >= start_dt)
+
+    active_metrics = {x_metric, y_metric}
+    need_sleep = bool(active_metrics & {"sleep_score", "sleep_time", "hrv"})
+    need_hrv = "hrv" in active_metrics
+    need_body_battery = "body_battery" in active_metrics
+    need_stress = "stress_avg" in active_metrics
+
+    activity_cols = _activity_load_columns(x_metric, y_metric)
+    activities_query = (
+        db.query(Activity)
+        .options(
+            load_only(*activity_cols),
+            joinedload(Activity.activity_type).load_only(ActivityType.type_key, ActivityType.id),
+        )
+        .filter(Activity.start_time >= start_dt)
+    )
     if activity_type:
         activities_query = activities_query.join(Activity.activity_type).filter_by(type_key=activity_type)
 
     activities = activities_query.order_by(Activity.start_time.asc()).all()
 
-    sleep_rows = db.query(Sleep).filter(Sleep.sleep_date >= lookback_day).all()
-    sleep_by_date = {row.sleep_date: row for row in sleep_rows}
+    sleep_by_date: Dict[date, Any] = {}
+    if need_sleep:
+        sleep_cols: List[Any] = [Sleep.sleep_date]
+        if "sleep_score" in active_metrics:
+            sleep_cols.extend([Sleep.sleep_score, Sleep.overall_score, Sleep.recovery_score])
+        if "sleep_time" in active_metrics:
+            sleep_cols.append(Sleep.total_sleep_time)
+        if "hrv" in active_metrics:
+            sleep_cols.append(Sleep.heart_rate_variability)
+        sleep_cols = _unique_orm_columns(sleep_cols)
+        sleep_rows = (
+            db.query(Sleep)
+            .options(load_only(*sleep_cols))
+            .filter(Sleep.sleep_date >= lookback_day)
+            .all()
+        )
+        sleep_by_date = {row.sleep_date: row for row in sleep_rows if row.sleep_date is not None}
 
-    hrv_rows = db.query(HRV).filter(HRV.measurement_date >= lookback_day).all()
-    hrv_by_date = _avg_hrv_by_measurement_date(hrv_rows)
+    hrv_by_date: Dict[date, float] = {}
+    if need_hrv:
+        hrv_rows = (
+            db.query(HRV)
+            .options(load_only(HRV.measurement_date, HRV.rmssd))
+            .filter(HRV.measurement_date >= lookback_day)
+            .all()
+        )
+        hrv_by_date = _avg_hrv_by_measurement_date(hrv_rows)
 
-    bb_rows = db.query(BodyBattery).filter(BodyBattery.date >= lookback_day).all()
-    bb_by_date = {row.date: row for row in bb_rows}
+    bb_by_date: Dict[date, Any] = {}
+    if need_body_battery:
+        bb_rows = (
+            db.query(
+                BodyBattery.date,
+                BodyBattery.max_body_battery,
+                BodyBattery.body_battery_charged,
+                BodyBattery.body_battery_charged_start,
+                BodyBattery.min_body_battery,
+            )
+            .filter(BodyBattery.date >= lookback_day)
+            .all()
+        )
+        for bb_date, max_bb, charged, charged_start, min_bb in bb_rows:
+            if bb_date is None:
+                continue
+            bb_by_date[bb_date] = SimpleNamespace(
+                max_body_battery=max_bb,
+                body_battery_charged=charged,
+                body_battery_charged_start=charged_start,
+                min_body_battery=min_bb,
+            )
 
-    stress_rows = db.query(Stress).filter(Stress.stress_date >= lookback_day).all()
-    stress_by_date = {row.stress_date: row for row in stress_rows}
+    stress_by_date: Dict[date, Any] = {}
+    if need_stress:
+        stress_rows = (
+            db.query(Stress.stress_date, Stress.stress_level)
+            .filter(Stress.stress_date >= lookback_day)
+            .all()
+        )
+        for s_date, level in stress_rows:
+            if s_date is None:
+                continue
+            stress_by_date[s_date] = SimpleNamespace(stress_level=level)
 
     def metric_value(metric: str, activity: Activity) -> Optional[float]:
         activity_day = activity.start_time.date() if activity.start_time else None
@@ -137,9 +249,15 @@ def get_factor_relationships(
         prev_day = activity_day - timedelta(days=1)
 
         if metric == "distance":
-            return _safe_float((activity.distance or 0) / 1000.0) if activity.distance is not None else None
+            meters = _safe_float(activity.distance)
+            if meters is None:
+                return None
+            return meters / 1000.0
         if metric == "duration":
-            return _safe_float((activity.duration or 0) / 60.0) if activity.duration is not None else None
+            seconds = _safe_float(activity.duration)
+            if seconds is None:
+                return None
+            return seconds / 60.0
         if metric == "average_hr":
             return _safe_float(activity.average_heart_rate)
         if metric == "average_power":
@@ -173,9 +291,10 @@ def get_factor_relationships(
             if row is None:
                 return None
             total_sleep_time = getattr(row, "total_sleep_time", None)
-            if total_sleep_time is None:
+            secs = _safe_float(total_sleep_time)
+            if secs is None:
                 return None
-            return _safe_float(total_sleep_time / 3600.0)
+            return secs / 3600.0
         if metric == "hrv":
             v = hrv_by_date.get(prev_day)
             if v is not None:
@@ -209,7 +328,8 @@ def get_factor_relationships(
     y_vals: List[float] = []
 
     for activity in activities:
-        distance_km = (activity.distance or 0) / 1000.0 if activity.distance else 0.0
+        dist_m = _safe_float(activity.distance)
+        distance_km = (dist_m / 1000.0) if dist_m is not None else 0.0
         if distance_km < min_distance_km:
             continue
         x_val = metric_value(x_metric, activity)
@@ -218,6 +338,8 @@ def get_factor_relationships(
             continue
         x_vals.append(x_val)
         y_vals.append(y_val)
+        dur_sec = _safe_float(activity.duration)
+        duration_min = round(dur_sec / 60.0, 1) if dur_sec is not None else None
         points.append({
             "activity_id": activity.activity_id,
             "activity_name": activity.activity_name,
@@ -226,7 +348,7 @@ def get_factor_relationships(
             "x": round(x_val, 3),
             "y": round(y_val, 3),
             "distance_km": round(distance_km, 2),
-            "duration_min": round((activity.duration or 0) / 60.0, 1) if activity.duration else None,
+            "duration_min": duration_min,
         })
 
     corr = _pearson(x_vals, y_vals)
