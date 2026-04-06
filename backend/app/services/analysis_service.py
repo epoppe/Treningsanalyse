@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 import re
+import json
 from fastapi import HTTPException
 from ..storage import DataStorage
 from typing import Optional, Dict, Any, List
@@ -20,6 +21,12 @@ class AnalysisService:
 
     def _to_float(self, value: Any) -> Optional[float]:
         """Konverterer ulike numeriske representasjoner til float."""
+        if isinstance(value, dict):
+            # Noen kilder kan pakke tall inn i {"value": ...}
+            nested_value = value.get("value")
+            if nested_value is not None:
+                return self._to_float(nested_value)
+            return None
         if value is None:
             return None
         if isinstance(value, (int, float)):
@@ -31,6 +38,46 @@ class AnalysisService:
                     return float(match.group())
                 except ValueError:
                     return None
+        return None
+
+    def _coerce_dict(self, value: Any) -> Optional[Dict[str, Any]]:
+        """Normaliserer JSON-felt til dict når mulig."""
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                loaded = json.loads(text)
+            except Exception:
+                return None
+            return loaded if isinstance(loaded, dict) else None
+        return None
+
+    def _extract_records(self, details: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        """Henter records-liste fra kjente JSON-shapes."""
+        candidate_lists = [
+            details.get("records"),
+            details.get("fit_records"),
+            details.get("samples"),
+        ]
+        nested_containers = [
+            details.get("fit_data"),
+            details.get("details"),
+            details.get("activity_details"),
+            details.get("metrics"),
+        ]
+        for container in nested_containers:
+            if isinstance(container, dict):
+                candidate_lists.extend([
+                    container.get("records"),
+                    container.get("fit_records"),
+                    container.get("samples"),
+                ])
+        for candidate in candidate_lists:
+            if isinstance(candidate, list):
+                return candidate
         return None
 
     def _get_fit_details_for_activity(self, activity_id: int, activity: Activity) -> Optional[pd.DataFrame]:
@@ -45,22 +92,36 @@ class AnalysisService:
 
         # 2) Fallback: detailed_metrics JSON lagret på aktivitet
         details = activity.detailed_metrics if activity else None
-        if not details or not isinstance(details, dict):
+        details = self._coerce_dict(details)
+        if not details:
             return None
 
-        records = details.get("records")
-        if not records or not isinstance(records, list):
+        records = self._extract_records(details)
+        if not records:
             return None
 
         parsed_records: List[Dict[str, Any]] = []
         for record in records:
             if not isinstance(record, dict):
                 continue
-            timestamp = pd.to_datetime(record.get("timestamp"), errors="coerce")
+            timestamp = pd.to_datetime(
+                record.get("timestamp")
+                or record.get("time")
+                or record.get("record_timestamp"),
+                errors="coerce",
+            )
             if pd.isna(timestamp):
                 continue
-            speed = self._to_float(record.get("enhanced_speed") or record.get("speed"))
-            heart_rate = self._to_float(record.get("heart_rate"))
+            speed = self._to_float(
+                record.get("enhanced_speed")
+                or record.get("speed")
+                or record.get("enhancedSpeed")
+            )
+            heart_rate = self._to_float(
+                record.get("heart_rate")
+                or record.get("heartrate")
+                or record.get("hr")
+            )
             parsed_records.append({
                 "timestamp": timestamp,
                 "speed": speed,

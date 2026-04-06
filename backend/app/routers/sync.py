@@ -247,6 +247,36 @@ async def trigger_activity_sync_historical(
 
     return {"message": "Historisk synkronisering startet (ignore_sync_state, chunked FIT)", "job_id": job_id}
 
+
+@router.post("/fit-data/download/missing", status_code=202)
+async def trigger_missing_fit_download(
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client),
+    limit: int = Query(50, ge=1, le=500, description="Maks antall manglende aktiviteter per kjøring")
+):
+    """Fortsetter nedlasting av manglende FIT-data i batcher."""
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+
+    async def _run_missing_fit_job():
+        db_session = None
+        try:
+            sync_jobs[job_id]["status"] = "processing"
+            db_session = SessionLocal()
+            sync_service = SyncService(garmin_client, storage, db_session)
+            result = await sync_service.download_fit_data_for_activities(limit=limit)
+            sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+        except Exception as e:
+            logger.critical(f"Feil i missing FIT-jobb {job_id}: {e}", exc_info=True)
+            sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+        finally:
+            if db_session:
+                db_session.close()
+
+    background_tasks.add_task(_run_missing_fit_job)
+    return {"message": "Nedlasting av manglende FIT-data startet", "job_id": job_id, "limit": limit}
+
 @router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
     background_tasks: BackgroundTasks,

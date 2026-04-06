@@ -57,6 +57,42 @@ def patch_garth():
 
 patch_garth()
 
+
+def _merge_garmin_daily_and_sleep_detail(
+    daily: Optional[Dict[str, Any]],
+    detail: Optional[Dict[str, Any]],
+    date_str: str,
+) -> Optional[Dict[str, Any]]:
+    """Kombinerer DailySleep (typisk overall_score) med SleepData (søvnstadier)."""
+    if not daily and not detail:
+        return None
+    keys = (
+        "sleep_time",
+        "sleep_goal",
+        "sleep_score",
+        "overall_score",
+        "deep_sleep",
+        "light_sleep",
+        "rem_sleep",
+        "awake_time",
+        "total_sleep",
+    )
+    merged: Dict[str, Any] = {"date": date_str}
+    for k in keys:
+        d_val = daily.get(k) if daily else None
+        s_val = detail.get(k) if detail else None
+        merged[k] = s_val if s_val is not None else d_val
+    if merged.get("total_sleep") is None:
+        deep = merged.get("deep_sleep")
+        light = merged.get("light_sleep")
+        rem = merged.get("rem_sleep")
+        if any(x is not None for x in (deep, light, rem)):
+            merged["total_sleep"] = (deep or 0) + (light or 0) + (rem or 0)
+    if any(v is not None for k, v in merged.items() if k != "date"):
+        return merged
+    return None
+
+
 class GarminClient:
     _instance = None
     _lock = asyncio.Lock()
@@ -762,7 +798,10 @@ class GarminClient:
         try:
             date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter søvndata for {date_str}")
-            
+
+            result_from_daily: Optional[Dict[str, Any]] = None
+            result_from_sleep: Optional[Dict[str, Any]] = None
+
             # 0) Prøv garth.DailySleep (score pr dag, tider som sekunder)
             try:
                 DailySleep = getattr(garth, 'DailySleep', None)
@@ -890,8 +929,11 @@ class GarminClient:
                             "total_sleep": sleep_time if sleep_time is not None else ((deep or 0) + (light or 0) + (rem or 0))
                         }
                         if any(v is not None for k, v in result.items() if k != 'date'):
-                            logger.info(f"Hentet søvndata via garth.DailySleep for {date_str}")
-                            return result
+                            logger.info(
+                                "DailySleep for %s: lagrer score/tider (henter SleepData for stadier)",
+                                date_str,
+                            )
+                            result_from_daily = result
             except Exception as e:
                 logger.debug(f"DailySleep.list feilet for {date_str}: {e}")
 
@@ -901,12 +943,30 @@ class GarminClient:
                 if SleepData is not None:
                     sd = await asyncio.to_thread(SleepData.get, date_str)
                     if sd:
-                        sd_dict = sd.to_dict() if hasattr(sd, 'to_dict') else (sd.dict() if hasattr(sd, 'dict') else sd)
+                        # garth 0.5+: SleepData har data i daily_sleep_dto (ikke to_dict() på roten)
+                        dto = getattr(sd, 'daily_sleep_dto', None)
+                        if dto is not None:
+                            sd_dict = {
+                                k: v
+                                for k, v in vars(dto).items()
+                                if not k.startswith('_')
+                            }
+                        elif hasattr(sd, 'to_dict'):
+                            sd_dict = sd.to_dict()
+                        elif hasattr(sd, 'dict'):
+                            sd_dict = sd.dict()
+                        else:
+                            sd_dict = sd if isinstance(sd, dict) else {}
+
+                        if not isinstance(sd_dict, dict):
+                            sd_dict = {}
+
                         def find_num(d: dict, keys: list):
                             for k in keys:
                                 if k in d and isinstance(d[k], (int, float)):
                                     return d[k]
                             return None
+
                         def find_score(d: dict):
                             # Direkte felt
                             for k in ['sleepScore', 'sleep_score', 'score']:
@@ -928,10 +988,14 @@ class GarminClient:
                                     if isinstance(v, (int, float)):
                                         return v
                             return None
-                        
+
                         def find_overall_score(d: dict):
-                            """Hent overall score spesifikt fra sleep_scores"""
-                            # Søk først under "scores" -> "overall"
+                            """Hent overall score fra sleep_scores (garth DailySleepDTO) eller scores-dict."""
+                            ss = d.get('sleep_scores')
+                            if ss is not None and hasattr(ss, 'overall'):
+                                ov = getattr(ss.overall, 'value', None)
+                                if isinstance(ov, (int, float)):
+                                    return ov
                             scores = d.get('scores') if isinstance(d.get('scores'), dict) else None
                             if scores:
                                 overall = scores.get('overall')
@@ -940,12 +1004,10 @@ class GarminClient:
                                 overall_score = scores.get('overallScore')
                                 if isinstance(overall_score, (int, float)):
                                     return overall_score
-                            # Prøv direkte felt
                             for k in ['overall_score', 'overallScore']:
                                 v = d.get(k)
                                 if isinstance(v, (int, float)):
                                     return v
-                            # Prøv under "summary"
                             summary = d.get('summary') if isinstance(d.get('summary'), dict) else None
                             if summary:
                                 for k in ['overall', 'overallScore']:
@@ -953,13 +1015,22 @@ class GarminClient:
                                     if isinstance(v, (int, float)):
                                         return v
                             return None
-                        
-                        to_min = lambda s: (s/60.0) if isinstance(s, (int, float)) else None
-                        deep = to_min(find_num(sd_dict, ['deepSleepSeconds','deep_sleep_seconds']))
-                        light = to_min(find_num(sd_dict, ['lightSleepSeconds','light_sleep_seconds']))
-                        rem = to_min(find_num(sd_dict, ['remSleepSeconds','rem_sleep_seconds']))
-                        awake = to_min(find_num(sd_dict, ['awakeSeconds','awake_seconds']))
-                        total = to_min(find_num(sd_dict, ['totalSleepSeconds','total_sleep_seconds']))
+
+                        to_min = lambda s: (s / 60.0) if isinstance(s, (int, float)) else None
+                        deep = to_min(find_num(sd_dict, ['deepSleepSeconds', 'deep_sleep_seconds']))
+                        light = to_min(find_num(sd_dict, ['lightSleepSeconds', 'light_sleep_seconds']))
+                        rem = to_min(find_num(sd_dict, ['remSleepSeconds', 'rem_sleep_seconds']))
+                        awake = to_min(
+                            find_num(
+                                sd_dict,
+                                ['awakeSeconds', 'awake_seconds', 'awake_sleep_seconds'],
+                            )
+                        )
+                        total_sec = find_num(
+                            sd_dict,
+                            ['totalSleepSeconds', 'total_sleep_seconds', 'sleep_time_seconds'],
+                        )
+                        total = to_min(total_sec)
                         score = find_score(sd_dict)
                         overall_score = find_overall_score(sd_dict)
                         result = {
@@ -976,9 +1047,16 @@ class GarminClient:
                         }
                         if any(v is not None for k, v in result.items() if k != 'date'):
                             logger.info(f"Hentet søvndata via garth.SleepData for {date_str}")
-                            return result
+                            result_from_sleep = result
             except Exception as e:
                 logger.debug(f"SleepData.get feilet for {date_str}: {e}")
+
+            merged_garth = _merge_garmin_daily_and_sleep_detail(
+                result_from_daily, result_from_sleep, date_str
+            )
+            if merged_garth:
+                logger.info(f"Hentet søvndata (DailySleep + SleepData) for {date_str}")
+                return merged_garth
 
             # 2) Prøv usersummary allMetrics
             try:

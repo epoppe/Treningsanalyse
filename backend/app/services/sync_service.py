@@ -498,59 +498,59 @@ class SyncService:
                 if should_skip:
                     continue
 
-                # Hent detaljerte data (FIT-fil) - kun for nylige aktiviteter for å unngå timeout
+                # Hent detaljerte data (FIT-fil) for perioden vi synker.
+                # FIT-data er nødvendig for historisk backfill, så vi bruker den også på eldre aktiviteter.
                 details_json = None
-                if is_recent:  # Kun last ned FIT-data for nylige aktiviteter
-                    fit_data = await self.garmin_client.get_activity_details(activity_id)
-                    if fit_data:
-                        details_json = self._parse_fit_data(fit_data)
-                        
-                        # Lagre FIT-data også i parquet-format for decoupling-beregninger
-                        if details_json and 'records' in details_json:
-                            logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
-                            parquet_records = []
-                            for record in details_json['records']:
-                                # Konverter timestamp til UTC hvis det eksisterer
-                                timestamp = record.get('timestamp')
-                                if timestamp:
-                                    if isinstance(timestamp, str):
-                                        timestamp = date_parser.parse(timestamp)
-                                        if timestamp.tzinfo is None:
-                                            timestamp = timestamp.replace(tzinfo=timezone.utc)
-                                    elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                fit_data = await self.garmin_client.get_activity_details(activity_id)
+                if fit_data:
+                    details_json = self._parse_fit_data(fit_data)
+                    
+                    # Lagre FIT-data også i parquet-format for decoupling-beregninger
+                    if details_json and 'records' in details_json:
+                        logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
+                        parquet_records = []
+                        for record in details_json['records']:
+                            # Konverter timestamp til UTC hvis det eksisterer
+                            timestamp = record.get('timestamp')
+                            if timestamp:
+                                if isinstance(timestamp, str):
+                                    timestamp = date_parser.parse(timestamp)
+                                    if timestamp.tzinfo is None:
                                         timestamp = timestamp.replace(tzinfo=timezone.utc)
-                                    elif not hasattr(timestamp, 'tzinfo'):
-                                        timestamp = datetime.fromisoformat(str(timestamp)).replace(tzinfo=timezone.utc)
-                                
-                                parquet_record = {
-                                    'activity_id': int(activity_id),
-                                    'timestamp': timestamp,
-                                    'latitude': self._extract_numeric_value(record.get('position_lat')),
-                                    'longitude': self._extract_numeric_value(record.get('position_long')),
-                                    'distance': self._extract_numeric_value(record.get('distance')),
-                                    'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
-                                    'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
-                                    'cadence': self._extract_numeric_value(record.get('cadence')),
-                                    'temperature': self._extract_numeric_value(record.get('temperature')),
-                                    'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
-                                }
-                                
-                                # Kun legg til record hvis den har nødvendige data
-                                if parquet_record['timestamp'] is not None:
-                                    parquet_records.append(parquet_record)
+                                elif hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is None:
+                                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                                elif not hasattr(timestamp, 'tzinfo'):
+                                    timestamp = datetime.fromisoformat(str(timestamp)).replace(tzinfo=timezone.utc)
                             
-                            if parquet_records:
-                                try:
-                                    self.storage.save_activity_details(parquet_records)
-                                    logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
-                                except Exception as e:
-                                    logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
-                            else:
-                                logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
+                            parquet_record = {
+                                'activity_id': int(activity_id),
+                                'timestamp': timestamp,
+                                'latitude': self._extract_numeric_value(record.get('position_lat')),
+                                'longitude': self._extract_numeric_value(record.get('position_long')),
+                                'distance': self._extract_numeric_value(record.get('distance')),
+                                'speed': self._extract_numeric_value(record.get('enhanced_speed') or record.get('speed')),
+                                'heart_rate': self._extract_numeric_value(record.get('heart_rate')),
+                                'cadence': self._extract_numeric_value(record.get('cadence')),
+                                'temperature': self._extract_numeric_value(record.get('temperature')),
+                                'altitude': self._extract_numeric_value(record.get('enhanced_altitude') or record.get('altitude'))
+                            }
+                            
+                            # Kun legg til record hvis den har nødvendige data
+                            if parquet_record['timestamp'] is not None:
+                                parquet_records.append(parquet_record)
+                        
+                        if parquet_records:
+                            try:
+                                self.storage.save_activity_details(parquet_records)
+                                logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
+                            except Exception as e:
+                                logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
                         else:
-                            logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
+                            logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
+                    else:
+                        logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
                 else:
-                    logger.info(f"Hopper over FIT-data nedlasting for aktivitet {activity_id} (ikke nylig)")
+                    logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
 
                 # Håndter ActivityType
                 activity_type_key = act_data.get('activityType', {}).get('typeKey')
