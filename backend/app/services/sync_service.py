@@ -203,7 +203,7 @@ class SyncService:
                 average_pace=avg_pace,
                 activity_type_id=activity_type_obj.id if activity_type_obj else None,
                 average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
-                total_training_effect=act_data.get('trainingEffect'),
+                total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                 total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                 lactate_threshold_speed=lactate_threshold_speed  # Lactate threshold speed
             )
@@ -628,7 +628,7 @@ class SyncService:
                     average_pace=avg_pace,
                     activity_type_id=activity_type_obj.id if activity_type_obj else None,
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
-                    total_training_effect=act_data.get('trainingEffect'),
+                    total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                     epoc=act_data.get('activityTrainingLoad'),  # EPOC data
                     lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
@@ -1361,12 +1361,20 @@ class SyncService:
                 # Ikke hopp over hvis dette er aller siste aktivitet (skal alltid oppdateres)
                 is_latest = (latest_activity_id is not None and activity_id == latest_activity_id)
                 # Behandle 0 som manglende – gyldig TE er 1.0–5.0
-                has_valid_te = (
-                    (activity.total_training_effect is not None and activity.total_training_effect > 0) or
-                    (activity.total_anaerobic_training_effect is not None and activity.total_anaerobic_training_effect > 0)
+                has_valid_aerobic_te = (
+                    activity.total_training_effect is not None and activity.total_training_effect > 0
                 )
-                # Skip hvis aktiviteten har gyldig TE og ikke er nylig og ikke er siste aktivitet
-                if has_valid_te and not (force_refresh_recent and is_recent) and not is_latest:
+                has_valid_anaerobic_te = (
+                    activity.total_anaerobic_training_effect is not None
+                    and activity.total_anaerobic_training_effect > 0
+                )
+                # Skip kun når begge TE-verdier allerede er gyldige.
+                if (
+                    has_valid_aerobic_te
+                    and has_valid_anaerobic_te
+                    and not (force_refresh_recent and is_recent)
+                    and not is_latest
+                ):
                     skipped_count += 1
                     continue
                 
