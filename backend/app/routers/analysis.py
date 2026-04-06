@@ -213,8 +213,15 @@ async def get_sleep_range_from_db(
                 one = await garmin_client.get_sleep_data(datetime.combine(missing_day, datetime.min.time()))
                 if not one:
                     continue
+                # Må matche health.py / Garmin: DailySleep kan gi overall_score uten sleep_score eller varigheter
                 if not any(one.get(k) for k in [
-                    "sleep_time", "total_sleep", "deep_sleep", "light_sleep", "rem_sleep", "sleep_score"
+                    "sleep_time",
+                    "total_sleep",
+                    "deep_sleep",
+                    "light_sleep",
+                    "rem_sleep",
+                    "sleep_score",
+                    "overall_score",
                 ]):
                     continue
 
@@ -235,6 +242,8 @@ async def get_sleep_range_from_db(
                 row.rem_sleep_time = to_sec(one.get("rem_sleep"))
                 row.awake_time = to_sec(one.get("awake_time"))
                 row.sleep_score = one.get("sleep_score")
+                if one.get("overall_score") is not None:
+                    row.overall_score = one.get("overall_score")
 
                 from sqlalchemy.sql import func as sa_func
                 row.updated_at = sa_func.now()
@@ -264,6 +273,7 @@ async def get_sleep_range_from_db(
                 "rem_sleep": (r.rem_sleep_time/60.0) if r.rem_sleep_time is not None else None,
                 "awake_time": (r.awake_time/60.0) if r.awake_time is not None else None,
                 "sleep_score": r.sleep_score,
+                "overall_score": r.overall_score,
             })
         return result
     except Exception as e:
