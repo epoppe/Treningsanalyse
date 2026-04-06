@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
+import re
 from fastapi import HTTPException
 from ..storage import DataStorage
 from typing import Optional, Dict, Any, List
@@ -16,6 +17,60 @@ class AnalysisService:
         self.storage = storage
         self.hrv_service = HRVService(storage)
         self.body_battery_service = None  # Vil bli initialisert når nødvendig
+
+    def _to_float(self, value: Any) -> Optional[float]:
+        """Konverterer ulike numeriske representasjoner til float."""
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, str):
+            match = re.search(r'[-+]?(?:\d*\.\d+|\d+)', value)
+            if match:
+                try:
+                    return float(match.group())
+                except ValueError:
+                    return None
+        return None
+
+    def _get_fit_details_for_activity(self, activity_id: int, activity: Activity) -> Optional[pd.DataFrame]:
+        """
+        Hent FIT-detaljer fra parquet først, med fallback til detailed_metrics i DB.
+        Returnerer DataFrame med minst timestamp/speed/heart_rate når tilgjengelig.
+        """
+        # 1) Primærkilde: parquet-lager
+        details_df = self.storage.get_activity_details(activity_id)
+        if details_df is not None and not details_df.empty:
+            return details_df
+
+        # 2) Fallback: detailed_metrics JSON lagret på aktivitet
+        details = activity.detailed_metrics if activity else None
+        if not details or not isinstance(details, dict):
+            return None
+
+        records = details.get("records")
+        if not records or not isinstance(records, list):
+            return None
+
+        parsed_records: List[Dict[str, Any]] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            timestamp = pd.to_datetime(record.get("timestamp"), errors="coerce")
+            if pd.isna(timestamp):
+                continue
+            speed = self._to_float(record.get("enhanced_speed") or record.get("speed"))
+            heart_rate = self._to_float(record.get("heart_rate"))
+            parsed_records.append({
+                "timestamp": timestamp,
+                "speed": speed,
+                "heart_rate": heart_rate
+            })
+
+        if not parsed_records:
+            return None
+
+        return pd.DataFrame(parsed_records)
 
     def calculate_negative_split(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
         """
@@ -39,8 +94,8 @@ class AnalysisService:
                     "calculation_method": "cached"
                 }
             
-            # Hent FIT-data
-            details_df = self.storage.get_activity_details(activity_id)
+            # Hent FIT-data (parquet først, deretter DB fallback)
+            details_df = self._get_fit_details_for_activity(activity_id, activity)
             if details_df is None or details_df.empty:
                 logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
                 raise HTTPException(status_code=404, detail="No FIT data available for this activity")
@@ -123,8 +178,8 @@ class AnalysisService:
                     "calculation_method": "cached"
                 }
             
-            # Hent FIT-data
-            details_df = self.storage.get_activity_details(activity_id)
+            # Hent FIT-data (parquet først, deretter DB fallback)
+            details_df = self._get_fit_details_for_activity(activity_id, activity)
             if details_df is None or details_df.empty:
                 logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
                 raise HTTPException(status_code=404, detail="No FIT data available for this activity")
