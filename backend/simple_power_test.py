@@ -9,12 +9,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.services.power_service import PowerService
 from app.storage import DataStorage
+from app.config import settings
 
 def test_power_calculation():
     """Tester power-beregning med enkle verdier"""
     
     # Initialiser PowerService
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     power_service = PowerService(storage)
     
     print("=== Enkel Power-beregning Test ===\n")

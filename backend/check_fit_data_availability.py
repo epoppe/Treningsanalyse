@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.database.session import get_db
 from app.database.models.activity import Activity, ActivityType
 from app.storage import DataStorage
+from app.config import settings
 from sqlalchemy import and_
 
 def check_fit_data_availability():
@@ -21,7 +22,7 @@ def check_fit_data_availability():
     print("=" * 60)
     
     db = next(get_db())
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     
     try:
         # Hent ID for løpingstypen

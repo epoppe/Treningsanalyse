@@ -1,8 +1,9 @@
 import pandas as pd
+from app.config import data_path
 
 def main():
     # Last aktiviteter og finn de fra august 2024
-    activities_df = pd.read_parquet('data/activities.parquet')
+    activities_df = pd.read_parquet(data_path("activities.parquet"))
 
     if activities_df['start_time'].dtype == 'object':
         activities_df['start_time'] = pd.to_datetime(activities_df['start_time'], utc=True)
@@ -26,7 +27,7 @@ def main():
         print(f'\nTester aktivitet {test_id} for negative split...')
         
         # Sjekk om den finnes i FIT-data
-        fit_df = pd.read_parquet('data/activity_details.parquet')
+        fit_df = pd.read_parquet(data_path("activity_details.parquet"))
         if test_id in fit_df['activity_id'].values:
             count = len(fit_df[fit_df['activity_id'] == test_id])
             print(f'✓ Har FIT-data: {count} datapunkter')

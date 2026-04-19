@@ -146,6 +146,10 @@ class GarminClient:
                 logger.error(f"Pålogging feilet: {login_error}")
                 self._initialized = False
                 return False
+            except Exception as login_error:
+                logger.error(f"Pålogging feilet med uventet feil: {login_error}")
+                self._initialized = False
+                return False
 
     def is_authenticated(self) -> bool:
         """Sjekker om en token-fil finnes i katalogen uten å gjøre et nettverkskall."""

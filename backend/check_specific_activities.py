@@ -1,8 +1,9 @@
 import pandas as pd
+from app.config import data_path
 
 def main():
     # Last FIT-data
-    df = pd.read_parquet('data/activity_details.parquet')
+    df = pd.read_parquet(data_path("activity_details.parquet"))
     print(f'Totalt {len(df)} rader med FIT-data for {df["activity_id"].nunique()} aktiviteter')
     
     # Sjekk aktiviteter som brukte fallback

@@ -9,6 +9,7 @@ from ..services.garmin_client import GarminClient
 from ..services.power_service import PowerService
 from ..storage import DataStorage
 from ..dependencies import get_data_storage, get_garmin_client
+from ..config import settings
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
@@ -101,7 +102,7 @@ def get_activities_by_date_range(
                 elif force_refresh == 'true':
                     # Beregn power kun hvis force_refresh er true og power ikke er lagret
                     if storage is None:
-                        storage = DataStorage()
+                        storage = DataStorage(settings.DATA_DIR)
                         power_service = PowerService(storage)
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)
@@ -219,7 +220,7 @@ def get_activities(
                     elif force_refresh == 'true':
                         # Beregn power kun hvis force_refresh er true og power ikke er lagret
                         if storage is None:
-                            storage = DataStorage()
+                            storage = DataStorage(settings.DATA_DIR)
                             power_service = PowerService(storage)
                         try:
                             power_result = power_service.calculate_activity_power(int(act.activity_id), db)
@@ -316,7 +317,7 @@ def get_new_activities(
                 elif force_refresh == 'true':
                     # Beregn power kun hvis force_refresh er true og power ikke er lagret
                     if storage is None:
-                        storage = DataStorage()
+                        storage = DataStorage(settings.DATA_DIR)
                         power_service = PowerService(storage)
                     try:
                         power_result = power_service.calculate_activity_power(int(act.activity_id), db)

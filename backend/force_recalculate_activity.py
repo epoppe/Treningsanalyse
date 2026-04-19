@@ -12,6 +12,7 @@ from app.database.session import get_db
 from app.database.models.activity import Activity
 from app.services.analysis_service import AnalysisService
 from app.storage import DataStorage
+from app.config import settings
 
 def force_recalculate_activity():
     """Tvinge reberegning av negative split"""
@@ -20,7 +21,7 @@ def force_recalculate_activity():
     print(f"🔧 TVINGER REBEREGNING FOR AKTIVITET {activity_id}")
     print("=" * 60)
     
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     analysis_service = AnalysisService(storage)
     db = next(get_db())
     

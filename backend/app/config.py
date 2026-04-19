@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # VIKTIG: Sett disse som miljøvariabler i .env-filen!
     GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "")
     GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "")
-    TOKEN_DIR: str = os.getenv("TOKEN_DIR", "tokens")
+    TOKEN_DIR: str = os.getenv("TOKEN_DIR", token_dir_str)
     
     # Lactate threshold speed konfigurasjon (i m/s)
     # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API
@@ -70,3 +70,8 @@ class Settings(BaseSettings):
 settings = Settings()
 # print(f"Innstillinger lastet med token-mappe: {settings.TOKEN_DIR}")
 # print(f"Innstillinger lastet med data-mappe: {settings.DATA_DIR}")
+
+
+def data_path(*parts: str) -> Path:
+    """Bygger absolutt sti under konfigurert DATA_DIR."""
+    return Path(settings.DATA_DIR).joinpath(*parts)

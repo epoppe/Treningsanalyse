@@ -18,6 +18,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity, ActivityType
 from app.storage import DataStorage
+from app.config import settings
 from app.services.analysis_service import AnalysisService
 
 logging.basicConfig(level=logging.INFO)
@@ -70,7 +71,7 @@ def recalculate_negative_split(activities):
     
     print(f"\n🚀 Starter reberegning av negative split for {len(activities)} aktiviteter...")
     
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     analysis_service = AnalysisService(storage)
     db = SessionLocal()
     

@@ -1,8 +1,9 @@
 import pandas as pd
+from app.config import data_path
 
 def main():
     # Last FIT-data og sjekk hvilke aktiviteter som faktisk finnes
-    df = pd.read_parquet('data/activity_details.parquet')
+    df = pd.read_parquet(data_path("activity_details.parquet"))
     print(f'Total FIT-data: {len(df)} rader for {df["activity_id"].nunique()} aktiviteter')
 
     # Sjekk noen av aktivitetene som returnerte 404 i loggene

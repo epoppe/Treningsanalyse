@@ -17,6 +17,7 @@ from app.database.session import get_db
 from app.database.models.activity import Activity, ActivityType
 from app.services.analysis_service import AnalysisService
 from app.storage import DataStorage
+from app.config import settings
 import logging
 
 # Konfigurer logging
@@ -43,7 +44,7 @@ def recalculate_negative_split(activities):
     print("=" * 60)
     
     # Initialiser services
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     analysis_service = AnalysisService(storage)
     
     # Hent database session

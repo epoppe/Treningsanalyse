@@ -14,6 +14,7 @@ from ..storage import DataStorage
 from .power_service import PowerService
 from .training_stress_service import TrainingStressService
 from ..cache.cache_manager import get_cache_manager
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class BulkProcessor:
     
     def __init__(self, db: Session, storage: Optional[DataStorage] = None):
         self.db = db
-        self.storage = storage or DataStorage()
+        self.storage = storage or DataStorage(settings.DATA_DIR)
         self.power_service = PowerService(self.storage)
         self.cache = get_cache_manager()
     

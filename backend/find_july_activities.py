@@ -12,11 +12,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.database.session import get_db
 from app.database.models.activity import Activity, ActivityType
 from app.storage import DataStorage
+from app.config import settings
 
 def find_july_activities():
     """Finn aktiviteter fra 21. og 23. juli"""
     db = next(get_db())
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     
     try:
         # Hent aktiviteter fra 21. og 23. juli 2025

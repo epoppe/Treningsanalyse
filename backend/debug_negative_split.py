@@ -1,8 +1,9 @@
 import pandas as pd
 from app.storage import DataStorage
+from app.config import data_path, settings
 
 def debug_negative_split():
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     activity_id = 9990507603  # Aktivitet som vi nettopp lastet ned med ny parquet-fil
     
     print(f"=== DEBUG NEGATIV SPLIT FOR AKTIVITET {activity_id} ===")
@@ -53,7 +54,7 @@ def debug_negative_split():
     # Sjekk parquet-fil direkte
     print(f"\n=== DIREKTE PARQUET-SJEKK ===")
     try:
-        parquet_df = pd.read_parquet('data/activity_details.parquet')
+        parquet_df = pd.read_parquet(data_path("activity_details.parquet"))
         activity_data = parquet_df[parquet_df['activity_id'] == activity_id]
         print(f"Parquet har {len(activity_data)} rader for aktivitet {activity_id}")
         

@@ -20,6 +20,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity, ActivityType
 from app.storage import DataStorage
+from app.config import settings
 from app.services.analysis_service import AnalysisService
 
 def get_running_activities_with_fit_data():
@@ -40,7 +41,7 @@ def get_running_activities_with_fit_data():
         print(f"📊 Fant {len(running_activities)} løpeaktiviteter fra 2008 og fremover")
         
         # Initialiser storage og analysis service
-        storage = DataStorage()
+        storage = DataStorage(settings.DATA_DIR)
         analysis_service = AnalysisService(storage)
         
         # Sjekk hvilke aktiviteter som har FIT-data

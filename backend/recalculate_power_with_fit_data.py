@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.database.session import get_db
 from app.database.models.activity import Activity, ActivityType
 from app.storage import DataStorage
+from app.config import settings
 from app.services.power_service import PowerService
 from sqlalchemy import and_
 
@@ -22,7 +23,7 @@ def recalculate_power_with_fit_data():
     print("=" * 60)
     
     db = next(get_db())
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     power_service = PowerService(storage)
     
     try:

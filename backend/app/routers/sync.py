@@ -24,6 +24,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 sync_jobs: Dict[str, Dict] = {}
+ACTIVE_JOB_STATUSES = {"queued", "processing"}
+
+
+def _create_job(job_type: str, message: str = "Queued") -> str:
+    job_id = str(uuid.uuid4())
+    sync_jobs[job_id] = {
+        "status": "queued",
+        "message": message,
+        "job_type": job_type,
+        "created_at": datetime.now(timezone.utc),
+        "start_time": None,
+        "end_time": None,
+    }
+    return job_id
+
+
+def _find_active_job_by_type(job_type: str) -> Optional[tuple[str, Dict[str, Any]]]:
+    for existing_job_id, job in reversed(list(sync_jobs.items())):
+        if job.get("job_type") == job_type and job.get("status") in ACTIVE_JOB_STATUSES:
+            return existing_job_id, job
+    return None
+
+
+def _mark_job_processing(job_id: str, message: Optional[str] = None):
+    if job_id in sync_jobs:
+        sync_jobs[job_id]["status"] = "processing"
+        sync_jobs[job_id]["start_time"] = datetime.now(timezone.utc)
+        if message:
+            sync_jobs[job_id]["message"] = message
+
+
+def _completed_job_response(message: str, job_id: str) -> Dict[str, Any]:
+    return {"message": message, "job_id": job_id, "status": "queued", "reused_existing_job": False}
+
+
+def _existing_job_response(message: str, job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "message": message,
+        "job_id": job_id,
+        "status": job.get("status", "unknown"),
+        "job_type": job.get("job_type"),
+        "reused_existing_job": True,
+    }
 
 class SyncRequest(BaseModel):
     start_date: date
@@ -35,7 +78,7 @@ async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClie
     """Kjører aktivitetssynkronisering i bakgrunnen med automatisk FIT-data nedlasting."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer aktiviteter med FIT-data...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.sync_activities_with_fit_data(
@@ -58,7 +101,7 @@ async def run_activity_sync(job_id: str, garmin_client: GarminClient, storage: D
     """Kjører aktivitetssynkronisering i bakgrunnen."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer aktiviteter...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.sync_activities(start_date, end_date)
@@ -74,7 +117,7 @@ async def run_activity_sync_with_force(job_id: str, garmin_client: GarminClient,
     """Kjører aktivitetssynkronisering i bakgrunnen med mulighet for force refresh av nylige data."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer aktiviteter (force refresh)...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.sync_activities(start_date, end_date, force_refresh_recent)
@@ -90,7 +133,7 @@ async def run_health_sync(job_id: str, garmin_client: GarminClient, storage: Dat
     """Kjører helsedatasynkronisering i bakgrunnen."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer helsedata...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         await sync_service.sync_health_data(start_date, end_date)
@@ -106,7 +149,7 @@ async def run_health_sync_with_force(job_id: str, garmin_client: GarminClient, s
     """Kjører helsedatasynkronisering i bakgrunnen med mulighet for force refresh av nylige data."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer helsedata (force refresh)...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         await sync_service.sync_health_data(start_date, end_date, force_refresh_recent)
@@ -122,7 +165,7 @@ async def run_fit_data_download(job_id: str, garmin_client: GarminClient, storag
     """Kjører FIT-data nedlasting i bakgrunnen."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Laster ned FIT-data...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.download_fit_data_for_activities(activity_ids, limit)
@@ -138,7 +181,7 @@ async def run_training_effect_refresh(job_id: str, garmin_client: GarminClient, 
     """Kjører Training Effect-henting for aktiviteter som mangler eller har 0."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Synkroniserer Training Effect...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.sync_training_effect_for_missing(force=force)
@@ -154,7 +197,7 @@ async def run_fit_data_download_period(job_id: str, garmin_client: GarminClient,
     """Kjører FIT-data nedlasting for en periode i bakgrunnen."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
+        _mark_job_processing(job_id, "Laster ned FIT-data for periode...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
         result = await sync_service.download_fit_data_for_period(start_date, end_date)
@@ -172,7 +215,18 @@ async def get_sync_status(job_id: str):
     job = sync_jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return {
+        "job_id": job_id,
+        "job_type": job.get("job_type"),
+        "status": job.get("status"),
+        "is_active": job.get("status") in ACTIVE_JOB_STATUSES,
+        "message": job.get("message"),
+        "created_at": job.get("created_at"),
+        "start_time": job.get("start_time"),
+        "end_time": job.get("end_time"),
+        "result": job.get("result"),
+        "error": job.get("error"),
+    }
 
 @router.post("/sync/database", status_code=200)
 def trigger_db_sync(
@@ -198,8 +252,15 @@ async def trigger_activity_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("activities_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("activities_sync", "Aktivitetssynk er køet.")
     # Bruk force_refresh_recent=True for å sikre at nylige aktiviteter oppdateres
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
@@ -214,7 +275,10 @@ async def trigger_activity_sync(
         request.fit_download_mode or "chunked",
     )
     
-    return {"message": "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting og force refresh for nylige aktiviteter).", "job_id": job_id}
+    return _completed_job_response(
+        "Synkronisering av aktiviteter startet (inkluderer automatisk FIT-data nedlasting og force refresh for nylige aktiviteter).",
+        job_id,
+    )
 
 @router.post("/activities/historical", status_code=202)
 async def trigger_activity_sync_historical(
@@ -229,8 +293,15 @@ async def trigger_activity_sync_historical(
     start_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("activities_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Historisk aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("activities_sync", "Historisk aktivitetssynk er køet.")
 
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
@@ -245,7 +316,7 @@ async def trigger_activity_sync_historical(
         "chunked"  # fit_download_mode
     )
 
-    return {"message": "Historisk synkronisering startet (ignore_sync_state, chunked FIT)", "job_id": job_id}
+    return _completed_job_response("Historisk synkronisering startet (ignore_sync_state, chunked FIT)", job_id)
 
 
 @router.post("/fit-data/download/missing", status_code=202)
@@ -256,13 +327,20 @@ async def trigger_missing_fit_download(
     limit: int = Query(50, ge=1, le=500, description="Maks antall manglende aktiviteter per kjøring")
 ):
     """Fortsetter nedlasting av manglende FIT-data i batcher."""
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("fit_download")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("fit_download", "FIT-nedlasting (manglende) er køet.")
 
     async def _run_missing_fit_job():
         db_session = None
         try:
-            sync_jobs[job_id]["status"] = "processing"
+            _mark_job_processing(job_id, "Laster ned manglende FIT-data...")
             db_session = SessionLocal()
             sync_service = SyncService(garmin_client, storage, db_session)
             result = await sync_service.download_fit_data_for_activities(limit=limit)
@@ -275,7 +353,9 @@ async def trigger_missing_fit_download(
                 db_session.close()
 
     background_tasks.add_task(_run_missing_fit_job)
-    return {"message": "Nedlasting av manglende FIT-data startet", "job_id": job_id, "limit": limit}
+    res = _completed_job_response("Nedlasting av manglende FIT-data startet", job_id)
+    res["limit"] = limit
+    return res
 
 @router.post("/activities/recent", status_code=202)
 async def trigger_recent_activity_sync(
@@ -287,8 +367,15 @@ async def trigger_recent_activity_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("activities_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("activities_sync", "Synk av nye aktiviteter er køet.")
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
         job_id,
@@ -302,7 +389,10 @@ async def trigger_recent_activity_sync(
         "chunked",  # fit_download_mode
     )
     
-    return {"message": "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh og automatisk FIT-data nedlasting).", "job_id": job_id}
+    return _completed_job_response(
+        "Synkronisering av siste 30 dagers aktiviteter startet (med force refresh og automatisk FIT-data nedlasting).",
+        job_id,
+    )
 
 @router.post("/health", status_code=202)
 async def trigger_health_sync(
@@ -315,11 +405,18 @@ async def trigger_health_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("health_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Helsesynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("health_sync", "Helsesynk er køet.")
     background_tasks.add_task(run_health_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
     
-    return {"message": "Synkronisering av helsedata startet.", "job_id": job_id}
+    return _completed_job_response("Synkronisering av helsedata startet.", job_id)
 
 @router.post("/health/recent", status_code=202)
 async def trigger_recent_health_sync(
@@ -331,11 +428,21 @@ async def trigger_recent_health_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=90)
     
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("health_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Helsesynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("health_sync", "Helsesynk (recent) er køet.")
     background_tasks.add_task(run_health_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
-    return {"message": "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 2 dager).", "job_id": job_id}
+    return _completed_job_response(
+        "Synkronisering av siste 90 dagers helsedata startet (med force refresh for siste 2 dager).",
+        job_id,
+    )
 
 @router.post("/fit-data/download", status_code=202)
 async def trigger_fit_data_download(
@@ -345,11 +452,18 @@ async def trigger_fit_data_download(
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
     """Starter nedlasting av FIT-data for aktiviteter som mangler detaljerte data."""
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("fit_download")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("fit_download", "FIT-nedlasting er køet.")
     background_tasks.add_task(run_fit_data_download, job_id, garmin_client, storage, None, limit)
     
-    return {"message": f"FIT-data nedlasting startet for opptil {limit} aktiviteter.", "job_id": job_id}
+    return _completed_job_response(f"FIT-data nedlasting startet for opptil {limit} aktiviteter.", job_id)
 
 @router.post("/fit-data/download/period", status_code=202)
 async def trigger_fit_data_download_period_endpoint(
@@ -362,11 +476,21 @@ async def trigger_fit_data_download_period_endpoint(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("fit_download")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("fit_download", "FIT-periode-nedlasting er køet.")
     background_tasks.add_task(run_fit_data_download_period, job_id, garmin_client, storage, start_datetime, end_datetime)
     
-    return {"message": f"FIT-data nedlasting for periode {request.start_date} til {request.end_date} startet.", "job_id": job_id}
+    return _completed_job_response(
+        f"FIT-data nedlasting for periode {request.start_date} til {request.end_date} startet.",
+        job_id,
+    )
 
 @router.post("/training-effect/refresh", status_code=202)
 async def trigger_training_effect_refresh(
@@ -376,13 +500,20 @@ async def trigger_training_effect_refresh(
     garmin_client: GarminClient = Depends(get_garmin_client),
 ):
     """Henter aerob/anaerob effekt fra Garmin for aktiviteter som mangler eller viser 0."""
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("training_effect_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Training Effect-synk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("training_effect_sync", "Training Effect-synk er køet.")
     background_tasks.add_task(run_training_effect_refresh, job_id, garmin_client, storage, force)
     msg = "Henter Training Effect for aktiviteter som mangler eller har 0."
     if force:
         msg = "Henter Training Effect for ALLE aktiviteter (force)."
-    return {"message": msg, "job_id": job_id}
+    return _completed_job_response(msg, job_id)
 
 @router.post("/sync/historical/{start_year}")
 async def sync_historical_data(
@@ -458,8 +589,7 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
     """
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
-        sync_jobs[job_id]["message"] = "Starter full synkronisering..."
+        _mark_job_processing(job_id, "Starter full synkronisering...")
         
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
@@ -632,8 +762,15 @@ async def trigger_full_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("full_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Full synkronisering er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("full_sync", "Full synkronisering er køet.")
     background_tasks.add_task(
         run_full_sync, 
         job_id, 
@@ -644,17 +781,16 @@ async def trigger_full_sync(
         request.ignore_sync_state  # Send ignore_sync_state videre!
     )
     
-    return {
-        "message": f"Full synkronisering startet for perioden {request.start_date} til {request.end_date}. Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.",
-        "job_id": job_id
-    }
+    return _completed_job_response(
+        f"Full synkronisering startet for perioden {request.start_date} til {request.end_date}. Dette inkluderer aktiviteter, FIT-data, helsedata og Training Effect data.",
+        job_id,
+    )
 
 async def run_calculations_only(job_id: str, storage: DataStorage, start_date: datetime, end_date: datetime):
     """Kjører kun beregninger og caching for eksisterende data."""
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
-        sync_jobs[job_id]["message"] = "Starter beregninger og caching..."
+        _mark_job_processing(job_id, "Starter beregninger og caching...")
         db_session = SessionLocal()
         
         result = await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
@@ -689,8 +825,7 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
     """
     db_session = None
     try:
-        sync_jobs[job_id]["status"] = "processing"
-        sync_jobs[job_id]["message"] = "Finner siste aktivitet..."
+        _mark_job_processing(job_id, "Finner siste aktivitet...")
         
         db_session = SessionLocal()
         
@@ -811,14 +946,21 @@ async def trigger_calculations(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("calculations")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Beregninger/caching er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("calculations", "Beregninger/caching er køet.")
     background_tasks.add_task(run_calculations_only, job_id, storage, start_datetime, end_datetime)
     
-    return {
-        "message": f"Beregninger og caching startet for perioden {request.start_date} til {request.end_date}.",
-        "job_id": job_id
-    }
+    return _completed_job_response(
+        f"Beregninger og caching startet for perioden {request.start_date} til {request.end_date}.",
+        job_id,
+    )
 
 @router.post("/new-activities", status_code=202)
 async def trigger_new_activities_sync(
@@ -830,19 +972,26 @@ async def trigger_new_activities_sync(
     Starter synkronisering av nye aktiviteter fra siste lagrede aktivitet.
     Dette inkluderer aktiviteter, FIT-data, helsedata, Training Effect data og beregninger.
     """
-    job_id = str(uuid.uuid4())
-    sync_jobs[job_id] = {"status": "queued", "start_time": datetime.now(timezone.utc)}
+    active = _find_active_job_by_type("activities_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("activities_sync", "Synk av nye aktiviteter er køet.")
     background_tasks.add_task(run_new_activities_sync, job_id, garmin_client, storage)
     
-    return {
-        "message": "Synkronisering av nye aktiviteter startet. Dette vil synkronisere fra siste lagrede aktivitet til nå.",
-        "job_id": job_id
-    }
+    return _completed_job_response(
+        "Synkronisering av nye aktiviteter startet. Dette vil synkronisere fra siste lagrede aktivitet til nå.",
+        job_id,
+    )
 
 def run_hrv_sync(start_date: Optional[str] = None, end_date: Optional[str] = None, db_session: Session = None) -> Dict[str, Any]:
     """Synkroniserer HRV-data fra parquet-filer til databasen."""
     try:
-        storage = DataStorage()
+        storage = DataStorage(settings.DATA_DIR)
         hrv_service = HRVService(storage)
         
         result = hrv_service.sync_hrv_data_to_database(db_session, start_date, end_date)
@@ -877,7 +1026,15 @@ async def sync_hrv_data(
 ):
     """Synkroniserer HRV-data fra parquet-filer til databasen for raskere tilgang."""
     try:
-        job_id = str(uuid.uuid4())
+        active = _find_active_job_by_type("hrv_sync")
+        if active:
+            existing_job_id, existing_job = active
+            return _existing_job_response(
+                "HRV-synk er allerede i gang. Returnerer eksisterende jobb.",
+                existing_job_id,
+                existing_job,
+            )
+        job_id = _create_job("hrv_sync", "HRV-synk er køet.")
         
         # Start synkronisering som bakgrunnsjobb
         background_tasks.add_task(
@@ -887,19 +1044,14 @@ async def sync_hrv_data(
             end_date=end_date
         )
         
-        sync_jobs[job_id] = {
-            "status": "processing",
-            "message": "Starter HRV-synkronisering...",
-            "start_time": datetime.utcnow(),
-            "job_type": "hrv_sync"
-        }
+        _mark_job_processing(job_id, "Starter HRV-synkronisering...")
         
         logger.info(f"HRV-synkronisering startet med jobb-ID: {job_id}")
         
         return {
             "job_id": job_id,
             "message": "HRV-synkronisering startet",
-            "status": "processing"
+            "status": sync_jobs[job_id]["status"]
         }
         
     except Exception as e:
@@ -978,7 +1130,15 @@ async def sync_body_battery_data(
 ):
     """Synkroniserer Body Battery-data fra Garmin til databasen."""
     try:
-        job_id = str(uuid.uuid4())
+        active = _find_active_job_by_type("body_battery_sync")
+        if active:
+            existing_job_id, existing_job = active
+            return _existing_job_response(
+                "Body Battery-synk er allerede i gang. Returnerer eksisterende jobb.",
+                existing_job_id,
+                existing_job,
+            )
+        job_id = _create_job("body_battery_sync", "Body Battery-synk er køet.")
         
         # Start synkronisering som bakgrunnsjobb
         background_tasks.add_task(
@@ -988,19 +1148,14 @@ async def sync_body_battery_data(
             end_date=end_date
         )
         
-        sync_jobs[job_id] = {
-            "status": "processing",
-            "message": "Starter Body Battery-synkronisering...",
-            "start_time": datetime.utcnow(),
-            "job_type": "body_battery_sync"
-        }
+        _mark_job_processing(job_id, "Starter Body Battery-synkronisering...")
         
         logger.info(f"Body Battery-synkronisering startet med jobb-ID: {job_id}")
         
         return {
             "job_id": job_id,
             "message": "Body Battery-synkronisering startet",
-            "status": "processing"
+            "status": sync_jobs[job_id]["status"]
         }
         
     except Exception as e:

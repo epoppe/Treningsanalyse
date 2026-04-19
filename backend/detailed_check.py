@@ -1,5 +1,6 @@
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity
+from app.config import data_path
 import pandas as pd
 import os
 
@@ -26,7 +27,7 @@ def detailed_check():
         
         # Sjekk parquet-fil
         print(f"\n=== PARQUET-FIL ===")
-        parquet_path = "data/activity_details.parquet"
+        parquet_path = str(data_path("activity_details.parquet"))
         if os.path.exists(parquet_path):
             df = pd.read_parquet(parquet_path)
             unique_activities = df['activity_id'].unique()

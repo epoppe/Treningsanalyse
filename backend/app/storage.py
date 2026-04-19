@@ -11,6 +11,7 @@ import fitparse
 import zipfile
 from sqlalchemy.orm import Session
 from .database.models.activity import Activity
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -322,5 +323,5 @@ def get_storage() -> DataStorage:
     """Returnerer en global DataStorage instans."""
     global _storage_instance
     if _storage_instance is None:
-        _storage_instance = DataStorage()
+        _storage_instance = DataStorage(settings.DATA_DIR)
     return _storage_instance

@@ -37,7 +37,7 @@ async def download_fit_data_and_calculate():
     print("=" * 60)
     
     # Initialiser services
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     garmin_client = GarminClient(
         email=settings.GARMIN_EMAIL,
         password=settings.GARMIN_PASSWORD,

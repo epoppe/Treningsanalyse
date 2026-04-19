@@ -1,8 +1,9 @@
 import pandas as pd
+from app.config import data_path
 
 def check_fit_count():
     try:
-        df = pd.read_parquet('data/activity_details.parquet')
+        df = pd.read_parquet(data_path("activity_details.parquet"))
         unique_activities = len(df['activity_id'].unique())
         total_records = len(df)
         

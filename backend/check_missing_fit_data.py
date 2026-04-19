@@ -1,9 +1,10 @@
 import pandas as pd
 from datetime import datetime
+from app.config import data_path
 
 def main():
     # Last aktiviteter
-    df = pd.read_parquet('data/activities.parquet')
+    df = pd.read_parquet(data_path("activities.parquet"))
     print(f'Totalt antall aktiviteter: {len(df)}')
 
     # Konverter start_time til datetime hvis det er string
@@ -26,7 +27,7 @@ def main():
 
     # Sjekk hvilke aktiviteter som allerede har FIT-data
     try:
-        details_df = pd.read_parquet('data/activity_details.parquet')
+        details_df = pd.read_parquet(data_path("activity_details.parquet"))
         existing_fit_ids = set(details_df['activity_id'].unique())
         print(f'\nAktiviteter som allerede har FIT-data: {len(existing_fit_ids)}')
         

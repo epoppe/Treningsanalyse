@@ -1,10 +1,11 @@
 import pandas as pd
 from datetime import datetime
+from app.config import data_path
 
 def main():
     # Last activities og sjekk hvilke som finnes i perioden men ikke har FIT-data
-    activities_df = pd.read_parquet('data/activities.parquet')
-    fit_df = pd.read_parquet('data/activity_details.parquet')
+    activities_df = pd.read_parquet(data_path("activities.parquet"))
+    fit_df = pd.read_parquet(data_path("activity_details.parquet"))
 
     # Konverter start_time til datetime hvis det er string
     if activities_df['start_time'].dtype == 'object':

@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from app.database.session import get_db
 from app.database.models.activity import Activity
 from app.storage import DataStorage
+from app.config import settings
 from app.services.power_service import PowerService
 
 def debug_power_calculation():
@@ -20,7 +21,7 @@ def debug_power_calculation():
     print("=" * 60)
     
     db = next(get_db())
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     power_service = PowerService(storage)
     
     try:

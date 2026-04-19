@@ -12,6 +12,7 @@ import numpy as np
 sys.path.append(os.path.join(os.path.dirname(__file__), 'app'))
 
 from app.storage import DataStorage
+from app.config import settings
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity
 from app.services.analysis_service import AnalysisService
@@ -23,7 +24,7 @@ def debug_negative_split_calculation():
     
     print(f"=== DEBUG NEGATIVE SPLIT BEREGNING FOR AKTIVITET {activity_id} ===")
     
-    storage = DataStorage()
+    storage = DataStorage(settings.DATA_DIR)
     analysis_service = AnalysisService(storage)
     db = SessionLocal()
     

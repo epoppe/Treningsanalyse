@@ -15,7 +15,7 @@ async def manual_fit_test():
             password=settings.GARMIN_PASSWORD,
             token_dir=settings.TOKEN_DIR
         )
-        storage = DataStorage()
+        storage = DataStorage(settings.DATA_DIR)
         db = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db)
         

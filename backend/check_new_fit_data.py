@@ -1,8 +1,9 @@
 import pandas as pd
+from app.config import data_path
 
 def main():
     print('Sjekker activity_details.parquet...')
-    df = pd.read_parquet('data/activity_details.parquet')
+    df = pd.read_parquet(data_path("activity_details.parquet"))
     print(f'Totale rader: {len(df)}')
     print(f'Unike aktiviteter: {df["activity_id"].nunique()}')
 
