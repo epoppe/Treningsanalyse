@@ -172,6 +172,50 @@ class DataStorage:
 
     def get_all_activities(self) -> pd.DataFrame:
         return self.activities_df
+
+    def get_activities(self) -> List[Dict[str, Any]]:
+        """
+        Leser Garmin-lignende aktiviteter fra JSON i data-mappen.
+        Støtter activities.json, activities_*.json og lister pakket inn i {"activities": [...]}.
+        """
+        activities: List[Dict[str, Any]] = []
+        seen_keys: set[str] = set()
+        paths_to_try: List[str] = []
+        primary = os.path.join(self.data_dir, "activities.json")
+        if os.path.isfile(primary):
+            paths_to_try.append(primary)
+        try:
+            for name in sorted(os.listdir(self.data_dir)):
+                if name.startswith("activities_") and name.endswith(".json"):
+                    p = os.path.join(self.data_dir, name)
+                    if p not in paths_to_try:
+                        paths_to_try.append(p)
+        except OSError as e:
+            logger.debug("Kunne ikke liste data-mappe for JSON-aktiviteter: %s", e)
+
+        for path in paths_to_try:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                batch: List[Dict[str, Any]] = []
+                if isinstance(data, list):
+                    batch = [x for x in data if isinstance(x, dict)]
+                elif isinstance(data, dict):
+                    inner = data.get("activities") or data.get("data")
+                    if isinstance(inner, list):
+                        batch = [x for x in inner if isinstance(x, dict)]
+                for item in batch:
+                    aid = item.get("activityId") or item.get("id")
+                    key = str(aid) if aid is not None else None
+                    if key is not None:
+                        if key in seen_keys:
+                            continue
+                        seen_keys.add(key)
+                    activities.append(item)
+            except Exception as e:
+                logger.warning("Kunne ikke lese aktiviteter fra %s: %s", path, e)
+
+        return activities
     
     def reload_activity_details(self):
         """Laster aktivitetsdetaljene på nytt fra parquet-filen."""

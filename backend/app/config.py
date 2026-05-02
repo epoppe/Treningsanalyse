@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -25,6 +25,11 @@ os.makedirs(token_dir_str, exist_ok=True)
 # print(f"Token-mappe opprettet: {token_dir_str}") # Kan kommenteres ut for produksjon
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(ENV_FILE),
+        case_sensitive=True,
+    )
+
     # Database URL
     DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
     
@@ -43,10 +48,6 @@ class Settings(BaseSettings):
     
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    
-    class Config:
-        env_file = str(ENV_FILE)
-        case_sensitive = True
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
