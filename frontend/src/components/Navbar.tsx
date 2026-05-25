@@ -73,6 +73,9 @@ export default function Navbar() {
           <NavLink href="/ukesanalyse" prefetch={false} onClick={(e) => hardNavigate(e, '/ukesanalyse') } $active={pathname === '/ukesanalyse'}>
             Løpsøkonomi
           </NavLink>
+          <NavLink href="/analytics" prefetch={false} onClick={(e) => hardNavigate(e, '/analytics') } $active={pathname === '/analytics'}>
+            Løpeanalyse
+          </NavLink>
           <NavLink href="/hrv" prefetch={false} onClick={(e) => hardNavigate(e, '/hrv') } $active={pathname === '/hrv'}>
             HRV
           </NavLink>

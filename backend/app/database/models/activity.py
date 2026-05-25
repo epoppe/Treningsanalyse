@@ -87,6 +87,18 @@ class Activity(Base):
     negative_split_percent = Column(Float, nullable=True)
     running_economy = Column(Float, nullable=True)
     decoupling_percent = Column(Float, nullable=True)
+    avg_efficiency_factor = Column(Float, nullable=True)
+    median_efficiency_factor = Column(Float, nullable=True)
+    steady_state_efficiency_factor = Column(Float, nullable=True)
+    efficiency_data_quality = Column(Float, nullable=True)
+    decoupling_suitability_flag = Column(String(50), nullable=True)
+    decoupling_reason_if_unsuitable = Column(String(255), nullable=True)
+    decoupling_data_quality_score = Column(Float, nullable=True)
+    fatigue_resistance_score = Column(Float, nullable=True)
+    pace_drop_pct = Column(Float, nullable=True)
+    hr_drift_pct = Column(Float, nullable=True)
+    cadence_drop_pct = Column(Float, nullable=True)
+    ef_drop_pct = Column(Float, nullable=True)
     training_readiness_score = Column(Float, nullable=True)  # Training readiness score (0-100)
     body_battery_start = Column(Float, nullable=True)  # Body Battery ved start av aktivitet (0-100)
     
@@ -154,3 +166,14 @@ class ActivityLap(Base):
     
     # Relasjoner
     activity = relationship("Activity", back_populates="laps")
+
+
+class AnalyticsSnapshot(Base):
+    __tablename__ = 'analytics_snapshots'
+
+    id = Column(Integer, primary_key=True, index=True)
+    metric_key = Column(String(100), unique=True, nullable=False, index=True)
+    payload = Column(JSON, nullable=True)
+    calculated_at = Column(DateTime, nullable=True)
+    data_quality_score = Column(Float, nullable=True)
+    model_quality = Column(String(50), nullable=True)

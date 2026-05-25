@@ -323,6 +323,146 @@ export interface FactorRelationshipsResponse {
   }>;
 }
 
+export interface EfficiencyTrendItem {
+  activityId: string;
+  activityName?: string | null;
+  startTimeLocal: string;
+  avgEfficiencyFactor?: number | null;
+  medianEfficiencyFactor?: number | null;
+  steadyStateEfficiencyFactor?: number | null;
+  efficiencyDataQuality?: number | null;
+  distance?: number | null;
+  duration?: number | null;
+}
+
+export interface DecouplingTrendItem {
+  activityId: string;
+  activityName?: string | null;
+  startTimeLocal: string;
+  decouplingPercent?: number | null;
+  decouplingSuitabilityFlag?: string | null;
+  decouplingReasonIfUnsuitable?: string | null;
+  decouplingDataQualityScore?: number | null;
+  avgEfficiencyFactor?: number | null;
+  distance?: number | null;
+  duration?: number | null;
+}
+
+export interface FatigueResistanceItem {
+  activityId: string;
+  activityName?: string | null;
+  startTimeLocal: string;
+  fatigueResistanceScore?: number | null;
+  paceDropPct?: number | null;
+  hrDriftPct?: number | null;
+  cadenceDropPct?: number | null;
+  efDropPct?: number | null;
+  distance?: number | null;
+  duration?: number | null;
+}
+
+export interface AnalyticsListResponse<T> {
+  activities: T[];
+  count: number;
+}
+
+export interface CriticalSpeedEffort {
+  duration_seconds: number;
+  speed_mps?: number;
+  activity_id?: string;
+  activity_name?: string;
+}
+
+export interface CriticalSpeedResponse {
+  critical_speed_mps: number | null;
+  critical_pace_sec_per_km: number | null;
+  d_prime: number | null;
+  model_r2: number | null;
+  model_quality: string;
+  efforts?: CriticalSpeedEffort[];
+  calculated_at?: string | null;
+  data_quality_score?: number | null;
+}
+
+export type DurationCurveMetric = 'speed' | 'power';
+export type DurationCurveScope = 'all_time' | 'last_90_days' | 'last_365_days';
+
+export interface DurationCurvePoint {
+  duration_seconds: number;
+  speed_mps?: number | null;
+  pace_sec_per_km?: number | null;
+  power_watts?: number | null;
+  activity_id?: string | null;
+  activity_name?: string | null;
+  activity_start_time?: string | null;
+}
+
+export interface DurationCurveResponse {
+  metric: DurationCurveMetric;
+  scope: DurationCurveScope;
+  points: DurationCurvePoint[];
+  effort_count: number;
+  calculated_at?: string | null;
+}
+
+export interface AnalyticsQueryParams {
+  days?: number;
+  limit?: number;
+}
+
+export const analyticsApi = {
+  getEfficiencyTrends: (params: AnalyticsQueryParams = {}) => {
+    const search = new URLSearchParams();
+    if (params.days != null) search.append('days', String(params.days));
+    if (params.limit != null) search.append('limit', String(params.limit));
+    const query = search.toString();
+    return apiCall<AnalyticsListResponse<EfficiencyTrendItem>>(
+      'get',
+      `/analytics/efficiency${query ? `?${query}` : ''}`,
+    );
+  },
+
+  getDecouplingTrends: (params: AnalyticsQueryParams = {}) => {
+    const search = new URLSearchParams();
+    if (params.days != null) search.append('days', String(params.days));
+    if (params.limit != null) search.append('limit', String(params.limit));
+    const query = search.toString();
+    return apiCall<AnalyticsListResponse<DecouplingTrendItem>>(
+      'get',
+      `/analytics/decoupling${query ? `?${query}` : ''}`,
+    );
+  },
+
+  getCriticalSpeed: (recalculate = false) =>
+    apiCall<CriticalSpeedResponse>(
+      'get',
+      `/analytics/critical-speed${recalculate ? '?recalculate=true' : ''}`,
+    ),
+
+  getFatigueResistance: (params: AnalyticsQueryParams = {}) => {
+    const search = new URLSearchParams();
+    if (params.days != null) search.append('days', String(params.days));
+    if (params.limit != null) search.append('limit', String(params.limit));
+    const query = search.toString();
+    return apiCall<AnalyticsListResponse<FatigueResistanceItem>>(
+      'get',
+      `/analytics/fatigue-resistance${query ? `?${query}` : ''}`,
+    );
+  },
+
+  getDurationCurve: (
+    metric: DurationCurveMetric = 'speed',
+    scope: DurationCurveScope = 'all_time',
+    recalculate = false,
+  ) => {
+    const search = new URLSearchParams();
+    search.append('metric', metric);
+    search.append('scope', scope);
+    if (recalculate) search.append('recalculate', 'true');
+    return apiCall<DurationCurveResponse>('get', `/analytics/duration-curve?${search.toString()}`);
+  },
+};
+
 export const analysisApi = {
   getVo2MaxHistory: (startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
@@ -459,8 +599,9 @@ export const api = {
   ...activitiesApi,
   ...healthApi,
   ...analysisApi,
+  ...analyticsApi,
   ...syncApi,
-} as typeof activitiesApi & typeof healthApi & typeof analysisApi & typeof syncApi;
+} as typeof activitiesApi & typeof healthApi & typeof analysisApi & typeof analyticsApi & typeof syncApi;
 
 export const errorHandler = (error: any) => {
   if (error.response) {

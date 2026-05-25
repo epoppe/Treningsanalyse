@@ -1,5 +1,5 @@
 from .base import Base
-from .activity import Activity, ActivityType, ActivityLap
+from .activity import Activity, ActivityType, ActivityLap, AnalyticsSnapshot
 from .sleep import Sleep, SleepStage, HRV, RestingHeartRate, Weight
 from .body_battery import BodyBattery
 from .stress import Stress
@@ -13,6 +13,7 @@ __all__ = [
     'Activity',
     'ActivityType', 
     'ActivityLap',
+    'AnalyticsSnapshot',
     'Sleep',
     'SleepStage',
     'HRV',
