@@ -23,6 +23,9 @@ class SyncMetricsService:
             "running_economy_calculated": False,
             "negative_split_calculated": False,
             "decoupling_calculated": False,
+            "efficiency_calculated": False,
+            "fatigue_resistance_calculated": False,
+            "performance_snapshots_updated": False,
             "hrv_calculated": False,
             "errors": [],
         }
@@ -96,18 +99,46 @@ class SyncMetricsService:
                 except Exception as exc:
                     logger.debug(f"Kunne ikke beregne negative split for aktivitet {activity_id}: {exc}")
 
-            if activity.decoupling_percent is None:
+            if (
+                activity.decoupling_percent is None
+                or activity.avg_efficiency_factor is None
+                or activity.decoupling_suitability_flag is None
+            ):
                 try:
-                    decoupling_result = self.sync_service.analysis_service.calculate_decoupling(
+                    efficiency_result = self.sync_service.analysis_service.calculate_efficiency_metrics(
                         activity_id_int, self.sync_service.db
                     )
-                    if decoupling_result and "decoupling_percent" in decoupling_result:
+                    if efficiency_result and "decoupling_percent" in efficiency_result:
                         results["decoupling_calculated"] = True
+                        results["efficiency_calculated"] = True
                         logger.info(
-                            f"✅ Beregnet decoupling for aktivitet {activity_id}: {decoupling_result.get('decoupling_percent')}%"
+                            "✅ Beregnet EF/decoupling for aktivitet %s: EF=%s decoupling=%s%%",
+                            activity_id,
+                            efficiency_result.get("avg_efficiency_factor"),
+                            efficiency_result.get("decoupling_percent"),
                         )
                 except Exception as exc:
-                    logger.debug(f"Kunne ikke beregne decoupling for aktivitet {activity_id}: {exc}")
+                    logger.debug(f"Kunne ikke beregne EF/decoupling for aktivitet {activity_id}: {exc}")
+
+            try:
+                from ..performance_metrics_service import PerformanceMetricsService
+
+                performance_service = PerformanceMetricsService(
+                    self.sync_service.db,
+                    self.sync_service.storage,
+                )
+                fatigue = performance_service.calculate_fatigue_resistance_for_activity(activity)
+                if fatigue:
+                    results["fatigue_resistance_calculated"] = True
+                    logger.info(
+                        "✅ Beregnet fatigue resistance for aktivitet %s: %s",
+                        activity_id,
+                        fatigue.get("fatigue_resistance_score"),
+                    )
+                performance_service.recalculate_performance_snapshots()
+                results["performance_snapshots_updated"] = True
+            except Exception as exc:
+                logger.debug(f"Kunne ikke oppdatere performance metrics for aktivitet {activity_id}: {exc}")
 
             try:
                 if activity.start_time and activity.start_time.year >= 2023:

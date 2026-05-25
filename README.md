@@ -64,6 +64,7 @@ Verdiene lagres i databasen og er umiddelbart tilgjengelige uten re-beregning!
 - **IMPLEMENTATION_SUMMARY.md** - Oversikt over optimaliseringer
 - **OPTIMIZATION_CHANGES.md** - Detaljerte endringer
 - **CACHE_SYSTEM.md** - Cache-arkitektur
+- **ANALYTICS_METRICS.md** - EF og aerobic decoupling formler
 
 ## 🔧 API Endepunkter
 

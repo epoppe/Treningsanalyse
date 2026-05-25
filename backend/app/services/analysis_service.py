@@ -220,98 +220,342 @@ class AnalysisService:
     def calculate_decoupling(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
         """
         Beregner cardiac-aerobic decoupling for en aktivitet basert på FIT-data.
-        Decoupling = ((HR2/Speed2) / (HR1/Speed1) - 1) * 100
-        Positiv verdi = positiv decoupling (hjerteraten øker mer enn hastigheten)
-        Negativ verdi = negativ decoupling (hjerteraten øker mindre enn hastigheten)
+        Bruker forbedret Efficiency Factor-basert beregning.
+        """
+        result = self.calculate_efficiency_metrics(activity_id, db)
+        if result is None:
+            return None
+        return {
+            "activity_id": activity_id,
+            "decoupling_percent": result["aerobic_decoupling_percent"],
+            "calculation_method": result["calculation_method"],
+            "first_half_hr": result["first_half_heart_rate"],
+            "first_half_speed": result["first_half_speed_mps"],
+            "second_half_hr": result["second_half_heart_rate"],
+            "second_half_speed": result["second_half_speed_mps"],
+            "first_half_efficiency_factor": result["first_half_efficiency_factor"],
+            "second_half_efficiency_factor": result["second_half_efficiency_factor"],
+            "efficiency_factor": result["efficiency_factor"],
+            "sample_count": result["sample_count"],
+        }
+
+    def _normalize_speed_mps(self, speed: pd.Series) -> pd.Series:
+        """Normaliserer FIT speed til m/s. Noen eldre data ligger som km/t."""
+        numeric_speed = pd.to_numeric(speed, errors="coerce")
+        median_speed = numeric_speed[(numeric_speed > 0)].median()
+        if pd.notna(median_speed) and median_speed > 8:
+            return numeric_speed / 3.6
+        return numeric_speed
+
+    def _prepare_aerobic_metric_samples(self, details_df: pd.DataFrame) -> pd.DataFrame:
+        """Filtrerer samples for EF/decoupling: warmup, stopp, manglende puls, lav fart."""
+        prepared = details_df.copy()
+        prepared["timestamp"] = pd.to_datetime(prepared["timestamp"], errors="coerce")
+        prepared["heart_rate"] = pd.to_numeric(prepared["heart_rate"], errors="coerce")
+        prepared["speed_mps"] = self._normalize_speed_mps(prepared["speed"])
+        prepared = prepared.dropna(subset=["timestamp"])
+        prepared = prepared.sort_values("timestamp")
+        prepared = prepared.drop_duplicates(subset=["timestamp"], keep="last")
+        if prepared.empty:
+            return prepared
+
+        start = prepared["timestamp"].iloc[0]
+        end = prepared["timestamp"].iloc[-1]
+        total_seconds = (end - start).total_seconds()
+        if total_seconds <= 0:
+            return prepared.iloc[0:0].copy()
+
+        # Dropp første 10 minutter (warmup)
+        if total_seconds > 600:
+            prepared = prepared[prepared["timestamp"] >= start + pd.Timedelta(seconds=600)]
+
+        # Stopp/pauser, manglende puls, svært lav fart, åpenbare pulsfeil
+        prepared = prepared.dropna(subset=["heart_rate", "speed_mps"])
+        prepared = prepared[
+            (prepared["heart_rate"].between(40, 220))
+            & (prepared["speed_mps"] >= 1.0)
+        ]
+        if len(prepared) >= 5:
+            hr_median = prepared["heart_rate"].rolling(5, center=True, min_periods=3).median()
+            hr_spike = (prepared["heart_rate"] - hr_median).abs() > 35
+            prepared = prepared[~hr_spike.fillna(False)]
+
+        return prepared.sort_values("timestamp")
+
+    def _per_sample_efficiency_factor(self, samples: pd.DataFrame) -> pd.Series:
+        ef = samples["speed_mps"] / samples["heart_rate"]
+        return ef.replace([np.inf, -np.inf], np.nan).dropna()
+
+    def _efficiency_factor(self, samples: pd.DataFrame) -> Optional[float]:
+        """Gjennomsnitt av per-sample EF = speed_mps / heart_rate."""
+        ef_values = self._per_sample_efficiency_factor(samples)
+        if ef_values.empty:
+            return None
+        return float(ef_values.mean())
+
+    def _median_efficiency_factor(self, samples: pd.DataFrame) -> Optional[float]:
+        ef_values = self._per_sample_efficiency_factor(samples)
+        if ef_values.empty:
+            return None
+        return float(ef_values.median())
+
+    def _steady_state_efficiency_factor(self, samples: pd.DataFrame) -> Optional[float]:
+        """EF på jevne fartssamples (±10 % av medianfart)."""
+        if len(samples) < 8:
+            return None
+        median_speed = samples["speed_mps"].median()
+        if pd.isna(median_speed) or median_speed <= 0:
+            return None
+        steady = samples[
+            samples["speed_mps"].between(median_speed * 0.90, median_speed * 1.10)
+        ]
+        if len(steady) < 8:
+            return None
+        ef_values = self._per_sample_efficiency_factor(steady)
+        if ef_values.empty:
+            return None
+        return float(ef_values.mean())
+
+    def _compute_efficiency_data_quality(
+        self,
+        raw_df: pd.DataFrame,
+        valid_df: pd.DataFrame,
+    ) -> float:
+        """Score 0–100 for datadekning etter filtrering."""
+        if raw_df.empty:
+            return 0.0
+        total = len(raw_df)
+        with_hr = raw_df["heart_rate"].notna().sum() if "heart_rate" in raw_df.columns else 0
+        retained = len(valid_df) / total if total else 0.0
+        hr_coverage = with_hr / total if total else 0.0
+        duration_score = min(
+            1.0,
+            (
+                (valid_df["timestamp"].iloc[-1] - valid_df["timestamp"].iloc[0]).total_seconds()
+                / 2400
+            )
+            if len(valid_df) >= 2
+            else 0.0,
+        )
+        score = (retained * 0.4 + hr_coverage * 0.3 + duration_score * 0.3) * 100
+        return round(min(100.0, max(0.0, score)), 1)
+
+    def _assess_decoupling_suitability(
+        self,
+        raw_df: pd.DataFrame,
+        valid_df: pd.DataFrame,
+        activity: Activity,
+    ) -> Dict[str, Any]:
+        """Vurderer om aktiviteten egner seg for aerobic decoupling."""
+        reasons: List[str] = []
+        total_seconds = 0.0
+        if not raw_df.empty and "timestamp" in raw_df.columns:
+            ts = pd.to_datetime(raw_df["timestamp"], errors="coerce").dropna()
+            if len(ts) >= 2:
+                total_seconds = (ts.iloc[-1] - ts.iloc[0]).total_seconds()
+
+        valid_seconds = 0.0
+        if len(valid_df) >= 2:
+            valid_seconds = (valid_df["timestamp"].iloc[-1] - valid_df["timestamp"].iloc[0]).total_seconds()
+
+        if total_seconds < 45 * 60 and valid_seconds < 40 * 60:
+            reasons.append("too_short")
+
+        if not raw_df.empty and "speed_mps" not in raw_df.columns:
+            raw_df = raw_df.copy()
+            raw_df["speed_mps"] = self._normalize_speed_mps(raw_df.get("speed", pd.Series(dtype=float)))
+
+        if len(raw_df) > 0:
+            stop_ratio = (raw_df["speed_mps"].fillna(0) < 0.5).mean()
+            if stop_ratio > 0.20:
+                reasons.append("too_many_stops")
+
+            hr_missing_ratio = raw_df["heart_rate"].isna().mean() if "heart_rate" in raw_df.columns else 1.0
+            if hr_missing_ratio > 0.25:
+                reasons.append("missing_heart_rate")
+
+        if len(valid_df) >= 10:
+            speed_cv = valid_df["speed_mps"].std() / valid_df["speed_mps"].mean()
+            if pd.notna(speed_cv) and speed_cv > 0.20:
+                reasons.append("interval_like_pace")
+
+        distance_km = (activity.distance or 0) / 1000
+        ascent = activity.total_ascent or 0
+        if distance_km > 0 and ascent / distance_km > 30:
+            reasons.append("very_hilly")
+
+        quality_score = self._compute_efficiency_data_quality(raw_df, valid_df)
+        if len(valid_df) < 20:
+            reasons.append("insufficient_samples")
+
+        suitable = len(reasons) == 0
+        return {
+            "decoupling_suitability_flag": "suitable" if suitable else "unsuitable",
+            "decoupling_reason_if_unsuitable": ",".join(reasons) if reasons else None,
+            "decoupling_data_quality_score": quality_score,
+        }
+
+    def calculate_efficiency_metrics(
+        self,
+        activity_id: int,
+        db: Session,
+        force_recalculate: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Beregner Efficiency Factor og Aerobic Decoupling fra FIT-data.
+
+        Per-sample EF = speed_mps / heart_rate.
+        Aerobic Decoupling = ((EF_first - EF_second) / EF_first) * 100.
+        Positiv verdi betyr at effektiviteten faller i andre halvdel.
         """
         try:
-            # Hent aktivitet fra database
             activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
             if not activity:
                 logger.warning(f"Aktivitet {activity_id} ikke funnet i database")
                 return None
-            
-            # Hvis allerede beregnet, returner cached verdi
-            if activity.decoupling_percent is not None:
-                return {
-                    "activity_id": activity_id,
-                    "decoupling_percent": round(activity.decoupling_percent, 2),
-                    "calculation_method": "cached"
-                }
-            
-            # Hent FIT-data (parquet først, deretter DB fallback)
+
             details_df = self._get_fit_details_for_activity(activity_id, activity)
             if details_df is None or details_df.empty:
                 logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
                 raise HTTPException(status_code=404, detail="No FIT data available for this activity")
-            
-            # Sjekk at vi har nødvendige kolonner
+
             required_columns = ['heart_rate', 'speed', 'timestamp']
             if not all(col in details_df.columns for col in required_columns):
-                logger.warning(f"Mangler nødvendige kolonner for decoupling: {required_columns}")
-                raise HTTPException(status_code=404, detail="Missing required data columns for decoupling calculation")
-            
-            # Filtrer ut rader med gyldig data
-            valid_data = details_df.dropna(subset=['heart_rate', 'speed', 'timestamp'])
-            valid_data = valid_data[(valid_data['heart_rate'] > 0) & (valid_data['speed'] > 0)]
-            
-            if len(valid_data) < 20:
-                logger.warning(f"Ikke nok datapunkter for decoupling beregning: {len(valid_data)}")
-                raise HTTPException(status_code=404, detail="Insufficient data points for decoupling calculation")
-            
-            # Sorter etter timestamp
-            valid_data = valid_data.sort_values('timestamp')
-            
-            # Del i to halvdeler
-            midpoint = len(valid_data) // 2
-            first_half = valid_data.iloc[:midpoint]
-            second_half = valid_data.iloc[midpoint:]
-            
-            # Beregn gjennomsnittlig HR og speed for hver halvdel
-            first_half_hr = first_half['heart_rate'].mean()
-            first_half_speed = first_half['speed'].mean()
-            second_half_hr = second_half['heart_rate'].mean()
-            second_half_speed = second_half['speed'].mean()
-            
-            if (pd.isna(first_half_hr) or pd.isna(first_half_speed) or 
-                pd.isna(second_half_hr) or pd.isna(second_half_speed) or
-                first_half_speed <= 0 or second_half_speed <= 0):
-                logger.warning(f"Ugyldig data for decoupling beregning")
+                logger.warning(f"Mangler nødvendige kolonner for efficiency metrics: {required_columns}")
+                raise HTTPException(status_code=404, detail="Missing required data columns for efficiency metrics calculation")
+
+            raw_df = details_df.copy()
+            raw_df["speed_mps"] = self._normalize_speed_mps(raw_df["speed"])
+
+            valid_data = self._prepare_aerobic_metric_samples(details_df)
+            if len(valid_data) < 16:
+                logger.warning(f"Ikke nok datapunkter for efficiency metrics: {len(valid_data)}")
+                raise HTTPException(status_code=404, detail="Insufficient data points for efficiency metrics calculation")
+
+            midpoint_time = valid_data["timestamp"].iloc[0] + (
+                valid_data["timestamp"].iloc[-1] - valid_data["timestamp"].iloc[0]
+            ) / 2
+            first_half = valid_data[valid_data["timestamp"] < midpoint_time]
+            second_half = valid_data[valid_data["timestamp"] >= midpoint_time]
+
+            if len(first_half) < 8 or len(second_half) < 8:
+                logger.warning(
+                    "Ikke nok datapunkter per halvdel for efficiency metrics: %s/%s",
+                    len(first_half),
+                    len(second_half),
+                )
+                raise HTTPException(status_code=404, detail="Insufficient split data for efficiency metrics calculation")
+
+            first_half_ef = self._efficiency_factor(first_half)
+            second_half_ef = self._efficiency_factor(second_half)
+            overall_ef = self._efficiency_factor(valid_data)
+            median_ef = self._median_efficiency_factor(valid_data)
+            steady_ef = self._steady_state_efficiency_factor(valid_data)
+            if not first_half_ef or not second_half_ef or not overall_ef:
+                logger.warning("Ugyldig data for efficiency metrics beregning")
                 return None
-            
-            # Beregn HR:Speed ratio for hver halvdel
-            first_half_ratio = first_half_hr / first_half_speed
-            second_half_ratio = second_half_hr / second_half_speed
-            
-            if first_half_ratio <= 0:
-                logger.warning(f"Ugyldig ratio for første halvdel: {first_half_ratio}")
-                return None
-            
-            # Beregn decoupling prosentvis
-            decoupling_percent = ((second_half_ratio / first_half_ratio) - 1) * 100
-            
-            # Lagre i database
-            activity.decoupling_percent = decoupling_percent
-            db.commit()
-            
-            logger.info(f"Beregnet decoupling for aktivitet {activity_id}: {decoupling_percent:.2f}%")
-            
-            return {
-                "activity_id": activity_id,
-                "decoupling_percent": round(decoupling_percent, 2),
-                "calculation_method": "calculated",
-                "first_half_hr": round(first_half_hr, 1),
-                "first_half_speed": round(first_half_speed, 2),
-                "second_half_hr": round(second_half_hr, 1),
-                "second_half_speed": round(second_half_speed, 2)
-            }
-            
+
+            decoupling_percent = ((first_half_ef - second_half_ef) / first_half_ef) * 100
+            efficiency_data_quality = self._compute_efficiency_data_quality(raw_df, valid_data)
+            suitability = self._assess_decoupling_suitability(raw_df, valid_data, activity)
+
+            calculation_method = "calculated"
+            if (
+                not force_recalculate
+                and activity.avg_efficiency_factor is not None
+                and activity.decoupling_percent is not None
+                and abs(activity.decoupling_percent - decoupling_percent) < 0.005
+            ):
+                calculation_method = "cached"
+            else:
+                activity.avg_efficiency_factor = round(overall_ef, 6)
+                activity.median_efficiency_factor = round(median_ef, 6) if median_ef is not None else None
+                activity.steady_state_efficiency_factor = (
+                    round(steady_ef, 6) if steady_ef is not None else None
+                )
+                activity.efficiency_data_quality = efficiency_data_quality
+                activity.decoupling_percent = round(decoupling_percent, 4)
+                activity.decoupling_suitability_flag = suitability["decoupling_suitability_flag"]
+                activity.decoupling_reason_if_unsuitable = suitability["decoupling_reason_if_unsuitable"]
+                activity.decoupling_data_quality_score = suitability["decoupling_data_quality_score"]
+                db.commit()
+
+            first_half_hr = first_half["heart_rate"].mean()
+            first_half_speed = first_half["speed_mps"].mean()
+            second_half_hr = second_half["heart_rate"].mean()
+            second_half_speed = second_half["speed_mps"].mean()
+
+            logger.info(
+                "Beregnet efficiency metrics for aktivitet %s: EF %.5f, decoupling %.2f%%",
+                activity_id,
+                overall_ef,
+                decoupling_percent,
+            )
+
+            return self._build_efficiency_metrics_response(
+                activity_id,
+                activity,
+                calculation_method,
+                extra={
+                    "first_half_efficiency_factor": round(first_half_ef, 5),
+                    "second_half_efficiency_factor": round(second_half_ef, 5),
+                    "first_half_heart_rate": round(first_half_hr, 1),
+                    "second_half_heart_rate": round(second_half_hr, 1),
+                    "first_half_speed_mps": round(first_half_speed, 2),
+                    "second_half_speed_mps": round(second_half_speed, 2),
+                    "sample_count": len(valid_data),
+                    "first_half_sample_count": len(first_half),
+                    "second_half_sample_count": len(second_half),
+                },
+                computed={
+                    "efficiency_factor": round(overall_ef, 5),
+                    "avg_efficiency_factor": round(overall_ef, 6),
+                    "median_efficiency_factor": round(median_ef, 6) if median_ef is not None else None,
+                    "steady_state_efficiency_factor": round(steady_ef, 6) if steady_ef is not None else None,
+                    "efficiency_data_quality": efficiency_data_quality,
+                    "aerobic_decoupling_percent": round(decoupling_percent, 2),
+                    "decoupling_percent": round(decoupling_percent, 2),
+                    "decoupling_suitability_flag": suitability["decoupling_suitability_flag"],
+                    "decoupling_reason_if_unsuitable": suitability["decoupling_reason_if_unsuitable"],
+                    "decoupling_data_quality_score": suitability["decoupling_data_quality_score"],
+                },
+            )
+
         except HTTPException:
-            # Re-raise HTTPExceptions without logging them as errors
             raise
         except Exception as e:
-            logger.error(f"Feil ved beregning av decoupling for aktivitet {activity_id}: {e}")
+            logger.error(f"Feil ved beregning av efficiency metrics for aktivitet {activity_id}: {e}")
             return None
+
+    def _build_efficiency_metrics_response(
+        self,
+        activity_id: int,
+        activity: Activity,
+        calculation_method: str,
+        extra: Optional[Dict[str, Any]] = None,
+        computed: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        values = computed or {
+            "efficiency_factor": round(activity.avg_efficiency_factor or 0.0, 5),
+            "avg_efficiency_factor": activity.avg_efficiency_factor,
+            "median_efficiency_factor": activity.median_efficiency_factor,
+            "steady_state_efficiency_factor": activity.steady_state_efficiency_factor,
+            "efficiency_data_quality": activity.efficiency_data_quality,
+            "aerobic_decoupling_percent": round(activity.decoupling_percent or 0.0, 2),
+            "decoupling_percent": round(activity.decoupling_percent or 0.0, 2),
+            "decoupling_suitability_flag": activity.decoupling_suitability_flag,
+            "decoupling_reason_if_unsuitable": activity.decoupling_reason_if_unsuitable,
+            "decoupling_data_quality_score": activity.decoupling_data_quality_score,
+        }
+        response: Dict[str, Any] = {
+            "activity_id": activity_id,
+            "efficiency_factor_unit": "m_per_s_per_bpm",
+            "calculation_method": calculation_method,
+            **values,
+        }
+        if extra:
+            response.update(extra)
+        return response
 
     def get_running_economy(self, activity_id: int) -> dict:
         """Beregner løpsøkonomi for en gitt aktivitet."""

@@ -652,3 +652,27 @@ def get_activity_decoupling(
     except Exception as e:
         logger.error(f"Feil ved beregning av decoupling for aktivitet {activity_id}: {e}")
         raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
+
+@router.get("/activities/{activity_id}/efficiency")
+def get_activity_efficiency_metrics(
+    activity_id: int,
+    storage: DataStorage = Depends(get_data_storage),
+    db: Session = Depends(get_db)
+):
+    """
+    Returnerer Efficiency Factor og Aerobic Decoupling for en aktivitet.
+    """
+    try:
+        from ..services.analysis_service import AnalysisService
+
+        analysis_service = AnalysisService(storage)
+        result = analysis_service.calculate_efficiency_metrics(activity_id, db)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Could not calculate efficiency metrics for this activity")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Feil ved beregning av efficiency metrics for aktivitet {activity_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")

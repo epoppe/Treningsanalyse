@@ -42,6 +42,7 @@ yarn-error.log*
 
 # Project specific
 backend/data/
+.run/
 *.parquet
 .garmin_tokens/
 *.log
@@ -93,6 +94,9 @@ Thumbs.db
 pyproject.toml
 setup.py
 test_*.py
+!backend/tests/test_advanced_metrics.py
+!backend/tests/test_performance_metrics.py
+!ANALYTICS_METRICS.md
 
 # Virtualenv
 .venv

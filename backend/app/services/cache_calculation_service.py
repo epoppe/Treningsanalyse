@@ -13,6 +13,7 @@ from ..storage import DataStorage
 from .power_service import PowerService
 from .training_stress_service import TrainingStressService
 from .analysis_service import AnalysisService
+from .performance_metrics_service import PerformanceMetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class CacheCalculationService:
         self.power_service = PowerService(storage)
         self.tss_service = TrainingStressService(db)
         self.analysis_service = AnalysisService(storage)
+        self.performance_metrics_service = PerformanceMetricsService(db, storage)
     
     def calculate_and_cache_activity(self, activity_id: str, force_recalculate: bool = False) -> dict:
         """
@@ -128,25 +130,81 @@ class CacheCalculationService:
                 "status": "cached"
             }
         
-        # 5. Decoupling (fra FIT-data hvis tilgjengelig)
-        if force_recalculate or activity.decoupling_percent is None:
+        # 5. Efficiency Factor og Aerobic Decoupling (fra FIT-data hvis tilgjengelig)
+        needs_efficiency = (
+            force_recalculate
+            or activity.avg_efficiency_factor is None
+            or activity.decoupling_percent is None
+            or activity.decoupling_suitability_flag is None
+        )
+        if needs_efficiency:
             try:
-                decoupling = self.analysis_service.calculate_decoupling(int(activity_id), self.db)
-                if decoupling and 'decoupling_percent' in decoupling:
-                    activity.decoupling_percent = decoupling['decoupling_percent']
-                    results["calculations"]["decoupling"] = {
-                        "value": decoupling['decoupling_percent'],
-                        "status": "calculated"
+                efficiency = self.analysis_service.calculate_efficiency_metrics(
+                    int(activity_id), self.db, force_recalculate=force_recalculate
+                )
+                if efficiency:
+                    results["calculations"]["efficiency"] = {
+                        "avg_efficiency_factor": efficiency.get("avg_efficiency_factor"),
+                        "decoupling_percent": efficiency.get("decoupling_percent"),
+                        "decoupling_suitability_flag": efficiency.get("decoupling_suitability_flag"),
+                        "status": efficiency.get("calculation_method", "calculated"),
                     }
-                    logger.debug(f"Beregnet decoupling for {activity_id}: {decoupling['decoupling_percent']}%")
+                    logger.debug(
+                        "Beregnet efficiency/decoupling for %s: EF=%s decoupling=%s%%",
+                        activity_id,
+                        efficiency.get("avg_efficiency_factor"),
+                        efficiency.get("decoupling_percent"),
+                    )
             except Exception as e:
-                logger.debug(f"Kunne ikke beregne decoupling for {activity_id}: {e}")
-                results["calculations"]["decoupling"] = {"status": "skipped", "message": "No FIT data"}
+                logger.debug(f"Kunne ikke beregne efficiency metrics for {activity_id}: {e}")
+                results["calculations"]["efficiency"] = {"status": "skipped", "message": "No FIT data"}
         else:
-            results["calculations"]["decoupling"] = {
-                "value": activity.decoupling_percent,
-                "status": "cached"
+            results["calculations"]["efficiency"] = {
+                "avg_efficiency_factor": activity.avg_efficiency_factor,
+                "decoupling_percent": activity.decoupling_percent,
+                "decoupling_suitability_flag": activity.decoupling_suitability_flag,
+                "status": "cached",
             }
+
+        # 6. Fatigue Resistance (for lange løpeøkter)
+        if force_recalculate or activity.fatigue_resistance_score is None:
+            try:
+                fatigue = self.performance_metrics_service.calculate_fatigue_resistance_for_activity(
+                    activity, force_recalculate=force_recalculate
+                )
+                if fatigue:
+                    results["calculations"]["fatigue_resistance"] = {
+                        "fatigue_resistance_score": fatigue.get("fatigue_resistance_score"),
+                        "pace_drop_pct": fatigue.get("pace_drop_pct"),
+                        "hr_drift_pct": fatigue.get("hr_drift_pct"),
+                        "cadence_drop_pct": fatigue.get("cadence_drop_pct"),
+                        "ef_drop_pct": fatigue.get("ef_drop_pct"),
+                        "status": fatigue.get("calculation_method", "calculated"),
+                    }
+            except Exception as e:
+                logger.debug(f"Kunne ikke beregne fatigue resistance for {activity_id}: {e}")
+                results["calculations"]["fatigue_resistance"] = {"status": "skipped", "message": "No suitable FIT data"}
+        else:
+            results["calculations"]["fatigue_resistance"] = {
+                "fatigue_resistance_score": activity.fatigue_resistance_score,
+                "pace_drop_pct": activity.pace_drop_pct,
+                "hr_drift_pct": activity.hr_drift_pct,
+                "cadence_drop_pct": activity.cadence_drop_pct,
+                "ef_drop_pct": activity.ef_drop_pct,
+                "status": "cached",
+            }
+
+        # 7. Aggregate performance snapshots (Critical Speed + duration curves)
+        try:
+            snapshots = self.performance_metrics_service.recalculate_performance_snapshots()
+            results["calculations"]["performance_snapshots"] = {
+                "critical_speed_mps": snapshots["critical_speed"].get("critical_speed_mps"),
+                "duration_curve_effort_count": snapshots["duration_curve"]["all_time"].get("effort_count"),
+                "status": "calculated",
+            }
+        except Exception as e:
+            logger.debug(f"Kunne ikke oppdatere performance snapshots for {activity_id}: {e}")
+            results["calculations"]["performance_snapshots"] = {"status": "skipped", "message": str(e)}
         
         # Commit alle endringer
         try:
@@ -188,7 +246,11 @@ class CacheCalculationService:
             query = query.filter(
                 (Activity.training_stress_score == None) |
                 (Activity.running_economy == None) |
-                (Activity.negative_split_percent == None)
+                (Activity.negative_split_percent == None) |
+                (Activity.avg_efficiency_factor == None) |
+                (Activity.decoupling_percent == None) |
+                (Activity.decoupling_suitability_flag == None) |
+                (Activity.fatigue_resistance_score == None)
             )
         
         if limit:
