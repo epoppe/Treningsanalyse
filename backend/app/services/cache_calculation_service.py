@@ -14,6 +14,7 @@ from .power_service import PowerService
 from .training_stress_service import TrainingStressService
 from .analysis_service import AnalysisService
 from .performance_metrics_service import PerformanceMetricsService
+from ..utils.activity_filters import is_running_activity
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ class CacheCalculationService:
             results["calculations"]["tss"] = {"value": activity.training_stress_score, "status": "cached"}
         
         # 2. Power (kun for løpeaktiviteter)
-        if activity.activity_type and activity.activity_type.type_key == 'running':
+        if is_running_activity(activity):
             if force_recalculate or activity.average_power is None:
                 try:
                     power_data = self.power_service.calculate_activity_power(int(activity_id), self.db)
@@ -88,7 +89,7 @@ class CacheCalculationService:
                 }
         
         # 3. Running Economy (hastighet/puls-forhold)
-        if activity.activity_type and 'running' in activity.activity_type.type_key:
+        if is_running_activity(activity):
             if force_recalculate or activity.running_economy is None:
                 try:
                     if activity.average_speed and activity.average_heart_rate and activity.average_speed > 0 and activity.average_heart_rate > 0:
@@ -110,8 +111,8 @@ class CacheCalculationService:
                     "status": "cached"
                 }
         
-        # 4. Negative Split (fra FIT-data hvis tilgjengelig)
-        if force_recalculate or activity.negative_split_percent is None:
+        # 4. Negative Split (fra FIT-data hvis tilgjengelig, kun løp)
+        if is_running_activity(activity) and (force_recalculate or activity.negative_split_percent is None):
             try:
                 negative_split = self.analysis_service.calculate_negative_split(int(activity_id), self.db)
                 if negative_split and 'negative_split_percent' in negative_split:
@@ -130,8 +131,8 @@ class CacheCalculationService:
                 "status": "cached"
             }
         
-        # 5. Efficiency Factor og Aerobic Decoupling (fra FIT-data hvis tilgjengelig)
-        needs_efficiency = (
+        # 5. Efficiency Factor og Aerobic Decoupling (fra FIT-data hvis tilgjengelig, kun løp)
+        needs_efficiency = is_running_activity(activity) and (
             force_recalculate
             or activity.avg_efficiency_factor is None
             or activity.decoupling_percent is None
@@ -167,7 +168,9 @@ class CacheCalculationService:
             }
 
         # 6. Fatigue Resistance (for lange løpeøkter)
-        if force_recalculate or activity.fatigue_resistance_score is None:
+        if is_running_activity(activity) and (
+            force_recalculate or activity.fatigue_resistance_score is None
+        ):
             try:
                 fatigue = self.performance_metrics_service.calculate_fatigue_resistance_for_activity(
                     activity, force_recalculate=force_recalculate
@@ -194,18 +197,6 @@ class CacheCalculationService:
                 "status": "cached",
             }
 
-        # 7. Aggregate performance snapshots (Critical Speed + duration curves)
-        try:
-            snapshots = self.performance_metrics_service.recalculate_performance_snapshots()
-            results["calculations"]["performance_snapshots"] = {
-                "critical_speed_mps": snapshots["critical_speed"].get("critical_speed_mps"),
-                "duration_curve_effort_count": snapshots["duration_curve"]["all_time"].get("effort_count"),
-                "status": "calculated",
-            }
-        except Exception as e:
-            logger.debug(f"Kunne ikke oppdatere performance snapshots for {activity_id}: {e}")
-            results["calculations"]["performance_snapshots"] = {"status": "skipped", "message": str(e)}
-        
         # Commit alle endringer
         try:
             self.db.commit()
@@ -288,5 +279,19 @@ class CacheCalculationService:
         
         logger.info(f"Ferdig! Prosessert {stats['processed']} aktiviteter: "
                    f"{stats['success']} suksess, {stats['errors']} feil, {stats['skipped']} hoppet over")
+
+        if stats["processed"] > 0:
+            try:
+                snapshots = self.performance_metrics_service.recalculate_performance_snapshots()
+                outdoor_cs = snapshots["critical_speed"].get("outdoor", {})
+                stats["performance_snapshots"] = {
+                    "critical_speed_mps": outdoor_cs.get("critical_speed_mps"),
+                    "duration_curve_effort_count": snapshots["duration_curve"]["all_time"].get("effort_count"),
+                    "status": "calculated",
+                }
+                logger.info("Oppdaterte performance snapshots (Critical Speed + duration curves).")
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere performance snapshots: {e}")
+                stats["performance_snapshots"] = {"status": "error", "message": str(e)}
         
         return stats

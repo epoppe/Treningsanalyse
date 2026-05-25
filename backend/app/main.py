@@ -2,6 +2,8 @@ from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import sys
+from pathlib import Path
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -57,6 +59,19 @@ async def lifespan(app: FastAPI):
     # Opprett databasetabeller
     Base.metadata.create_all(bind=db_engine)
     logger.info("Databasetabeller opprettet/verifisert.")
+
+    # Kjør idempotente SQLite-migrasjoner (nye kolonner etter git pull)
+    backend_root = Path(__file__).resolve().parent.parent
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    try:
+        from migrate_add_advanced_running_metrics import migrate_add_advanced_running_metrics
+        if migrate_add_advanced_running_metrics():
+            logger.info("Database-migrasjon for løpeanalyse verifisert.")
+        else:
+            logger.warning("Database-migrasjon for løpeanalyse fullførte ikke – sjekk backend-logg.")
+    except Exception as exc:
+        logger.warning("Kunne ikke kjøre database-migrasjon for løpeanalyse: %s", exc)
     
     yield
     logger.info("Stopper applikasjonen...")

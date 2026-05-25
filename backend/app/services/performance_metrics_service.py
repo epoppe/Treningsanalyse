@@ -10,29 +10,99 @@ from sqlalchemy.orm import Session
 
 from ..database.models.activity import Activity, AnalyticsSnapshot
 from ..storage import DataStorage
+from ..utils.activity_filters import is_running_activity
 
 
 class PerformanceMetricsService:
-    SPEED_CURVE_DURATIONS = [5, 30, 60, 180, 300, 600, 1200, 3600]
+    SPEED_CURVE_DURATIONS = [30, 60, 180, 300, 600, 1200, 2400, 3600]
     CRITICAL_SPEED_DURATIONS = [180, 360, 720, 1200, 1800]
+    CRITICAL_SPEED_LOOKBACK_DAYS = 365
+
+    # Maks plausible snittfart (m/s) per vinduslengde — filtrerer GPS-spikes i effort/CS.
+    _MAX_AVG_SPEED_MPS: Dict[int, float] = {
+        30: 10.0,
+        60: 9.5,
+        180: 8.0,
+        360: 7.8,
+        300: 7.5,
+        600: 7.2,
+        720: 7.0,
+        1200: 6.8,
+        1800: 6.5,
+        2400: 6.5,
+        3600: 6.2,
+    }
+    _ABSOLUTE_SAMPLE_SPEED_CAP_MPS = 8.5
 
     def __init__(self, db: Session, storage: DataStorage):
         self.db = db
         self.storage = storage
 
-    def _is_running_activity(self, activity: Activity) -> bool:
-        if not activity.activity_type:
-            return True
-        type_key = (activity.activity_type.type_key or "").lower()
-        parent = (activity.activity_type.parent_type_key or "").lower()
-        return "running" in type_key or parent == "running"
+    @property
+    def _speed_duration_seconds(self) -> List[int]:
+        """Alle varigheter vi rapporterer for fart (kurve + CS-tabell)."""
+        return sorted(set(self.SPEED_CURVE_DURATIONS + self.CRITICAL_SPEED_DURATIONS))
 
-    def _normalize_speed_mps(self, speed: pd.Series) -> pd.Series:
+    @property
+    def critical_speed_pace_table_durations(self) -> List[int]:
+        """Varigheter i pace-tabellen (CS-varigheter + 60 min)."""
+        return sorted(set(self.CRITICAL_SPEED_DURATIONS + [3600]))
+
+    def _normalize_speed_mps(
+        self,
+        speed: pd.Series,
+        reference_speed_mps: Optional[float] = None,
+    ) -> pd.Series:
+        """Normaliserer FIT-fart til m/s. Eldre parquet kan ha km/t uten konvertering."""
         numeric = pd.to_numeric(speed, errors="coerce")
-        median = numeric[numeric > 0].median()
-        if pd.notna(median) and median > 8:
+        positive = numeric[numeric > 0]
+        if positive.empty:
+            return numeric
+        median = float(positive.median())
+        if pd.notna(reference_speed_mps) and reference_speed_mps > 0:
+            ratio = median / reference_speed_mps
+            if 2.2 <= ratio <= 4.5:
+                return numeric / 3.6
+        if median > 8:
             return numeric / 3.6
         return numeric
+
+    def _max_plausible_avg_speed(self, duration_s: int) -> float:
+        if duration_s in self._MAX_AVG_SPEED_MPS:
+            return self._MAX_AVG_SPEED_MPS[duration_s]
+        keys = sorted(self._MAX_AVG_SPEED_MPS)
+        if duration_s <= keys[0]:
+            return self._MAX_AVG_SPEED_MPS[keys[0]]
+        if duration_s >= keys[-1]:
+            return self._MAX_AVG_SPEED_MPS[keys[-1]]
+        for lo, hi in zip(keys, keys[1:]):
+            if lo <= duration_s <= hi:
+                span = hi - lo
+                weight = (duration_s - lo) / span if span else 0.0
+                return (
+                    self._MAX_AVG_SPEED_MPS[lo] * (1 - weight)
+                    + self._MAX_AVG_SPEED_MPS[hi] * weight
+                )
+        return self._ABSOLUTE_SAMPLE_SPEED_CAP_MPS
+
+    def _clip_speed_samples(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Klipper enkelt-sample fart som er åpenbare GPS-spikes."""
+        reasonable = df.loc[df["speed_mps"] >= 1.0, "speed_mps"]
+        if len(reasonable) >= 5:
+            median = float(reasonable.median())
+            cap = min(self._ABSOLUTE_SAMPLE_SPEED_CAP_MPS, max(6.0, median * 2.5))
+        else:
+            cap = self._ABSOLUTE_SAMPLE_SPEED_CAP_MPS
+        df = df.copy()
+        df["speed_mps"] = df["speed_mps"].clip(upper=cap)
+        return df
+
+    def _is_plausible_speed_effort(self, effort: Dict[str, Any]) -> bool:
+        duration_s = int(effort.get("duration_seconds") or 0)
+        speed_mps = effort.get("speed_mps", effort.get("value"))
+        if duration_s <= 0 or speed_mps is None:
+            return False
+        return float(speed_mps) <= self._max_plausible_avg_speed(duration_s)
 
     def _details_for_activity(self, activity: Activity) -> Optional[pd.DataFrame]:
         try:
@@ -40,7 +110,12 @@ class PerformanceMetricsService:
         except Exception:
             return None
 
-    def _prepare_samples(self, details_df: pd.DataFrame, drop_warmup: bool = True) -> pd.DataFrame:
+    def _prepare_samples(
+        self,
+        details_df: pd.DataFrame,
+        drop_warmup: bool = True,
+        reference_speed_mps: Optional[float] = None,
+    ) -> pd.DataFrame:
         if details_df is None or details_df.empty:
             return pd.DataFrame()
         if "timestamp" not in details_df.columns or "speed" not in details_df.columns:
@@ -48,7 +123,7 @@ class PerformanceMetricsService:
 
         df = details_df.copy()
         df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df["speed_mps"] = self._normalize_speed_mps(df["speed"])
+        df["speed_mps"] = self._normalize_speed_mps(df["speed"], reference_speed_mps)
         if "heart_rate" in df.columns:
             df["heart_rate"] = pd.to_numeric(df["heart_rate"], errors="coerce")
         else:
@@ -67,6 +142,8 @@ class PerformanceMetricsService:
         df = df[df["speed_mps"] >= 0.5]
         if df.empty:
             return df
+
+        df = self._clip_speed_samples(df)
 
         start = df["timestamp"].iloc[0]
         if drop_warmup and (df["timestamp"].iloc[-1] - start).total_seconds() > 600:
@@ -126,6 +203,12 @@ class PerformanceMetricsService:
 
         if best_value is None:
             return None
+
+        if value_col == "speed_mps":
+            speed_cap = self._max_plausible_avg_speed(duration_s)
+            if best_value > speed_cap:
+                return None
+
         return {
             "duration_seconds": duration_s,
             "value": best_value,
@@ -135,7 +218,12 @@ class PerformanceMetricsService:
 
     def extract_activity_best_efforts(self, activity: Activity) -> List[Dict[str, Any]]:
         details = self._details_for_activity(activity)
-        samples = self._prepare_samples(details, drop_warmup=True) if details is not None else pd.DataFrame()
+        ref_speed = float(activity.average_speed) if activity.average_speed else None
+        samples = (
+            self._prepare_samples(details, drop_warmup=True, reference_speed_mps=ref_speed)
+            if details is not None
+            else pd.DataFrame()
+        )
         efforts: List[Dict[str, Any]] = []
         if samples.empty:
             return efforts
@@ -143,7 +231,9 @@ class PerformanceMetricsService:
         durations = sorted(set(self.SPEED_CURVE_DURATIONS + self.CRITICAL_SPEED_DURATIONS))
         for duration_s in durations:
             speed_effort = self._best_average_for_duration(samples, duration_s, "speed_mps")
-            if speed_effort:
+            if speed_effort and self._is_plausible_speed_effort(
+                {"duration_seconds": duration_s, "speed_mps": speed_effort["value"]}
+            ):
                 speed_effort.update({
                     "metric_type": "speed",
                     "activity_id": activity.activity_id,
@@ -171,6 +261,9 @@ class PerformanceMetricsService:
         activity: Activity,
         force_recalculate: bool = False,
     ) -> Optional[Dict[str, Any]]:
+        if not is_running_activity(activity):
+            return None
+
         if activity.fatigue_resistance_score is not None and not force_recalculate:
             return {
                 "activity_id": activity.activity_id,
@@ -183,7 +276,12 @@ class PerformanceMetricsService:
             }
 
         details = self._details_for_activity(activity)
-        samples = self._prepare_samples(details, drop_warmup=True) if details is not None else pd.DataFrame()
+        ref_speed = float(activity.average_speed) if activity.average_speed else None
+        samples = (
+            self._prepare_samples(details, drop_warmup=True, reference_speed_mps=ref_speed)
+            if details is not None
+            else pd.DataFrame()
+        )
         if samples.empty or len(samples) < 20:
             return None
         duration = samples["elapsed_s"].iloc[-1] - samples["elapsed_s"].iloc[0]
@@ -249,29 +347,90 @@ class PerformanceMetricsService:
             "calculation_method": "calculated",
         }
 
-    def _running_activities(self, days: Optional[int] = None) -> List[Activity]:
+    def _running_activities(
+        self,
+        days: Optional[int] = None,
+        *,
+        include_treadmill: bool = False,
+    ) -> List[Activity]:
         query = self.db.query(Activity).order_by(Activity.start_time.asc())
         if days is not None:
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             query = query.filter(Activity.start_time >= cutoff)
         activities = query.all()
-        return [activity for activity in activities if self._is_running_activity(activity)]
+        return [
+            activity
+            for activity in activities
+            if is_running_activity(activity, include_treadmill=include_treadmill)
+        ]
 
-    def collect_best_efforts(self, days: Optional[int] = None) -> List[Dict[str, Any]]:
+    def _running_activities_for_calendar_year(
+        self,
+        year: int,
+        *,
+        include_treadmill: bool = False,
+    ) -> List[Activity]:
+        start = datetime(year, 1, 1)
+        end = datetime(year + 1, 1, 1)
+        query = (
+            self.db.query(Activity)
+            .filter(Activity.start_time >= start, Activity.start_time < end)
+            .order_by(Activity.start_time.asc())
+        )
+        return [
+            activity
+            for activity in query.all()
+            if is_running_activity(activity, include_treadmill=include_treadmill)
+        ]
+
+    def collect_best_efforts(
+        self,
+        days: Optional[int] = None,
+        *,
+        include_treadmill: bool = False,
+    ) -> List[Dict[str, Any]]:
         efforts: List[Dict[str, Any]] = []
-        for activity in self._running_activities(days=days):
+        for activity in self._running_activities(days=days, include_treadmill=include_treadmill):
             efforts.extend(self.extract_activity_best_efforts(activity))
         return efforts
 
-    def build_duration_curve(self, days: Optional[int] = None) -> Dict[str, Any]:
-        efforts = self.collect_best_efforts(days=days)
+    def collect_best_efforts_for_calendar_year(
+        self,
+        year: int,
+        *,
+        include_treadmill: bool = False,
+    ) -> List[Dict[str, Any]]:
+        efforts: List[Dict[str, Any]] = []
+        for activity in self._running_activities_for_calendar_year(
+            year,
+            include_treadmill=include_treadmill,
+        ):
+            efforts.extend(self.extract_activity_best_efforts(activity))
+        return efforts
+
+    def _build_duration_curve_from_efforts(
+        self,
+        efforts: List[Dict[str, Any]],
+        *,
+        days: Optional[int] = None,
+        year: Optional[int] = None,
+    ) -> Dict[str, Any]:
         curves: Dict[str, List[Dict[str, Any]]] = {"speed": [], "power": []}
         for metric_type in curves:
             metric_efforts = [e for e in efforts if e.get("metric_type") == metric_type]
-            for duration_s in self.SPEED_CURVE_DURATIONS:
+            duration_list = (
+                self._speed_duration_seconds
+                if metric_type == "speed"
+                else self.SPEED_CURVE_DURATIONS
+            )
+            for duration_s in duration_list:
                 candidates = [e for e in metric_efforts if e["duration_seconds"] == duration_s]
                 if not candidates:
                     continue
+                if metric_type == "speed":
+                    candidates = [e for e in candidates if self._is_plausible_speed_effort(e)]
+                    if not candidates:
+                        continue
                 best = max(candidates, key=lambda e: e["value"])
                 item = {
                     "duration_seconds": duration_s,
@@ -287,20 +446,171 @@ class PerformanceMetricsService:
                 else:
                     item["power_watts"] = round(best["value"], 1)
                 curves[metric_type].append(item)
-        return {
+        result: Dict[str, Any] = {
             "days": days,
             "curves": curves,
             "effort_count": len(efforts),
         }
+        if year is not None:
+            result["year"] = year
+        return result
 
-    def calculate_critical_speed(self, days: Optional[int] = None) -> Dict[str, Any]:
-        efforts = self.collect_best_efforts(days=days)
+    def build_duration_curve(
+        self,
+        days: Optional[int] = None,
+        *,
+        include_treadmill: bool = False,
+    ) -> Dict[str, Any]:
+        return self._build_duration_curve_from_efforts(
+            self.collect_best_efforts(days=days, include_treadmill=include_treadmill),
+            days=days,
+        )
+
+    def build_duration_curve_for_calendar_year(
+        self,
+        year: int,
+        *,
+        include_treadmill: bool = False,
+    ) -> Dict[str, Any]:
+        return self._build_duration_curve_from_efforts(
+            self.collect_best_efforts_for_calendar_year(year, include_treadmill=include_treadmill),
+            year=year,
+        )
+
+    def build_critical_speed_pace_by_year(
+        self,
+        years: int = 3,
+        *,
+        include_treadmill: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Beste pace per CS-varighet og kalenderår.
+        Manglende kortere varigheter fylles fra samme økt som beste lengre
+        varighet det året (f.eks. 6/12 min fra løpet som ga 20 min).
+        """
+        current_year = datetime.now(timezone.utc).year
+        target_years = [current_year - offset for offset in range(years - 1, -1, -1)]
+        rows: List[Dict[str, Any]] = [
+            {
+                "duration_seconds": duration_s,
+                "paces_by_year": {str(year): None for year in target_years},
+            }
+            for duration_s in self.critical_speed_pace_table_durations
+        ]
+        row_by_dur = {row["duration_seconds"]: row for row in rows}
+        table_durations = set(self.critical_speed_pace_table_durations)
+
+        for year in target_years:
+            speed_efforts = [
+                e
+                for e in self.collect_best_efforts_for_calendar_year(
+                    year,
+                    include_treadmill=include_treadmill,
+                )
+                if e.get("metric_type") == "speed"
+                and int(e["duration_seconds"]) in table_durations
+                and self._is_plausible_speed_effort(e)
+            ]
+            best_by_dur: Dict[int, Dict[str, Any]] = {}
+            for effort in speed_efforts:
+                duration_s = int(effort["duration_seconds"])
+                speed_mps = float(effort["speed_mps"])
+                if duration_s not in best_by_dur or speed_mps > float(best_by_dur[duration_s]["speed_mps"]):
+                    best_by_dur[duration_s] = effort
+
+            anchor_effort = None
+            for duration_s in sorted(self.critical_speed_pace_table_durations, reverse=True):
+                if duration_s in best_by_dur:
+                    anchor_effort = best_by_dur[duration_s]
+                    break
+
+            if anchor_effort:
+                anchor_id = str(anchor_effort.get("activity_id"))
+                activity = self.db.query(Activity).filter_by(activity_id=anchor_id).first()
+                for duration_s in self.critical_speed_pace_table_durations:
+                    if duration_s in best_by_dur:
+                        continue
+                    same_act = next(
+                        (
+                            e
+                            for e in speed_efforts
+                            if str(e.get("activity_id")) == anchor_id
+                            and int(e["duration_seconds"]) == duration_s
+                        ),
+                        None,
+                    )
+                    if same_act is None and activity is not None:
+                        for effort in self.extract_activity_best_efforts(activity):
+                            if (
+                                effort.get("metric_type") == "speed"
+                                and int(effort["duration_seconds"]) == duration_s
+                                and self._is_plausible_speed_effort(
+                                    {
+                                        "duration_seconds": duration_s,
+                                        "speed_mps": effort.get("speed_mps", effort.get("value")),
+                                    }
+                                )
+                            ):
+                                same_act = effort
+                                break
+                    if same_act is not None:
+                        best_by_dur[duration_s] = {**same_act, "_from_anchor": True}
+
+            for duration_s, effort in best_by_dur.items():
+                speed_mps = float(effort["speed_mps"])
+                row_by_dur[duration_s]["paces_by_year"][str(year)] = {
+                    "pace_sec_per_km": round(1000 / speed_mps, 1),
+                    "speed_mps": round(speed_mps, 4),
+                    "activity_id": effort.get("activity_id"),
+                    "source": "anchor_activity" if effort.get("_from_anchor") else "year_best",
+                }
+
+        return {
+            "years": target_years,
+            "rows": rows,
+            "include_treadmill": include_treadmill,
+        }
+
+    def build_duration_curve_year_comparison(
+        self,
+        years: int = 3,
+        *,
+        include_treadmill: bool = False,
+    ) -> List[Dict[str, Any]]:
+        current_year = datetime.now(timezone.utc).year
+        target_years = [current_year - offset for offset in range(years - 1, -1, -1)]
+        return [
+            {
+                "year": year,
+                **self.build_duration_curve_for_calendar_year(
+                    year,
+                    include_treadmill=include_treadmill,
+                ),
+            }
+            for year in target_years
+        ]
+
+    def calculate_critical_speed(
+        self,
+        days: Optional[int] = CRITICAL_SPEED_LOOKBACK_DAYS,
+        *,
+        include_treadmill: bool = False,
+    ) -> Dict[str, Any]:
+        efforts = self.collect_best_efforts(days=days, include_treadmill=include_treadmill)
         speed_efforts = [e for e in efforts if e.get("metric_type") == "speed"]
         best_by_duration: Dict[int, Dict[str, Any]] = {}
         for duration_s in self.CRITICAL_SPEED_DURATIONS:
-            candidates = [e for e in speed_efforts if e["duration_seconds"] == duration_s]
+            candidates = [
+                e for e in speed_efforts
+                if e["duration_seconds"] == duration_s and self._is_plausible_speed_effort(e)
+            ]
             if candidates:
-                best_by_duration[duration_s] = max(candidates, key=lambda e: e["speed_mps"])
+                best = max(candidates, key=lambda e: e["speed_mps"])
+                speed_mps = float(best["speed_mps"])
+                best["pace_sec_per_km"] = (
+                    round(1000 / speed_mps, 1) if speed_mps > 0 else None
+                )
+                best_by_duration[duration_s] = best
 
         if len(best_by_duration) < 3:
             return {
@@ -310,6 +620,8 @@ class PerformanceMetricsService:
                 "model_r2": None,
                 "model_quality": "insufficient_data",
                 "efforts": list(best_by_duration.values()),
+                "include_treadmill": include_treadmill,
+                "lookback_days": days,
             }
 
         times = np.array(sorted(best_by_duration.keys()), dtype=float)
@@ -328,7 +640,41 @@ class PerformanceMetricsService:
             "model_r2": round(float(r2), 4),
             "model_quality": quality,
             "efforts": list(best_by_duration.values()),
+            "include_treadmill": include_treadmill,
+            "lookback_days": days,
         }
+
+    def resolve_critical_speed_payload(
+        self,
+        payload: Optional[Dict[str, Any]],
+        *,
+        include_treadmill: bool = False,
+        days: int = CRITICAL_SPEED_LOOKBACK_DAYS,
+    ) -> Dict[str, Any]:
+        """Henter CS-variant fra snapshot (utendørs / med tredemølle), ellers beregner på nytt."""
+        def fresh() -> Dict[str, Any]:
+            return self.calculate_critical_speed(days=days, include_treadmill=include_treadmill)
+
+        if not payload:
+            return fresh()
+
+        if payload.get("outdoor") is not None or payload.get("with_treadmill") is not None:
+            key = "with_treadmill" if include_treadmill else "outdoor"
+            variant = payload.get(key)
+            if variant and variant.get("lookback_days") == days:
+                resolved = dict(variant)
+                resolved["calculated_at"] = payload.get("calculated_at")
+                resolved["data_quality_score"] = payload.get("data_quality_score")
+                resolved["model_quality"] = variant.get("model_quality") or payload.get("model_quality")
+                return resolved
+            return fresh()
+
+        if payload.get("lookback_days") == days and payload.get("critical_speed_mps") is not None:
+            legacy = dict(payload)
+            legacy.setdefault("include_treadmill", False)
+            return legacy
+
+        return fresh()
 
     def _upsert_snapshot(
         self,
@@ -349,21 +695,42 @@ class PerformanceMetricsService:
         return snapshot
 
     def recalculate_performance_snapshots(self) -> Dict[str, Any]:
-        critical_speed = self.calculate_critical_speed(days=None)
+        critical_speed = {
+            "outdoor": self.calculate_critical_speed(
+                days=self.CRITICAL_SPEED_LOOKBACK_DAYS,
+                include_treadmill=False,
+            ),
+            "with_treadmill": self.calculate_critical_speed(
+                days=self.CRITICAL_SPEED_LOOKBACK_DAYS,
+                include_treadmill=True,
+            ),
+        }
         curve_all = self.build_duration_curve(days=None)
         curve_90 = self.build_duration_curve(days=90)
         curve_365 = self.build_duration_curve(days=365)
+        current_year = datetime.now(timezone.utc).year
+        by_year = {
+            str(year): self.build_duration_curve_for_calendar_year(year, include_treadmill=False)
+            for year in range(current_year - 2, current_year + 1)
+        }
+        by_year_with_treadmill = {
+            str(year): self.build_duration_curve_for_calendar_year(year, include_treadmill=True)
+            for year in range(current_year - 2, current_year + 1)
+        }
         duration_curve = {
             "all_time": curve_all,
             "last_90_days": curve_90,
             "last_365_days": curve_365,
+            "by_year": by_year,
+            "by_year_with_treadmill": by_year_with_treadmill,
         }
 
+        outdoor_cs = critical_speed["outdoor"]
         self._upsert_snapshot(
             "critical_speed",
             critical_speed,
-            data_quality_score=100.0 if critical_speed.get("critical_speed_mps") else 0.0,
-            model_quality=critical_speed.get("model_quality"),
+            data_quality_score=100.0 if outdoor_cs.get("critical_speed_mps") else 0.0,
+            model_quality=outdoor_cs.get("model_quality"),
         )
         self._upsert_snapshot(
             "duration_curve",

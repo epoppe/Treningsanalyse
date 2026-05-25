@@ -9,16 +9,19 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
 } from 'recharts';
 import PlotlyChart from '../../components/PlotlyChart';
 import {
   analyticsApi,
+  CriticalSpeedPaceByYearResponse,
   CriticalSpeedResponse,
   DecouplingTrendItem,
   DurationCurveMetric,
   DurationCurveResponse,
   DurationCurveScope,
+  DurationCurveYearComparisonResponse,
   EfficiencyTrendItem,
   FatigueResistanceItem,
 } from '../../utils/api';
@@ -163,6 +166,7 @@ const Badge = styled.span<{ $tone?: 'good' | 'warn' | 'bad' | 'neutral' }>`
 
 const ChartBox = styled.div`
   min-height: 320px;
+  overflow: visible;
 `;
 
 const LoadingText = styled.div`
@@ -184,6 +188,13 @@ const PERIOD_DAYS: Record<PeriodKey, number | undefined> = {
   '365': 365,
   all: undefined,
 };
+
+const DURATION_CURVE_SECONDS = [30, 60, 180, 300, 600, 1200, 2400, 3600] as const;
+/** Varigheter som brukes i Critical Speed-modellen (3–30 min). */
+const CRITICAL_SPEED_TABLE_DURATIONS = [180, 360, 720, 1200, 1800, 3600] as const;
+const CRITICAL_SPEED_TABLE_YEARS = [2024, 2025, 2026] as const;
+const PACE_AXIS_STEP_SEC = 30;
+const YEAR_LINE_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#d35400'];
 
 type ActivityFlag =
   | 'good_aerobic_stability'
@@ -268,8 +279,35 @@ const formatNumber = (value?: number | null, digits = 2) => {
 
 const formatDurationLabel = (seconds: number) => {
   if (seconds < 60) return `${seconds}s`;
+  if (seconds === 3600) return '60 min';
   if (seconds < 3600) return `${Math.round(seconds / 60)} min`;
   return `${(seconds / 3600).toFixed(1)} t`;
+};
+
+/** Y-akse i sek/km med jevne pace-trinn; raskere pace (lavere tall) øverst. */
+const buildPaceYAxisConfig = (paceSecValues: number[]) => {
+  const valid = paceSecValues.filter((v) => Number.isFinite(v) && v > 0);
+  if (valid.length === 0) {
+    const ticks = [180, 210, 240, 270, 300, 330, 360, 390, 420, 450, 480, 540, 600];
+    return { domain: [180, 600] as [number, number], ticks };
+  }
+
+  const padding = 15;
+  const rawMin = Math.min(...valid);
+  const rawMax = Math.max(...valid);
+  let tickMin = Math.floor((rawMin - padding) / PACE_AXIS_STEP_SEC) * PACE_AXIS_STEP_SEC;
+  let tickMax = Math.ceil((rawMax + padding) / PACE_AXIS_STEP_SEC) * PACE_AXIS_STEP_SEC;
+  tickMin = Math.max(120, tickMin);
+  tickMax = Math.min(900, tickMax);
+
+  const ticks: number[] = [];
+  for (let t = tickMin; t <= tickMax; t += PACE_AXIS_STEP_SEC) {
+    ticks.push(t);
+  }
+  if (ticks.length < 2) {
+    ticks.push(tickMin, tickMax);
+  }
+  return { domain: [tickMin, tickMax] as [number, number], ticks };
 };
 
 const translateDecouplingReasons = (reasons?: string | null) => {
@@ -390,9 +428,9 @@ const modelQualityLabel = (quality?: string | null) => {
 };
 
 export default function AnalyticsPage() {
-  const [period, setPeriod] = useState<PeriodKey>('90');
+  const [period, setPeriod] = useState<PeriodKey>('365');
   const [curveScope, setCurveScope] = useState<DurationCurveScope>('all_time');
-  const [curveMetric, setCurveMetric] = useState<DurationCurveMetric>('speed');
+  const [includeTreadmill, setIncludeTreadmill] = useState(false);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState<string[]>([]);
 
@@ -400,7 +438,9 @@ export default function AnalyticsPage() {
   const [decoupling, setDecoupling] = useState<DecouplingTrendItem[]>([]);
   const [fatigue, setFatigue] = useState<FatigueResistanceItem[]>([]);
   const [criticalSpeed, setCriticalSpeed] = useState<CriticalSpeedResponse | null>(null);
-  const [speedCurve, setSpeedCurve] = useState<DurationCurveResponse | null>(null);
+  const [criticalSpeedPaceByYear, setCriticalSpeedPaceByYear] =
+    useState<CriticalSpeedPaceByYearResponse | null>(null);
+  const [speedYearComparison, setSpeedYearComparison] = useState<DurationCurveYearComparisonResponse | null>(null);
   const [powerCurve, setPowerCurve] = useState<DurationCurveResponse | null>(null);
 
   const loadData = useCallback(async () => {
@@ -408,13 +448,15 @@ export default function AnalyticsPage() {
     setErrors([]);
     const days = PERIOD_DAYS[period];
 
+    const activityQuery = { days, limit: 100, includeTreadmill };
     const results = await Promise.allSettled([
-      analyticsApi.getEfficiencyTrends({ days, limit: 100 }),
-      analyticsApi.getDecouplingTrends({ days, limit: 100 }),
-      analyticsApi.getFatigueResistance({ days, limit: 100 }),
-      analyticsApi.getCriticalSpeed(),
-      analyticsApi.getDurationCurve('speed', curveScope),
-      analyticsApi.getDurationCurve('power', curveScope),
+      analyticsApi.getEfficiencyTrends(activityQuery),
+      analyticsApi.getDecouplingTrends(activityQuery),
+      analyticsApi.getFatigueResistance(activityQuery),
+      analyticsApi.getCriticalSpeed(false, includeTreadmill),
+      analyticsApi.getCriticalSpeedPaceByYear(3, includeTreadmill),
+      analyticsApi.getDurationCurveYearComparison('speed', 3, includeTreadmill),
+      analyticsApi.getDurationCurve('power', curveScope, includeTreadmill),
     ]);
 
     const nextErrors: string[] = [];
@@ -448,21 +490,28 @@ export default function AnalyticsPage() {
     }
 
     if (results[4].status === 'fulfilled') {
-      setSpeedCurve(results[4].value);
+      setCriticalSpeedPaceByYear(results[4].value);
     } else {
-      setSpeedCurve(null);
-      nextErrors.push('Kunne ikke hente speed-duration curve.');
+      setCriticalSpeedPaceByYear(null);
+      nextErrors.push('Kunne ikke hente Critical Speed pace per år.');
     }
 
     if (results[5].status === 'fulfilled') {
-      setPowerCurve(results[5].value);
+      setSpeedYearComparison(results[5].value);
+    } else {
+      setSpeedYearComparison(null);
+      nextErrors.push('Kunne ikke hente speed-duration sammenligning per år.');
+    }
+
+    if (results[6].status === 'fulfilled') {
+      setPowerCurve(results[6].value);
     } else {
       setPowerCurve(null);
     }
 
     setErrors(nextErrors);
     setLoading(false);
-  }, [period, curveScope]);
+  }, [period, curveScope, includeTreadmill]);
 
   useEffect(() => {
     loadData();
@@ -506,21 +555,108 @@ export default function AnalyticsPage() {
     [fatigue],
   );
 
-  const activeCurve = curveMetric === 'speed' ? speedCurve : powerCurve;
+  const speedYearChartData = useMemo(() => {
+    const series = speedYearComparison?.years ?? [];
+    if (series.length === 0) {
+      return { rows: [], yearKeys: [] as number[], paceAxis: buildPaceYAxisConfig([]) };
+    }
+
+    const yearKeys = series.map((s) => s.year);
+    const paceValues: number[] = [];
+    const rows = DURATION_CURVE_SECONDS.map((durationSeconds) => {
+      const row: Record<string, string | number | null> = {
+        duration_label: formatDurationLabel(durationSeconds),
+        duration_seconds: durationSeconds,
+      };
+      series.forEach((yearSeries) => {
+        const point = yearSeries.points.find(
+          (p) => Number(p.duration_seconds) === durationSeconds,
+        );
+        const speed = point?.speed_mps ?? null;
+        const pace =
+          point?.pace_sec_per_km ?? (speed != null && speed > 0 ? 1000 / speed : null);
+        row[`pace_${yearSeries.year}`] = pace;
+        if (pace != null && Number.isFinite(pace)) {
+          paceValues.push(pace);
+        }
+      });
+      return row;
+    });
+
+    return { rows, yearKeys, paceAxis: buildPaceYAxisConfig(paceValues) };
+  }, [speedYearComparison]);
+
+  const criticalSpeedTableYears = useMemo(() => {
+    const years = criticalSpeedPaceByYear?.years ?? [];
+    return years.length > 0 ? years : [...CRITICAL_SPEED_TABLE_YEARS];
+  }, [criticalSpeedPaceByYear]);
+
+  const criticalSpeedPaceByYearRows = useMemo(() => {
+    const apiRows = criticalSpeedPaceByYear?.rows ?? [];
+    const apiHasPaces = apiRows.some((row) =>
+      Object.values(row.paces_by_year ?? {}).some(
+        (cell) => cell?.pace_sec_per_km != null && Number.isFinite(cell.pace_sec_per_km),
+      ),
+    );
+    if (apiHasPaces) {
+      return apiRows.map((row) => ({
+        duration_label: formatDurationLabel(row.duration_seconds),
+        duration_seconds: row.duration_seconds,
+        paces_by_year: row.paces_by_year,
+      }));
+    }
+
+    const series = speedYearComparison?.years ?? [];
+    if (series.length > 0) {
+      return CRITICAL_SPEED_TABLE_DURATIONS.map((durationSeconds) => {
+        const paces_by_year: Record<string, { pace_sec_per_km: number | null } | null> = {};
+        series.forEach((yearSeries) => {
+          const point = yearSeries.points.find(
+            (p) => Number(p.duration_seconds) === durationSeconds,
+          );
+          const speed = point?.speed_mps ?? null;
+          const pace =
+            point?.pace_sec_per_km ?? (speed != null && speed > 0 ? 1000 / speed : null);
+          if (pace != null) {
+            paces_by_year[String(yearSeries.year)] = { pace_sec_per_km: pace };
+          }
+        });
+        return {
+          duration_label: formatDurationLabel(durationSeconds),
+          duration_seconds: durationSeconds,
+          paces_by_year,
+        };
+      });
+    }
+
+    return CRITICAL_SPEED_TABLE_DURATIONS.map((durationSeconds) => ({
+      duration_label: formatDurationLabel(durationSeconds),
+      duration_seconds: durationSeconds,
+      paces_by_year: {} as Record<string, { pace_sec_per_km: number | null } | null>,
+    }));
+  }, [criticalSpeedPaceByYear, speedYearComparison]);
+
+  const hasCriticalSpeedPaceByYear = useMemo(
+    () => criticalSpeedPaceByYearRows.some((row) =>
+      criticalSpeedTableYears.some((year) => {
+        const cell = row.paces_by_year?.[String(year)];
+        return cell?.pace_sec_per_km != null && Number.isFinite(cell.pace_sec_per_km);
+      }),
+    ),
+    [criticalSpeedPaceByYearRows, criticalSpeedTableYears],
+  );
 
   const durationChartData = useMemo(() => {
-    const points = activeCurve?.points ?? [];
+    const points = powerCurve?.points ?? [];
     return [...points]
       .sort((a, b) => a.duration_seconds - b.duration_seconds)
       .map((point) => ({
         duration_label: formatDurationLabel(point.duration_seconds),
         duration_seconds: point.duration_seconds,
-        value: curveMetric === 'speed'
-          ? (point.speed_mps ?? null)
-          : (point.power_watts ?? null),
-        pace: point.pace_sec_per_km ?? (point.speed_mps ? 1000 / point.speed_mps : null),
+        value: point.power_watts ?? null,
+        pace: null,
       }));
-  }, [activeCurve, curveMetric]);
+  }, [powerCurve]);
 
   const flaggedRows = useMemo(
     () => mergedRows.filter((row) => row.flags.length > 0).slice(0, 25),
@@ -533,6 +669,27 @@ export default function AnalyticsPage() {
       <Subtitle>
         Efficiency Factor, aerobic decoupling, Critical Speed, fatigue resistance og duration curves.
       </Subtitle>
+
+      <Controls>
+        <FilterButton
+          $active={!includeTreadmill}
+          onClick={() => setIncludeTreadmill(false)}
+        >
+          Utendørsaktiviteter
+        </FilterButton>
+        <FilterButton
+          $active={includeTreadmill}
+          onClick={() => setIncludeTreadmill(true)}
+        >
+          Innendørs + utendørs
+        </FilterButton>
+      </Controls>
+      <SmallMeta>
+        Kun løpeaktiviteter.
+        {includeTreadmill
+          ? ' Inkluderer tredemølle og innendørs løp.'
+          : ' Kun utendørs løp (gate, sti, bane osv.).'}
+      </SmallMeta>
 
       <Controls>
         {(Object.keys(PERIOD_DAYS) as PeriodKey[]).map((key) => (
@@ -557,53 +714,61 @@ export default function AnalyticsPage() {
           <Section>
             <Card>
               <SectionTitle>Critical Speed og terskelpace</SectionTitle>
-              {criticalSpeed?.critical_speed_mps ? (
+              {criticalSpeed?.critical_speed_mps || hasCriticalSpeedPaceByYear ? (
                 <>
-                  <Grid>
-                    <div>
-                      <MetricLabel>Critical Speed</MetricLabel>
-                      <MetricValue>{formatNumber(criticalSpeed.critical_speed_mps, 3)} m/s</MetricValue>
-                    </div>
-                    <div>
-                      <MetricLabel>Kritisk pace (CS)</MetricLabel>
-                      <MetricValue>{formatPaceFromSecPerKm(criticalSpeed.critical_pace_sec_per_km)}</MetricValue>
-                    </div>
-                    <div>
-                      <MetricLabel>D&apos;</MetricLabel>
-                      <MetricValue>{formatNumber(criticalSpeed.d_prime, 0)} m</MetricValue>
-                    </div>
-                    <div>
-                      <MetricLabel>Modellkvalitet (R²)</MetricLabel>
-                      <MetricValue>
-                        {modelQualityLabel(criticalSpeed.model_quality)}
-                        {criticalSpeed.model_r2 != null ? ` · ${formatNumber(criticalSpeed.model_r2, 3)}` : ''}
-                      </MetricValue>
-                    </div>
-                  </Grid>
-                  {(criticalSpeed.efforts?.length ?? 0) > 0 && (
-                    <TableWrap>
-                      <Table>
-                        <thead>
-                          <tr>
-                            <th>Varighet</th>
-                            <th>Fart</th>
-                            <th>Pace</th>
-                            <th>Aktivitet</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {criticalSpeed.efforts?.map((effort) => (
-                            <tr key={`${effort.duration_seconds}-${effort.activity_id ?? effort.activity_name ?? 'effort'}`}>
-                              <td>{formatDurationLabel(effort.duration_seconds)}</td>
-                              <td>{formatNumber(effort.speed_mps, 3)} m/s</td>
-                              <td>{formatPaceFromMps(effort.speed_mps)}</td>
-                              <td>{effort.activity_name ?? effort.activity_id ?? '—'}</td>
-                            </tr>
+                  {criticalSpeed?.critical_speed_mps ? (
+                    <Grid>
+                      <div>
+                        <MetricLabel>Critical Speed · siste 12 mnd</MetricLabel>
+                        <MetricValue>{formatNumber(criticalSpeed.critical_speed_mps, 3)} m/s</MetricValue>
+                      </div>
+                      <div>
+                        <MetricLabel>Kritisk pace (CS) · siste 12 mnd</MetricLabel>
+                        <MetricValue>{formatPaceFromSecPerKm(criticalSpeed.critical_pace_sec_per_km)}</MetricValue>
+                      </div>
+                      <div>
+                        <MetricLabel>D&apos;</MetricLabel>
+                        <MetricValue>{formatNumber(criticalSpeed.d_prime, 0)} m</MetricValue>
+                      </div>
+                      <div>
+                        <MetricLabel>Modellkvalitet (R²)</MetricLabel>
+                        <MetricValue>
+                          {modelQualityLabel(criticalSpeed.model_quality)}
+                          {criticalSpeed.model_r2 != null ? ` · ${formatNumber(criticalSpeed.model_r2, 3)}` : ''}
+                        </MetricValue>
+                      </div>
+                    </Grid>
+                  ) : null}
+                  <SmallMeta>
+                    Beste pace per CS-varighet og år. Kortere varigheter uten egen års-PR fylles
+                    fra samme økt som lengste effort det året.
+                  </SmallMeta>
+                  <TableWrap>
+                    <Table>
+                      <thead>
+                        <tr>
+                          <th>Varighet</th>
+                          {criticalSpeedTableYears.map((year) => (
+                            <th key={year}>Pace {year}</th>
                           ))}
-                        </tbody>
-                      </Table>
-                    </TableWrap>
-                  )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {criticalSpeedPaceByYearRows.map((row) => (
+                          <tr key={row.duration_seconds}>
+                            <td>{row.duration_label}</td>
+                            {criticalSpeedTableYears.map((year) => (
+                              <td key={year}>
+                                {formatPaceFromSecPerKm(
+                                  row.paces_by_year?.[String(year)]?.pace_sec_per_km ?? null,
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </TableWrap>
                 </>
               ) : (
                 <EmptyState>Ingen Critical Speed-data ennå. Kjør synk/beregning for å fylle snapshot.</EmptyState>
@@ -613,7 +778,68 @@ export default function AnalyticsPage() {
 
           <Section>
             <Card>
-              <SectionTitle>Speed- og power-duration curve</SectionTitle>
+              <SectionTitle>Speed-duration – sammenligning siste 3 år</SectionTitle>
+              <SmallMeta>Beste registrerte fart per varighet.</SmallMeta>
+              {speedYearChartData.rows.length > 0 && speedYearChartData.yearKeys.length > 0 ? (
+                <>
+                  <SmallMeta>
+                    {speedYearComparison?.years
+                      .map((y) => `${y.year}: ${y.effort_count} effort`)
+                      .join(' · ')}
+                    {speedYearComparison?.calculated_at
+                      ? ` · beregnet ${formatDate(speedYearComparison.calculated_at)}`
+                      : ''}
+                  </SmallMeta>
+                  <ChartBox>
+                    <ResponsiveContainer width="100%" height={340}>
+                      <LineChart
+                        data={speedYearChartData.rows}
+                        margin={{ top: 12, right: 24, left: 4, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="duration_label" />
+                        <YAxis
+                          reversed
+                          width={76}
+                          domain={speedYearChartData.paceAxis.domain}
+                          ticks={speedYearChartData.paceAxis.ticks}
+                          allowDecimals={false}
+                          tick={{ fontSize: 12 }}
+                          tickFormatter={(value) => formatPaceFromSecPerKm(Number(value))}
+                        />
+                        <Tooltip
+                          formatter={(value: number, name: string) => [
+                            formatPaceFromSecPerKm(Number(value)),
+                            String(name).replace('pace_', ''),
+                          ]}
+                          labelFormatter={(label) => `Varighet: ${label}`}
+                        />
+                        <Legend />
+                        {speedYearChartData.yearKeys.map((year, index) => (
+                          <Line
+                            key={year}
+                            type="monotone"
+                            dataKey={`pace_${year}`}
+                            name={String(year)}
+                            stroke={YEAR_LINE_COLORS[index % YEAR_LINE_COLORS.length]}
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            connectNulls
+                          />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartBox>
+                </>
+              ) : (
+                <EmptyState>Ingen speed-duration-data for de siste tre årene.</EmptyState>
+              )}
+            </Card>
+          </Section>
+
+          <Section>
+            <Card>
+              <SectionTitle>Power-duration curve</SectionTitle>
               <Controls>
                 {(['all_time', 'last_90_days', 'last_365_days'] as DurationCurveScope[]).map((scope) => (
                   <FilterButton
@@ -624,19 +850,13 @@ export default function AnalyticsPage() {
                     {scope === 'all_time' ? 'All tid' : scope === 'last_90_days' ? '90 dager' : '365 dager'}
                   </FilterButton>
                 ))}
-                <FilterButton $active={curveMetric === 'speed'} onClick={() => setCurveMetric('speed')}>
-                  Speed
-                </FilterButton>
-                <FilterButton $active={curveMetric === 'power'} onClick={() => setCurveMetric('power')}>
-                  Power
-                </FilterButton>
               </Controls>
 
               {durationChartData.length > 0 ? (
                 <>
                   <SmallMeta>
-                    {activeCurve?.effort_count ?? 0} beste effort-punkter · beregnet{' '}
-                    {formatDate(activeCurve?.calculated_at)}
+                    {powerCurve?.effort_count ?? 0} beste effort-punkter · beregnet{' '}
+                    {formatDate(powerCurve?.calculated_at)}
                   </SmallMeta>
                   <ChartBox>
                     <ResponsiveContainer width="100%" height={320}>
@@ -645,20 +865,10 @@ export default function AnalyticsPage() {
                         <XAxis dataKey="duration_label" />
                         <YAxis
                           domain={['auto', 'auto']}
-                          tickFormatter={(value) => (
-                            curveMetric === 'speed'
-                              ? formatPaceFromMps(Number(value))
-                              : `${Math.round(Number(value))} W`
-                          )}
+                          tickFormatter={(value) => `${Math.round(Number(value))} W`}
                         />
                         <Tooltip
-                          formatter={(value: number, _name, item) => {
-                            if (curveMetric === 'speed') {
-                              const pace = item.payload?.pace as number | null | undefined;
-                              return [formatPaceFromSecPerKm(pace), 'Pace'];
-                            }
-                            return [`${Math.round(value)} W`, 'Power'];
-                          }}
+                          formatter={(value: number) => [`${Math.round(value)} W`, 'Power']}
                           labelFormatter={(label) => `Varighet: ${label}`}
                         />
                         <Line
@@ -674,9 +884,7 @@ export default function AnalyticsPage() {
                 </>
               ) : (
                 <EmptyState>
-                  {curveMetric === 'power'
-                    ? 'Ingen power-duration punkter for valgt periode (krever power i FIT-data).'
-                    : 'Ingen speed-duration punkter for valgt periode.'}
+                  Ingen power-duration punkter for valgt periode (krever power i FIT-data).
                 </EmptyState>
               )}
             </Card>

@@ -16,6 +16,9 @@ const apiClient = axios.create({
 /** Timeout for POST som kun returnerer 202 + jobb-id (server kan bruke tid før svar). */
 const SYNC_TRIGGER_TIMEOUT_MS = 120_000;
 
+/** Løpeanalyse kan trigge tung FIT-beregning ved recalculate=true. */
+const ANALYTICS_TIMEOUT_MS = 120_000;
+
 async function apiCall<T>(method: string, url: string, options: any = {}): Promise<T> {
   try {
     const lower = method.toLowerCase();
@@ -369,8 +372,27 @@ export interface AnalyticsListResponse<T> {
 export interface CriticalSpeedEffort {
   duration_seconds: number;
   speed_mps?: number;
+  pace_sec_per_km?: number | null;
   activity_id?: string;
   activity_name?: string;
+}
+
+export interface CriticalSpeedPaceByYearCell {
+  pace_sec_per_km: number | null;
+  speed_mps?: number | null;
+  activity_id?: string | null;
+  source?: 'year_best' | 'anchor_activity';
+}
+
+export interface CriticalSpeedPaceByYearRow {
+  duration_seconds: number;
+  paces_by_year: Record<string, CriticalSpeedPaceByYearCell | null>;
+}
+
+export interface CriticalSpeedPaceByYearResponse {
+  years: number[];
+  rows: CriticalSpeedPaceByYearRow[];
+  include_treadmill?: boolean;
 }
 
 export interface CriticalSpeedResponse {
@@ -380,6 +402,8 @@ export interface CriticalSpeedResponse {
   model_r2: number | null;
   model_quality: string;
   efforts?: CriticalSpeedEffort[];
+  include_treadmill?: boolean;
+  lookback_days?: number | null;
   calculated_at?: string | null;
   data_quality_score?: number | null;
 }
@@ -405,61 +429,121 @@ export interface DurationCurveResponse {
   calculated_at?: string | null;
 }
 
+export interface DurationCurveYearSeries {
+  year: number;
+  points: DurationCurvePoint[];
+  effort_count: number;
+}
+
+export interface DurationCurveYearComparisonResponse {
+  metric: DurationCurveMetric;
+  years: DurationCurveYearSeries[];
+  calculated_at?: string | null;
+}
+
 export interface AnalyticsQueryParams {
   days?: number;
   limit?: number;
+  includeTreadmill?: boolean;
 }
+
+const appendAnalyticsQuery = (search: URLSearchParams, params: AnalyticsQueryParams = {}) => {
+  if (params.days != null) search.append('days', String(params.days));
+  if (params.limit != null) search.append('limit', String(params.limit));
+  if (params.includeTreadmill) search.append('include_treadmill', 'true');
+};
 
 export const analyticsApi = {
   getEfficiencyTrends: (params: AnalyticsQueryParams = {}) => {
     const search = new URLSearchParams();
-    if (params.days != null) search.append('days', String(params.days));
-    if (params.limit != null) search.append('limit', String(params.limit));
+    appendAnalyticsQuery(search, params);
     const query = search.toString();
     return apiCall<AnalyticsListResponse<EfficiencyTrendItem>>(
       'get',
       `/analytics/efficiency${query ? `?${query}` : ''}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
     );
   },
 
   getDecouplingTrends: (params: AnalyticsQueryParams = {}) => {
     const search = new URLSearchParams();
-    if (params.days != null) search.append('days', String(params.days));
-    if (params.limit != null) search.append('limit', String(params.limit));
+    appendAnalyticsQuery(search, params);
     const query = search.toString();
     return apiCall<AnalyticsListResponse<DecouplingTrendItem>>(
       'get',
       `/analytics/decoupling${query ? `?${query}` : ''}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
     );
   },
 
-  getCriticalSpeed: (recalculate = false) =>
-    apiCall<CriticalSpeedResponse>(
+  getCriticalSpeedPaceByYear: (years = 3, includeTreadmill = false) => {
+    const search = new URLSearchParams();
+    search.append('years', String(years));
+    if (includeTreadmill) search.append('include_treadmill', 'true');
+    return apiCall<CriticalSpeedPaceByYearResponse>(
       'get',
-      `/analytics/critical-speed${recalculate ? '?recalculate=true' : ''}`,
-    ),
+      `/analytics/critical-speed/pace-by-year?${search.toString()}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
+    );
+  },
+
+  getCriticalSpeed: (recalculate = false, includeTreadmill = false) => {
+    const search = new URLSearchParams();
+    if (recalculate) search.append('recalculate', 'true');
+    if (includeTreadmill) search.append('include_treadmill', 'true');
+    const query = search.toString();
+    return apiCall<CriticalSpeedResponse>(
+      'get',
+      `/analytics/critical-speed${query ? `?${query}` : ''}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
+    );
+  },
 
   getFatigueResistance: (params: AnalyticsQueryParams = {}) => {
     const search = new URLSearchParams();
-    if (params.days != null) search.append('days', String(params.days));
-    if (params.limit != null) search.append('limit', String(params.limit));
+    appendAnalyticsQuery(search, params);
     const query = search.toString();
     return apiCall<AnalyticsListResponse<FatigueResistanceItem>>(
       'get',
       `/analytics/fatigue-resistance${query ? `?${query}` : ''}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
     );
   },
 
   getDurationCurve: (
     metric: DurationCurveMetric = 'speed',
     scope: DurationCurveScope = 'all_time',
+    includeTreadmill = false,
     recalculate = false,
   ) => {
     const search = new URLSearchParams();
     search.append('metric', metric);
     search.append('scope', scope);
+    if (includeTreadmill) search.append('include_treadmill', 'true');
     if (recalculate) search.append('recalculate', 'true');
-    return apiCall<DurationCurveResponse>('get', `/analytics/duration-curve?${search.toString()}`);
+    return apiCall<DurationCurveResponse>(
+      'get',
+      `/analytics/duration-curve?${search.toString()}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
+    );
+  },
+
+  getDurationCurveYearComparison: (
+    metric: DurationCurveMetric = 'speed',
+    years = 3,
+    includeTreadmill = false,
+    recalculate = false,
+  ) => {
+    const search = new URLSearchParams();
+    search.append('metric', metric);
+    search.append('years', String(years));
+    if (includeTreadmill) search.append('include_treadmill', 'true');
+    if (recalculate) search.append('recalculate', 'true');
+    return apiCall<DurationCurveYearComparisonResponse>(
+      'get',
+      `/analytics/duration-curve/year-comparison?${search.toString()}`,
+      { timeout: ANALYTICS_TIMEOUT_MS },
+    );
   },
 };
 

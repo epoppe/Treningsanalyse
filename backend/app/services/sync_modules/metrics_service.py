@@ -7,6 +7,7 @@ import logging
 from sqlalchemy import or_
 
 from ...database.models.activity import Activity, ActivityType
+from ...utils.activity_filters import is_running_activity
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class SyncMetricsService:
                     logger.warning(f"Feil ved beregning av TSS for aktivitet {activity_id}: {exc}")
                     results["errors"].append(f"TSS feil: {str(exc)}")
 
-            if activity.activity_type and activity.activity_type.type_key == "running":
+            if is_running_activity(activity):
                 if activity.average_power is None:
                     try:
                         from ..power_service import PowerService
@@ -66,7 +67,7 @@ class SyncMetricsService:
                         logger.warning(f"Feil ved beregning av power for aktivitet {activity_id}: {exc}")
                         results["errors"].append(f"Power feil: {str(exc)}")
 
-            if activity.activity_type and "running" in activity.activity_type.type_key:
+            if is_running_activity(activity):
                 if activity.running_economy is None:
                     try:
                         if (
@@ -84,7 +85,7 @@ class SyncMetricsService:
                         logger.warning(f"Feil ved beregning av løpsøkonomi for aktivitet {activity_id}: {exc}")
                         results["errors"].append(f"Running economy feil: {str(exc)}")
 
-            if activity.negative_split_percent is None:
+            if is_running_activity(activity) and activity.negative_split_percent is None:
                 try:
                     negative_split_result = self.sync_service.analysis_service.calculate_negative_split(
                         activity_id_int, self.sync_service.db
@@ -99,7 +100,7 @@ class SyncMetricsService:
                 except Exception as exc:
                     logger.debug(f"Kunne ikke beregne negative split for aktivitet {activity_id}: {exc}")
 
-            if (
+            if is_running_activity(activity) and (
                 activity.decoupling_percent is None
                 or activity.avg_efficiency_factor is None
                 or activity.decoupling_suitability_flag is None
@@ -120,25 +121,26 @@ class SyncMetricsService:
                 except Exception as exc:
                     logger.debug(f"Kunne ikke beregne EF/decoupling for aktivitet {activity_id}: {exc}")
 
-            try:
-                from ..performance_metrics_service import PerformanceMetricsService
+            if is_running_activity(activity):
+                try:
+                    from ..performance_metrics_service import PerformanceMetricsService
 
-                performance_service = PerformanceMetricsService(
-                    self.sync_service.db,
-                    self.sync_service.storage,
-                )
-                fatigue = performance_service.calculate_fatigue_resistance_for_activity(activity)
-                if fatigue:
-                    results["fatigue_resistance_calculated"] = True
-                    logger.info(
-                        "✅ Beregnet fatigue resistance for aktivitet %s: %s",
-                        activity_id,
-                        fatigue.get("fatigue_resistance_score"),
+                    performance_service = PerformanceMetricsService(
+                        self.sync_service.db,
+                        self.sync_service.storage,
                     )
-                performance_service.recalculate_performance_snapshots()
-                results["performance_snapshots_updated"] = True
-            except Exception as exc:
-                logger.debug(f"Kunne ikke oppdatere performance metrics for aktivitet {activity_id}: {exc}")
+                    fatigue = performance_service.calculate_fatigue_resistance_for_activity(activity)
+                    if fatigue:
+                        results["fatigue_resistance_calculated"] = True
+                        logger.info(
+                            "✅ Beregnet fatigue resistance for aktivitet %s: %s",
+                            activity_id,
+                            fatigue.get("fatigue_resistance_score"),
+                        )
+                    performance_service.recalculate_performance_snapshots()
+                    results["performance_snapshots_updated"] = True
+                except Exception as exc:
+                    logger.debug(f"Kunne ikke oppdatere performance metrics for aktivitet {activity_id}: {exc}")
 
             try:
                 if activity.start_time and activity.start_time.year >= 2023:

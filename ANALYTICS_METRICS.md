@@ -2,6 +2,8 @@
 
 Dette dokumentet beskriver formlene bak Efficiency Factor (EF) og aerobic decoupling i backend.
 
+**Aktivitetsfilter:** Løpeanalyse inkluderer kun utendørs-lignende løp: `running`, `trail_running`, `street_running` og `track_running`. Tredemølle, innendørs, langrenn, sykling og andre typer ekskluderes.
+
 ## Efficiency Factor (EF)
 
 Per sample:
@@ -68,13 +70,18 @@ Flagges som **unsuitable** ved:
 - `GET /api/activities/{id}/decoupling` — eksisterende decoupling-respons (uendret shape)
 - `GET /api/analytics/efficiency?days=&limit=` — trend/liste med lagrede EF-felt
 - `GET /api/analytics/decoupling?days=&limit=` — trend/liste med lagrede decoupling-felt
-- `GET /api/analytics/critical-speed` — siste lagrede Critical Speed snapshot
+- `GET /api/analytics/critical-speed?include_treadmill=false|true` — Critical Speed for utendørs løp eller utendørs + innendørs/tredemølle (kun løpeaktiviteter)
 - `GET /api/analytics/fatigue-resistance?days=&limit=` — per-aktivitet fatigue resistance for lagrede langturer
 - `GET /api/analytics/duration-curve?metric=speed|power&scope=all_time|last_90_days|last_365_days` — beste duration curve-punkter
 
 ## Critical Speed
 
-Critical Speed beregnes på tvers av løpeøkter fra beste snittfart for disse varighetene:
+GPS-spikes filtreres før beregning:
+
+- Enkelt-sample fart klippes til max(median × 2,5, 8,5 m/s) per aktivitet
+- Beste snittfart per vindu må ligge under varighetsavhengig tak (f.eks. max 8,0 m/s på 3 min, 6,5 m/s på 30 min)
+
+Critical Speed beregnes fra **siste 12 måneder** (365 dager) på tvers av løpeøkter, fra beste snittfart for disse varighetene:
 
 - 3 min
 - 6 min
@@ -113,15 +120,17 @@ Tidlig del sammenlignes med sen del:
 
 ## Speed-/Power-Duration Curve
 
+**Årssammenligning:** `GET /api/analytics/duration-curve/year-comparison?metric=speed&years=3` returnerer beste speed-punkter per kalenderår (siste tre år som standard) for én graf med flere linjer.
+
 Duration curve bruker disse varighetene:
 
-- 5 s
 - 30 s
 - 1 min
 - 3 min
 - 5 min
 - 10 min
 - 20 min
+- 40 min
 - 60 min
 
 For hver varighet lagres beste kjente punkt for:
