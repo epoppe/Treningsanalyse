@@ -1,13 +1,44 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import styled from 'styled-components';
-import { format, subDays, startOfDay, endOfDay } from 'date-fns';
+import { useState, useRef, useEffect } from 'react';
+import styled, { keyframes } from 'styled-components';
+import { format, subDays } from 'date-fns';
 import { nb } from 'date-fns/locale';
 import { api } from '../../utils/api';
 import CacheCalculationPanel from '../../components/CacheCalculationPanel';
 import { useAppDispatch } from '@/store/hooks';
 import { fetchActivities, fetchMoreActivities, fetchActivityCount } from '@/store/slices/activitiesSlice';
+import { jobTypeLabel, syncStatusLabel } from '@/utils/syncJobLabels';
+import type { SyncJobStatusResponse } from '@/types/syncJob';
+import { messageFromApiError } from '@/utils/httpErrorMessage';
+
+/** Fjerner jobbkort fra listen etter terminaltilstand (lesbar tid for feilmeldinger). */
+const REMOVE_JOB_AFTER_MS = {
+  completed: 14_000,
+  failed: 48_000,
+  not_found: 8_000,
+} as const;
+
+function parseLocalYmd(ymd: string): Date {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function validateDateRange(start: string, end: string): string | null {
+  if (!start?.trim() || !end?.trim()) return 'Velg både fra- og til-dato.';
+  if (parseLocalYmd(start) > parseLocalYmd(end)) return 'Fra-dato kan ikke være etter til-dato.';
+  return null;
+}
+
+const ErrorBanner = styled.div`
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  background: #fdecea;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+  font-size: 0.95rem;
+`;
 
 const Container = styled.div`
   max-width: 1200px;
@@ -35,33 +66,6 @@ const SectionTitle = styled.h2`
   font-size: 1.5rem;
 `;
 
-const Button = styled.button<{ $primary?: boolean; $danger?: boolean; $disabled?: boolean }>`
-  background-color: ${props => {
-    if (props.$disabled) return '#bdc3c7';
-    if (props.$danger) return '#e74c3c';
-    if (props.$primary) return '#3498db';
-    return '#ecf0f1';
-  }};
-  color: ${props => props.$disabled ? '#7f8c8d' : 'white'};
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 4px;
-  cursor: ${props => props.$disabled ? 'not-allowed' : 'pointer'};
-  font-size: 1rem;
-  margin-right: 1rem;
-  margin-bottom: 1rem;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background-color: ${props => {
-      if (props.$disabled) return '#bdc3c7';
-      if (props.$danger) return '#c0392b';
-      if (props.$primary) return '#2980b9';
-      return '#d5dbdb';
-    }};
-  }
-`;
-
 const StatusContainer = styled.div`
   margin-top: 1rem;
   padding: 1rem;
@@ -76,27 +80,41 @@ const StatusText = styled.div<{ $status: string }>`
       case 'completed': return '#27ae60';
       case 'failed': return '#e74c3c';
       case 'processing': return '#f39c12';
+      case 'queued': return '#e67e22';
       default: return '#7f8c8d';
     }
   }};
   font-weight: 500;
 `;
 
-const ProgressBar = styled.div<{ $progress: number }>`
+const indeterminateMove = keyframes`
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+`;
+
+/** Ubestemt fremdrift (ingen falsk prosent) */
+const IndeterminateProgress = styled.div`
   width: 100%;
   height: 8px;
   background-color: #ecf0f1;
   border-radius: 4px;
   overflow: hidden;
   margin-top: 0.5rem;
+  position: relative;
 
   &::after {
     content: '';
-    display: block;
-    height: 100%;
-    width: ${props => props.$progress}%;
-    background-color: #3498db;
-    transition: width 0.3s ease;
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 35%;
+    background: linear-gradient(90deg, transparent, #3498db 40%, #2980b9 60%, transparent);
+    animation: ${indeterminateMove} 1.4s ease-in-out infinite;
   }
 `;
 
@@ -160,56 +178,64 @@ const DangerButton = styled.button<{ $disabled?: boolean }>`
   }
 `;
 
-const ButtonContainer = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  margin-top: 1rem;
-`;
-
-const DateRangeContainer = styled.div`
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-`;
-
-const SyncButton = styled(Button)`
-  width: 100%;
-  padding: 0.75rem 1.5rem;
-  font-size: 1rem;
-  font-weight: 500;
-  min-width: 200px;
-`;
-
-interface SyncJob {
-  status: string;
-  message?: string;
-  result?: any;
-  error?: string;
-  start_time?: string;
-  end_time?: string;
-}
-
 export default function SynkroniseringPage() {
   const [startDate, setStartDate] = useState(format(subDays(new Date(), 7), 'yyyy-MM-dd'));
   const [endDate, setEndDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [activeJobs, setActiveJobs] = useState<Record<string, SyncJob>>({});
+  const [activeJobs, setActiveJobs] = useState<Record<string, SyncJobStatusResponse>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [syncActionError, setSyncActionError] = useState<string | null>(null);
   const dispatch = useAppDispatch();
+  const removeJobTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const startSync = async (syncFunction: () => Promise<any>, jobId?: string) => {
+  useEffect(() => () => {
+    removeJobTimeoutsRef.current.forEach(clearTimeout);
+    removeJobTimeoutsRef.current.clear();
+  }, []);
+
+  const scheduleRemoveJobFromList = (id: string, delayMs: number) => {
+    const prev = removeJobTimeoutsRef.current.get(id);
+    if (prev) clearTimeout(prev);
+    const t = setTimeout(() => {
+      removeJobTimeoutsRef.current.delete(id);
+      setActiveJobs(jobs => {
+        if (!(id in jobs)) return jobs;
+        const next = { ...jobs };
+        delete next[id];
+        return next;
+      });
+    }, delayMs);
+    removeJobTimeoutsRef.current.set(id, t);
+  };
+
+  const startSync = async (syncFunction: () => Promise<any>) => {
+    setSyncActionError(null);
     setIsLoading(true);
     try {
       const result = await syncFunction();
       if (result?.job_id) {
+        const initialStatus =
+          result.status === 'queued' || result.status === 'processing' ? result.status : 'processing';
         setActiveJobs(prev => ({
           ...prev,
-          [result.job_id]: { status: 'processing', start_time: new Date().toISOString() }
+          [result.job_id]: {
+            status: initialStatus,
+            start_time: new Date().toISOString(),
+            job_type: result.job_type,
+            job_id: result.job_id,
+            message: typeof result.message === 'string' ? result.message : undefined,
+          },
         }));
         pollJobStatus(result.job_id);
+      } else {
+        setSyncActionError(
+          typeof result?.message === 'string'
+            ? result.message
+            : 'Server returnerte ikke jobb-id. Sjekk at backend kjører og prøv igjen.',
+        );
       }
     } catch (error) {
       console.error('Synkroniseringsfeil:', error);
+      setSyncActionError(messageFromApiError(error));
     } finally {
       setIsLoading(false);
     }
@@ -221,28 +247,34 @@ export default function SynkroniseringPage() {
         const status = await api.getSyncStatus(jobId);
         setActiveJobs(prev => ({
           ...prev,
-          [jobId]: status
+          [jobId]: {
+            ...prev[jobId],
+            ...status,
+            job_id: status.job_id ?? jobId,
+          },
         }));
 
-        if (status.status === 'processing') {
+        if (status.status === 'processing' || status.status === 'queued') {
           setTimeout(poll, 2000); // Poll hver 2. sekund
         } else if (status.status === 'completed') {
           console.log('[Synkronisering] Synkronisering fullført, triggerer oppdatering av aktiviteter...');
-          // Trigger oppdatering av aktiviteter på alle sider ved å sende en custom event
-          window.dispatchEvent(new CustomEvent('syncCompleted', { 
-            detail: { jobId, status } 
+          window.dispatchEvent(new CustomEvent('syncCompleted', {
+            detail: { jobId, status },
           }));
 
-          // Oppdater også aktivitetstilstanden direkte i Redux,
-          // slik at aktivitetslisten er oppdatert neste gang du åpner forsiden.
-          // Hent først de første 100 for rask visning (inkluderer flere nye aktiviteter)
           dispatch(fetchActivities({ forceRefresh: true, limit: 100 }));
           dispatch(fetchActivityCount());
           setTimeout(() => {
-            // Hent alle resterende aktiviteter (opp til 5000)
             console.log('[Synkronisering] Henter resten av aktivitetene...');
             dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 100 }));
           }, 1500);
+          scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.completed);
+        } else if (status.status === 'failed') {
+          scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.failed);
+        } else if (status.status === 'not_found') {
+          scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.not_found);
+        } else {
+          console.warn('[Synkronisering] Uventet jobbstatus, stopper polling:', status.status);
         }
       } catch (error) {
         console.error('Feil ved polling av jobb-status:', error);
@@ -256,34 +288,34 @@ export default function SynkroniseringPage() {
   };
 
   const syncSelectedPeriod = () => {
-    startSync(() => api.fullSyncBody(startDate, endDate));
+    const rangeErr = validateDateRange(startDate, endDate);
+    if (rangeErr) {
+      setSyncActionError(rangeErr);
+      return;
+    }
+    startSync(() => api.syncActivitiesForPeriod(startDate, endDate));
   };
 
   const syncAll = () => {
-    // Synkroniser aktiviteter fra 2008, helsedata fra 2020
+    // Full synk: aktiviteter fra 2008, helsedata fra 2020 (håndteres i backend)
     const end = new Date();
-    const start = new Date(2008, 0, 1); // 1. januar 2008 for aktiviteter og FIT-data
+    const start = new Date(2008, 0, 1);
     const startStr = format(start, 'yyyy-MM-dd');
     const endStr = format(end, 'yyyy-MM-dd');
-    startSync(() => api.fullSyncBody(startStr, endStr));
+    startSync(() => api.fullSyncForPeriod(startStr, endStr));
   };
 
   const syncBodyBattery = () => {
+    const rangeErr = validateDateRange(startDate, endDate);
+    if (rangeErr) {
+      setSyncActionError(rangeErr);
+      return;
+    }
     startSync(() => api.syncBodyBatteryData(startDate, endDate));
   };
 
   const refreshTrainingEffect = () => {
     startSync(() => api.refreshTrainingEffect(false));
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'completed': return 'Fullført';
-      case 'failed': return 'Feilet';
-      case 'processing': return 'Behandler';
-      case 'queued': return 'I kø';
-      default: return 'Ukjent';
-    }
   };
 
   return (
@@ -296,19 +328,27 @@ export default function SynkroniseringPage() {
       {/* All Sync Options in One Row */}
       <SyncSection>
         <SectionTitle>Synkronisering</SectionTitle>
+        {syncActionError && (
+          <ErrorBanner role="alert">{syncActionError}</ErrorBanner>
+        )}
+        <p style={{ marginBottom: '1rem', color: '#566573', maxWidth: '52rem' }}>
+          Velg datointervall under for handlinger som gjelder en periode. «Aktiviteter for periode» henter kun treningsøkter
+          og FIT fra Garmin for intervallet — raskere enn full synk. «Full synkronisering» oppdaterer også helse, TE, HRV,
+          Body Battery og kjører beregninger for perioden.
+        </p>
         <QuickActions>
           <QuickActionButton 
             onClick={syncNewActivities}
             disabled={isLoading}
           >
-            Synk nye aktiviteter
+            Synk nye (fra siste økt)
           </QuickActionButton>
           
           <QuickActionButton 
             onClick={syncSelectedPeriod}
             disabled={isLoading}
           >
-            Synk valgt periode
+            Aktiviteter for periode
           </QuickActionButton>
           
           <QuickActionButton 
@@ -329,7 +369,7 @@ export default function SynkroniseringPage() {
             onClick={syncAll}
             disabled={isLoading}
           >
-            Synk alle
+            Full synkronisering (bred historikk)
           </DangerButton>
         </QuickActions>
         
@@ -354,7 +394,8 @@ export default function SynkroniseringPage() {
         </div>
         
         <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
-          ⚠️ &quot;Synk alle&quot; vil synkronisere aktiviteter og FIT-data fra 2008, helsedata fra 2020. Kan ta lang tid.
+          ⚠️ «Full synkronisering» bruker aktiviteter/FIT fra 2008 til i dag; helse-relaterte data begrenses internt til 2020→
+          (som i backend). Forvent lang kjøretid.
         </p>
       </SyncSection>
 
@@ -364,15 +405,18 @@ export default function SynkroniseringPage() {
           <SectionTitle>Aktive Synkroniseringsjobber</SectionTitle>
           {Object.entries(activeJobs).map(([jobId, job]) => (
             <StatusContainer key={jobId}>
+              <div style={{ marginBottom: '0.35rem' }}>
+                <strong>Type:</strong> {jobTypeLabel(job.job_type)}
+              </div>
               <div>
                 <strong>Jobb ID:</strong> {jobId.substring(0, 8)}...
               </div>
               <StatusText $status={job.status}>
-                Status: {getStatusText(job.status)}
+                Status: {syncStatusLabel(job.status)}
               </StatusText>
               {job.message && (
                 <div style={{ marginTop: '0.5rem' }}>
-                  <strong>Melding:</strong> {job.message}
+                  <strong>Fase / melding:</strong> {job.message}
                 </div>
               )}
               {job.error && (
@@ -380,8 +424,8 @@ export default function SynkroniseringPage() {
                   <strong>Feil:</strong> {job.error}
                 </div>
               )}
-              {job.status === 'processing' && (
-                <ProgressBar $progress={50} />
+              {(job.status === 'processing' || job.status === 'queued') && (
+                <IndeterminateProgress aria-label="Jobb kjører" />
               )}
               {job.start_time && (
                 <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
@@ -420,11 +464,12 @@ export default function SynkroniseringPage() {
           
           <p><strong>Tips:</strong></p>
           <ul>
-            <li><strong>&quot;Synk nye aktiviteter&quot;</strong> er den enkleste måten å holde data oppdatert - den finner automatisk siste aktivitet og synker fra den datoen</li>
-            <li><strong>&quot;Synk valgt periode&quot;</strong> for å synkronisere en spesifikk tidsperiode</li>
-            <li><strong>&quot;Synk alle&quot;</strong> for full synkronisering av alle aktiviteter fra 2008 og helsedata fra 2020 (kan ta lang tid)</li>
-            <li>Du kan lukke denne siden - synkroniseringen fortsetter i bakgrunnen</li>
-            <li>Sjekk status på jobbene nedenfor for å følge fremgangen</li>
+            <li><strong>«Synk nye (fra siste økt)»</strong> finner siste lagrede aktivitet og oppdaterer derfra til nå — inkluderer aktivitet, FIT, helse og TE (tilsvarende en «hent alt nytt»-jobb)</li>
+            <li><strong>«Aktiviteter for periode»</strong> er for et valgt datointervall: kun aktiviteter og FIT (raskere enn full synk)</li>
+            <li><strong>«Full synkronisering (bred historikk)»</strong> kjører full pipeline for en lang periode (aktivitet fra 2008, helse fra 2020 internt) — bruk med omtanke</li>
+            <li>Du kan lukke denne siden — jobben kjører på serveren; status vises helt til den er ferdig i denne økten</li>
+            <li>Under «Fase / melding» vises serverens nåværende steg (ikke en nøyaktig prosent)</li>
+            <li>Fullførte jobber forsvinner fra listen etter noen sekunder; feilede jobber vises lenger slik at du rekker å lese feilen</li>
           </ul>
         </div>
       </SyncSection>

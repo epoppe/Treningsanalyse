@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Activity } from '../types';
+import type { SyncJobStatusResponse } from '../types/syncJob';
 
 // Bruk relativ URL slik at Next.js proxy (rewrite) sender til backend – unngår CORS
 export const BASE_URL = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
@@ -12,17 +13,28 @@ const apiClient = axios.create({
   timeout: 15000,
 });
 
+/** Timeout for POST som kun returnerer 202 + jobb-id (server kan bruke tid før svar). */
+const SYNC_TRIGGER_TIMEOUT_MS = 120_000;
+
 async function apiCall<T>(method: string, url: string, options: any = {}): Promise<T> {
   try {
     const lower = method.toLowerCase();
     const hasExplicitBody = options && Object.prototype.hasOwnProperty.call(options, 'body');
-    const data = hasExplicitBody
-      ? options.body
-      : (lower === 'post' || lower === 'put' || lower === 'patch')
-        ? (Object.keys(options || {}).length > 0 && !options.params ? options : undefined)
-        : undefined;
-    const params = options?.params;
     const timeout = options?.timeout;
+    const params = options?.params;
+
+    let data: unknown;
+    if (hasExplicitBody) {
+      data = options.body;
+    } else if (lower === 'post' || lower === 'put' || lower === 'patch') {
+      const payload = { ...(options || {}) };
+      delete payload.timeout;
+      delete payload.params;
+      delete payload.body;
+      data = Object.keys(payload).length ? payload : undefined;
+    } else {
+      data = undefined;
+    }
 
     const response = await apiClient({
       url,
@@ -221,21 +233,6 @@ export const activitiesApi = {
     return response.data;
   },
 
-  // Start synkronisering av aktiviteter for en periode
-  syncActivities: async (startDate: string, endDate: string) => {
-    // Konverter ISO-datoer til YYYY-MM-DD format for Pydantic
-    const formatDate = (dateStr: string) => {
-      return dateStr.split('T')[0];  // Fjern tidspart og behold bare YYYY-MM-DD
-    };
-    
-    const response = await apiClient.post<ApiResponse<any>>('/sync/activities', {
-      start_date: formatDate(startDate),
-      end_date: formatDate(endDate),
-      ignore_sync_state: true  // Ignorer SyncState for å tillate synkronisering av historiske data
-    });
-    return response.data;
-  },
-
   // Training Readiness API
   getTrainingReadiness: async (date?: string) => {
     const timestamp = new Date().getTime();
@@ -387,13 +384,32 @@ export const analysisApi = {
 };
 
 export const syncApi = {
-  // --- Aktiviteter ---
-  syncActivities: (startDate: string, endDate: string) => apiCall('post', '/sync/activities', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
-  syncNewActivities: () => apiCall('post', '/sync/new-activities'),
-  syncAllActivities: () => apiCall('post', '/sync/full-sync'),
-  fullSync: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
-  // Sender data direkte til apiCall (IKKE wrappet i body)
-  fullSyncBody: (startDate: string, endDate: string) => apiCall('post', '/sync/full-sync', { start_date: startDate, end_date: endDate, ignore_sync_state: true }),
+  /**
+   * Aktiviteter + FIT for datointervall (POST /sync/activities).
+   * Tar ikke med full helsesynk/TE/HRV som «full»-jobben.
+   */
+  syncActivitiesForPeriod: (startDate: string, endDate: string) =>
+    apiCall('post', '/sync/activities', {
+      start_date: startDate,
+      end_date: endDate,
+      ignore_sync_state: true,
+      timeout: SYNC_TRIGGER_TIMEOUT_MS,
+    }),
+
+  /** Nye aktiviteter fra siste lagrede aktivitet + tilhørende helse/TE/BB (tung jobb). */
+  syncNewActivities: () =>
+    apiCall('post', '/sync/new-activities', { timeout: SYNC_TRIGGER_TIMEOUT_MS }),
+
+  /**
+   * Full synkronisering for periode: aktivitet, FIT, helse, TE, HRV, Body Battery, beregninger (POST /sync/full-sync).
+   */
+  fullSyncForPeriod: (startDate: string, endDate: string) =>
+    apiCall('post', '/sync/full-sync', {
+      start_date: startDate,
+      end_date: endDate,
+      ignore_sync_state: true,
+      timeout: SYNC_TRIGGER_TIMEOUT_MS,
+    }),
   
   // --- HRV ---
   syncHrvData: (startDate?: string, endDate?: string) => {
@@ -402,12 +418,14 @@ export const syncApi = {
     if (endDate) params.append('end_date', endDate);
     const queryString = params.toString();
     const url = `/sync/hrv-sync${queryString ? `?${queryString}` : ''}`;
-    return apiCall('post', url);
+    return apiCall('post', url, { timeout: SYNC_TRIGGER_TIMEOUT_MS });
   },
   
   // --- Training Effect (aerob/anaerob effekt) ---
   refreshTrainingEffect: (force?: boolean) =>
-    apiCall('post', `/sync/training-effect/refresh${force ? '?force=true' : ''}`),
+    apiCall('post', `/sync/training-effect/refresh${force ? '?force=true' : ''}`, {
+      timeout: SYNC_TRIGGER_TIMEOUT_MS,
+    }),
 
   // --- Body Battery ---
   syncBodyBatteryData: (startDate?: string, endDate?: string) => {
@@ -416,21 +434,20 @@ export const syncApi = {
     if (endDate) params.append('end_date', endDate);
     const queryString = params.toString();
     const url = `/sync/body-battery-sync${queryString ? `?${queryString}` : ''}`;
-    return apiCall('post', url);
+    return apiCall('post', url, { timeout: SYNC_TRIGGER_TIMEOUT_MS });
   },
   
   // --- Jobb-status ---
-  getSyncStatus: async (jobId: string) => {
+  getSyncStatus: async (jobId: string): Promise<SyncJobStatusResponse> => {
     try {
-      const response = await apiClient.get<any>(`/sync/status/${jobId}`);
+      const response = await apiClient.get<SyncJobStatusResponse>(`/sync/status/${jobId}`);
       return response.data;
     } catch (error: any) {
       if (error.response?.status === 404) {
-        // Jobb ikke funnet - returner en standard status
         return {
-          status: "not_found",
-          message: "Synkroniseringsjobb ikke funnet (kan være fullført eller slettet)",
-          job_id: jobId
+          status: 'not_found',
+          message: 'Synkroniseringsjobb ikke funnet (kan være fullført eller slettet)',
+          job_id: jobId,
         };
       }
       throw error;

@@ -139,7 +139,7 @@ class SyncMetricsService:
                 logger.debug("Ingen lactate threshold verdi tilgjengelig fra Garmin, hopper over oppdatering")
                 return
             logger.info(
-                f"🔍 Sjekker lactate threshold oppdatering. Nåværende verdi fra Garmin: {current_lactate_threshold} m/s"
+                f"🔍 Sjekker manglende lactate threshold verdier. Nåværende verdi fra Garmin: {current_lactate_threshold} m/s"
             )
 
             running_activities = (
@@ -162,16 +162,16 @@ class SyncMetricsService:
 
             activities_to_update = []
             for activity in running_activities:
-                if activity.lactate_threshold_speed is None or abs(activity.lactate_threshold_speed - current_lactate_threshold) > 0.0001:
+                if activity.lactate_threshold_speed is None:
                     activities_to_update.append(activity)
             if not activities_to_update:
                 logger.debug(
-                    f"Alle {len(running_activities)} løpeaktiviteter har allerede riktig lactate threshold verdi ({current_lactate_threshold} m/s)"
+                    f"Ingen løpeaktiviteter mangler lactate threshold verdi. Bevarer eksisterende historiske verdier ({current_lactate_threshold} m/s nåverdi)"
                 )
                 return
 
             logger.info(
-                f"📝 Oppdaterer lactate threshold for {len(activities_to_update)} løpeaktiviteter til {current_lactate_threshold} m/s"
+                f"📝 Fyller inn lactate threshold for {len(activities_to_update)} løpeaktiviteter til {current_lactate_threshold} m/s"
             )
             updated_count = 0
             for activity in activities_to_update:
@@ -189,4 +189,3 @@ class SyncMetricsService:
             logger.error(f"Feil ved oppdatering av lactate threshold for løpeaktiviteter: {exc}", exc_info=True)
             self.sync_service.db.rollback()
             raise
-

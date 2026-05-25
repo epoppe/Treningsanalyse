@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
@@ -71,7 +71,7 @@ class HRVService:
                         existing_hrv.rmssd = row.get('last_night_avg')
                         existing_hrv.measurement_time = measurement_date
                         existing_hrv.measurement_type = 'during_sleep'
-                        existing_hrv.updated_at = datetime.utcnow()
+                        existing_hrv.updated_at = datetime.now(timezone.utc)
                         skipped_count += 1
                     else:
                         # Opprett ny record
@@ -80,8 +80,8 @@ class HRVService:
                             measurement_time=measurement_date,
                             rmssd=row.get('last_night_avg'),
                             measurement_type='during_sleep',
-                            created_at=datetime.utcnow(),
-                            updated_at=datetime.utcnow()
+                            created_at=datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc)
                         )
                         db.add(new_hrv)
                         synced_count += 1

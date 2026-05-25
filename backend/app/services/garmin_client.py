@@ -1398,6 +1398,69 @@ class GarminClient:
             logger.error(f"Feil ved henting av metrics sammendrag for {date_str}: {e}")
             return {"date": date_str, "metrics": {}}
 
+    async def get_lactate_threshold_info(self) -> Optional[Dict[str, Any]]:
+        """Henter terskelinfo fra Garmin, med fallback til konfigurasjon ved behov."""
+        try:
+            raw_speed = None
+            heart_rate = None
+
+            if self.is_authenticated():
+                logger.info("Henter lactate threshold speed fra Garmin Connect")
+
+                try:
+                    import garth
+                    user_settings = await asyncio.to_thread(garth.UserSettings.get)
+
+                    if hasattr(user_settings, 'user_data') and user_settings.user_data:
+                        user_data = user_settings.user_data
+                        raw_speed = getattr(user_data, 'lactate_threshold_speed', None)
+                        heart_rate = getattr(user_data, 'lactate_threshold_heart_rate', None)
+                        if raw_speed is not None:
+                            logger.info(f"Lactate threshold speed hentet fra Garmin: {raw_speed} (råverdi)")
+                            normalized_speed = self._normalize_lactate_threshold_speed(raw_speed)
+                            if normalized_speed is not None:
+                                logger.info(
+                                    f"Lactate threshold speed normalisert fra Garmin-råverdi {raw_speed} "
+                                    f"til {normalized_speed} m/s"
+                                )
+                                return {
+                                    "speed_mps": normalized_speed,
+                                    "heart_rate_bpm": heart_rate,
+                                    "raw_speed_mps": raw_speed,
+                                    "source": "garmin_connect",
+                                    "is_fallback": False,
+                                }
+                            logger.warning(
+                                f"Lactate threshold speed {raw_speed} fra Garmin kunne ikke normaliseres "
+                                "til et forventet m/s-område. Bruker fallback fra konfigurasjon."
+                            )
+                        else:
+                            logger.warning("Lactate threshold speed ikke tilgjengelig i user_data")
+                    else:
+                        logger.warning("user_data ikke tilgjengelig")
+
+                except Exception as e:
+                    logger.warning(f"Kunne ikke hente lactate threshold speed via garth.UserSettings.get(): {e}")
+            else:
+                logger.warning("Garmin-klient ikke autentisert")
+
+            if settings.LACTATE_THRESHOLD_SPEED is not None:
+                logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
+                return {
+                    "speed_mps": settings.LACTATE_THRESHOLD_SPEED,
+                    "heart_rate_bpm": heart_rate,
+                    "raw_speed_mps": raw_speed,
+                    "source": "config_fallback",
+                    "is_fallback": True,
+                }
+
+            logger.info("Ingen lactate threshold speed tilgjengelig fra Garmin eller konfigurasjon")
+            return None
+
+        except Exception as e:
+            logger.error(f"Uventet feil ved henting av lactate threshold speed: {e}")
+            return None
+
     async def get_lactate_threshold_speed(self) -> Optional[float]:
         """
         Henter lactate threshold speed fra Garmin Connect eller konfigurasjon.
@@ -1405,50 +1468,28 @@ class GarminClient:
         Returns:
             Optional[float]: Lactate threshold speed i m/s, eller None hvis ikke tilgjengelig
         """
+        info = await self.get_lactate_threshold_info()
+        return info.get("speed_mps") if info else None
+
+    @staticmethod
+    def _normalize_lactate_threshold_speed(raw_speed: Any) -> Optional[float]:
+        """Normaliserer Garmin-råverdi for terskelfart til m/s."""
         try:
-            if not self.is_authenticated():
-                logger.warning("Garmin-klient ikke autentisert")
-                # Sjekk konfigurasjon som fallback
-                if settings.LACTATE_THRESHOLD_SPEED is not None:
-                    logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
-                    return settings.LACTATE_THRESHOLD_SPEED
-                return None
-            
-            logger.info("Henter lactate threshold speed fra Garmin Connect")
-            
-            # Prøv å bruke garth.UserSettings.get() direkte
-            try:
-                import garth
-                user_settings = await asyncio.to_thread(garth.UserSettings.get)
-                
-                if hasattr(user_settings, 'user_data') and user_settings.user_data:
-                    user_data = user_settings.user_data
-                    lactate_speed = getattr(user_data, 'lactate_threshold_speed', None)
-                    if lactate_speed is not None:
-                        logger.info(f"Lactate threshold speed hentet fra Garmin: {lactate_speed} (råverdi)")
-                        if 2.0 <= lactate_speed <= 6.0:
-                            logger.info(f"Lactate threshold speed ({lactate_speed} m/s) er innenfor forventet område, returnerer verdi")
-                            return lactate_speed
-                        logger.warning(
-                            f"Lactate threshold speed {lactate_speed} m/s fra Garmin er utenfor forventet intervall "
-                            "(2.0 - 6.0 m/s). Bruker fallback fra konfigurasjon."
-                        )
-                    else:
-                        logger.warning("Lactate threshold speed ikke tilgjengelig i user_data")
-                else:
-                    logger.warning("user_data ikke tilgjengelig")
-                    
-            except Exception as e:
-                logger.warning(f"Kunne ikke hente lactate threshold speed via garth.UserSettings.get(): {e}")
-                
-            # Fallback til konfigurasjon
-            if settings.LACTATE_THRESHOLD_SPEED is not None:
-                logger.info(f"Bruker konfigurert lactate threshold speed: {settings.LACTATE_THRESHOLD_SPEED} m/s")
-                return settings.LACTATE_THRESHOLD_SPEED
-            else:
-                logger.info("Ingen lactate threshold speed tilgjengelig fra Garmin eller konfigurasjon")
-                return None
-                    
-        except Exception as e:
-            logger.error(f"Uventet feil ved henting av lactate threshold speed: {e}")
+            speed = float(raw_speed)
+        except (TypeError, ValueError):
             return None
+
+        if speed <= 0:
+            return None
+
+        if 2.0 <= speed <= 6.0:
+            return speed
+
+        # Garmin user-settings kan returnere terskelfart i en komprimert desimalform
+        # som må skaleres opp til m/s for å samsvare med pace i Garmin UI.
+        if 0.2 <= speed <= 0.7:
+            normalized_speed = speed * 10.0
+            if 2.0 <= normalized_speed <= 6.0:
+                return normalized_speed
+
+        return None

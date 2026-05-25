@@ -7,7 +7,7 @@ import sys
 import os
 import asyncio
 from pathlib import Path
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 
 # Add the backend directory to the Python path
 sys.path.append(str(Path(__file__).parent))
@@ -74,7 +74,7 @@ async def update_hrv_baselines():
                     if hrv_summary.get('status'):
                         hrv_record.status = hrv_summary.get('status')
                     
-                    hrv_record.updated_at = datetime.utcnow()
+                    hrv_record.updated_at = datetime.now(timezone.utc)
                     updated_count += 1
                     
                     if updated_count % 10 == 0:
@@ -104,4 +104,3 @@ async def update_hrv_baselines():
 if __name__ == "__main__":
     success = asyncio.run(update_hrv_baselines())
     sys.exit(0 if success else 1)
-

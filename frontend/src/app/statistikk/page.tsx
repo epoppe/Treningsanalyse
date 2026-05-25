@@ -377,7 +377,7 @@ const StatistikkPage = () => {
     } catch (error) {
       console.error('[Statistikk] Feil ved oppdatering av sammendragstabeller:', error);
     }
-  }, [dispatch, activities]);
+  }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser
   useSyncListener(handleSyncComplete);
@@ -415,7 +415,7 @@ const StatistikkPage = () => {
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
-  }, [dispatch, activities.length]);
+  }, [dispatch, activities]);
 
   useEffect(() => {
     if (status === 'idle') {

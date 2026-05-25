@@ -44,6 +44,10 @@ const monthNames = [
 export default function MonthlyComparisonChart({ activities, metric, title, useServerSummaries = true, activityTypes = [] }: MonthlyComparisonChartProps) {
   const [serverData, setServerData] = useState<any[] | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const years = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    return Array.from({ length: currentYear - 2022 + 1 }, (_, index) => 2022 + index);
+  }, []);
 
   // Hent månedlige sammendrag fra server (2022 -> nå)
   useEffect(() => {
@@ -76,14 +80,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
       }
     };
     fetchSummaries();
-  }, [useServerSummaries, JSON.stringify(activityTypes)]);
-
-  // Vis data fra 2022 til inneværende år
-  const currentYear = new Date().getFullYear();
-  const years: number[] = [];
-  for (let year = 2022; year <= currentYear; year++) {
-    years.push(year);
-  }
+  }, [useServerSummaries, activityTypes]);
   
   // Bygg datastruktur enten fra server-sammendrag eller fra aktiviteter
   const monthlyData: { [key: string]: { [year: number]: number } } = useMemo(() => {
@@ -130,7 +127,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
     }
 
     return base;
-  }, [useServerSummaries, JSON.stringify(serverData), JSON.stringify(activities), metric]);
+  }, [activities, metric, serverData, useServerSummaries, years]);
 
   // Debug logging
   console.log(`[MonthlyComparisonChart] ${title}: source=${useServerSummaries && serverData ? 'server' : 'client'}, years=${years.length}`);

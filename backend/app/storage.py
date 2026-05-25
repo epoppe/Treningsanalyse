@@ -1,4 +1,5 @@
 import os
+import importlib.util
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -101,9 +102,7 @@ class DataStorage:
                 df = df.copy()
                 for col in df.columns:
                     try:
-                        import pandas as pd  # local import for safety
-                        from pandas.api.types import is_period_dtype
-                        if is_period_dtype(df[col]):
+                        if isinstance(df[col].dtype, pd.PeriodDtype):
                             df[col] = df[col].astype(str)
                     except Exception:
                         pass
@@ -116,11 +115,10 @@ class DataStorage:
                     pass
             except Exception:
                 pass
-            # Bruk fastparquet som primær motor for å unngå kjente pyarrow type extension-problemer
-            try:
+            # Bruk fastparquet når tilgjengelig, ellers pyarrow uten støyende fallback-warning.
+            if importlib.util.find_spec("fastparquet") is not None:
                 df.to_parquet(file_path, engine="fastparquet")
-            except Exception as e_fast:
-                logger.warning(f"fastparquet feilet for {df_name} ({e_fast}), prøver pyarrow...")
+            else:
                 import pyarrow  # sikre import
                 df.to_parquet(file_path, engine="pyarrow")
             logger.info(f"Lagret {df_name}-data til {file_path} ({len(df)} rader).")
@@ -225,10 +223,11 @@ class DataStorage:
         )
         logger.info(f"Lastet aktivitetsdetaljer på nytt: {len(self.activity_details_df)} rader")
 
-    def get_activity_details(self, activity_id: int) -> Optional[pd.DataFrame]:
-        # Last data på nytt for å sikre at vi har de nyeste dataene
-        self.reload_activity_details()
-        
+    def get_activity_details(self, activity_id: int, force_reload: bool = False) -> Optional[pd.DataFrame]:
+        """Henter aktivitetsdetaljer fra cache, med valgfri reload fra parquet ved behov."""
+        if force_reload:
+            self.reload_activity_details()
+
         activity_data = self.activity_details_df[self.activity_details_df['activity_id'] == activity_id]
         if activity_data.empty:
             return None
@@ -248,10 +247,16 @@ class DataStorage:
     def get_resting_heart_rate_data(self) -> pd.DataFrame:
         return self.resting_heart_rate_df
 
-    def get_existing_activity_ids(self, db: Session) -> set:
-        """Henter alle eksisterende aktivitets-ID-er fra databasen."""
+    def get_existing_activity_ids(self, db: Session, candidate_ids: Optional[List[str]] = None) -> set:
+        """Henter eksisterende aktivitets-ID-er, helst avgrenset til aktuelle kandidater."""
         try:
-            existing_activities = db.query(Activity.activity_id).all()
+            query = db.query(Activity.activity_id)
+            if candidate_ids:
+                normalized_ids = sorted({str(activity_id) for activity_id in candidate_ids if activity_id is not None})
+                if not normalized_ids:
+                    return set()
+                query = query.filter(Activity.activity_id.in_(normalized_ids))
+            existing_activities = query.all()
             existing_ids = {str(activity.activity_id) for activity in existing_activities}
             logger.info(f"Hentet {len(existing_ids)} eksisterende aktivitets-ID-er fra databasen")
             return existing_ids

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { api } from '../../utils/api';
 import BodyBatteryChart from '../../components/BodyBatteryChart';
@@ -181,14 +181,7 @@ const BodyBatteryPage: React.FC = () => {
     setActiveFilter('30d');
   }, []);
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchBodyBatteryData();
-      fetchStatistics();
-    }
-  }, [startDate, endDate]);
-
-  const fetchBodyBatteryData = async () => {
+  const fetchBodyBatteryData = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -201,16 +194,23 @@ const BodyBatteryPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
 
-  const fetchStatistics = async () => {
+  const fetchStatistics = useCallback(async () => {
     try {
       const response = await api.getBodyBatteryStatistics() as BodyBatteryStatistics;
       setStatistics(response);
     } catch (err: any) {
       console.error('Feil ved henting av Body Battery-statistikk:', err);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      fetchBodyBatteryData();
+      fetchStatistics();
+    }
+  }, [startDate, endDate, fetchBodyBatteryData, fetchStatistics]);
 
   const handleFilterSubmit = () => {
     if (startDate && endDate) {

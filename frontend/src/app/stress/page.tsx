@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Area } from 'recharts';
 import { api } from '../../utils/api';
@@ -209,13 +209,7 @@ export default function StressPage() {
     setActiveFilter('30d');
   }, []);
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchStressData();
-    }
-  }, [startDate, endDate]);
-
-  const fetchStressData = async () => {
+  const fetchStressData = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -228,7 +222,13 @@ export default function StressPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      fetchStressData();
+    }
+  }, [startDate, endDate, fetchStressData]);
 
   const handleQuickFilter = (days: number, filterName: string) => {
     const end = new Date();
@@ -582,4 +582,3 @@ export default function StressPage() {
     </PageContainer>
   );
 }
-

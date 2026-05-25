@@ -5,6 +5,10 @@ import styled from 'styled-components';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { fetchActivities } from '@/store/slices/activitiesSlice';
 import { api } from '@/utils/api';
+import { jobTypeLabel, syncStatusLabel } from '@/utils/syncJobLabels';
+import type { SyncJobStatusResponse } from '@/types/syncJob';
+
+const SYNC_POLL_MS = 2000;
 
 const SyncPanelContainer = styled.div`
   background-color: #333;
@@ -148,8 +152,13 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
 
     const interval = setInterval(async () => {
       try {
-        const statusData = await api.getSyncStatus(jobId);
-        setStatusMessage(`Synkroniseringsstatus: ${statusData.status}`);
+        const statusData: SyncJobStatusResponse = await api.getSyncStatus(jobId);
+        const summaryParts = [
+          statusData.job_type ? jobTypeLabel(statusData.job_type) : null,
+          syncStatusLabel(statusData.status),
+          typeof statusData.message === 'string' && statusData.message ? statusData.message : null,
+        ].filter(Boolean);
+        setStatusMessage(summaryParts.length ? summaryParts.join(' · ') : `Status: ${syncStatusLabel(statusData.status)}`);
 
         if (statusData.status === 'completed' || statusData.status === 'failed') {
           clearInterval(interval);
@@ -209,7 +218,7 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
         setJobId(null);
         setStatusMessage('Kunne ikke hente synkroniseringsstatus.');
       }
-    }, 5000); // Sjekker status hvert 5. sekund
+    }, SYNC_POLL_MS);
 
     return () => clearInterval(interval);
   }, [jobId, dispatch]);
@@ -221,7 +230,7 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
     }
     try {
       setStatusMessage('Starter synkronisering...');
-      const response = await api.syncActivities(startDate, endDate) as any;
+      const response = await api.syncActivitiesForPeriod(startDate, endDate) as any;
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Synkroniseringsfeil:', err);
@@ -237,7 +246,7 @@ const DataSyncPanel: React.FC<DataSyncPanelProps> = ({
       start.setDate(end.getDate() - 30);
       const startStr = start.toISOString().split('T')[0];
       const endStr = end.toISOString().split('T')[0];
-      const response = await api.syncActivities(startStr, endStr) as any;
+      const response = await api.syncActivitiesForPeriod(startStr, endStr) as any;
       setJobId(response.job_id);
     } catch (err: any) {
       console.error('Feil ved synkronisering av siste 30 dager:', err);

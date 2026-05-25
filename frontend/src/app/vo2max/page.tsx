@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { analysisApi } from '../../utils/api';
@@ -184,13 +184,7 @@ export default function VO2MaxPage() {
     setActiveFilter('12m');
   }, []);
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchVO2MaxData();
-    }
-  }, [startDate, endDate]);
-
-  const fetchVO2MaxData = async () => {
+  const fetchVO2MaxData = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -203,7 +197,13 @@ export default function VO2MaxPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    if (startDate && endDate) {
+      fetchVO2MaxData();
+    }
+  }, [startDate, endDate, fetchVO2MaxData]);
 
   const handleQuickFilter = (months: number, filterName: string) => {
     const end = new Date();
@@ -402,5 +402,4 @@ export default function VO2MaxPage() {
     </PageContainer>
   );
 }
-
 

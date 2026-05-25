@@ -17,6 +17,36 @@ class SummaryService:
     
     def __init__(self):
         self.db = SessionLocal()
+
+    def _iter_dates(self, start_date: date, end_date: date):
+        current_date = start_date
+        while current_date <= end_date:
+            yield current_date
+            current_date += timedelta(days=1)
+
+    def _period_weeks(self, start_date: date, end_date: date) -> list[tuple[int, int]]:
+        seen: set[tuple[int, int]] = set()
+        ordered: list[tuple[int, int]] = []
+        for current_date in self._iter_dates(start_date, end_date):
+            year, week_num, _ = current_date.isocalendar()
+            key = (year, week_num)
+            if key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        return ordered
+
+    def _period_months(self, start_date: date, end_date: date) -> list[tuple[int, int]]:
+        months: list[tuple[int, int]] = []
+        year = start_date.year
+        month = start_date.month
+        while (year, month) <= (end_date.year, end_date.month):
+            months.append((year, month))
+            if month == 12:
+                year += 1
+                month = 1
+            else:
+                month += 1
+        return months
     
     def calculate_daily_summary(self, target_date: date) -> DailySummary:
         """Beregn daglig sammendrag for en spesifikk dato."""
@@ -537,27 +567,33 @@ class SummaryService:
         
         self.db.commit()
     
-    def bulk_update_summaries(self, start_date: date, end_date: date):
-        """Bulk-oppdater sammendrag for en periode."""
-        
-        current_date = start_date
-        while current_date <= end_date:
-            # Daglig sammendrag
-            self.calculate_daily_summary(current_date)
-            
-            # Ukentlig sammendrag (kun på søndager)
-            if current_date.weekday() == 6:  # Søndag
-                year, week_num, _ = current_date.isocalendar()
-                self.calculate_weekly_summary(year, week_num)
-            
-            # Månedlig sammendrag (kun på siste dag i måneden)
-            next_day = current_date + timedelta(days=1)
-            if next_day.month != current_date.month:
-                self.calculate_monthly_summary(current_date.year, current_date.month)
-            
-            current_date += timedelta(days=1)
-        
-        print(f"Sammendrag oppdatert for perioden {start_date} til {end_date}")
+    def bulk_update_summaries(self, start_date: date, end_date: date) -> Dict[str, int]:
+        """Bulk-oppdater sammendrag for en periode med kun berørte dager, uker og måneder."""
+        daily_count = 0
+        weekly_count = 0
+        monthly_count = 0
+
+        for current_date in self._iter_dates(start_date, end_date):
+            if self.calculate_daily_summary(current_date):
+                daily_count += 1
+
+        for year, week_num in self._period_weeks(start_date, end_date):
+            if self.calculate_weekly_summary(year, week_num):
+                weekly_count += 1
+
+        for year, month in self._period_months(start_date, end_date):
+            if self.calculate_monthly_summary(year, month):
+                monthly_count += 1
+
+        print(
+            f"Sammendrag oppdatert for perioden {start_date} til {end_date} "
+            f"(dag={daily_count}, uke={weekly_count}, måned={monthly_count})"
+        )
+        return {
+            "daily_count": daily_count,
+            "weekly_count": weekly_count,
+            "monthly_count": monthly_count,
+        }
     
     def calculate_daily_summaries(self) -> int:
         """Beregn alle daglige sammendrag."""

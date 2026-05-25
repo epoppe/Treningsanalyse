@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import {
   Chart as ChartJS,
@@ -330,7 +330,7 @@ const TrainingStressPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchTrainingStressData = async () => {
+  const fetchTrainingStressData = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -356,11 +356,11 @@ const TrainingStressPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [startDate, endDate]);
 
   useEffect(() => {
     fetchTrainingStressData();
-  }, [startDate, endDate]);
+  }, [fetchTrainingStressData]);
 
   const handleDateChange = (field: 'start' | 'end') => (event: React.ChangeEvent<HTMLInputElement>) => {
     if (field === 'start') {

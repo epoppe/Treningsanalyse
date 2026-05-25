@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import logging
 
@@ -43,6 +43,7 @@ class SleepSyncService:
             )
             .all()
         }
+        pending_missing_dates: set[date] = set()
 
         logger.info(f"Starter søvn-synk: {sleep_start_date.date()} -> {end_date.date()}")
         current_date = sleep_start_date
@@ -77,14 +78,11 @@ class SleepSyncService:
                     saved += 1
                 else:
                     try:
-                        existing = self.sync_service.db.query(HealthDataMissing).filter_by(
-                            data_type="sleep", missing_date=current_date.date()
-                        ).first()
-                        if not existing:
+                        if current_date.date() not in sleep_missing_dates and current_date.date() not in pending_missing_dates:
                             self.sync_service.db.add(
                                 HealthDataMissing(data_type="sleep", missing_date=current_date.date())
                             )
-                            self.sync_service.db.commit()
+                            pending_missing_dates.add(current_date.date())
                         sleep_missing_dates.add(current_date.date())
                     except Exception as add_exc:
                         logger.debug(f"Kunne ikke lagre søvn manglende dato {current_date.date()}: {add_exc}")
@@ -98,7 +96,13 @@ class SleepSyncService:
                 sleep_state = SyncState(key="sleep")
                 self.sync_service.db.add(sleep_state)
             sleep_state.last_synced_date = end_date.date()
-            sleep_state.last_synced_at = datetime.utcnow()
+            sleep_state.last_synced_at = datetime.now(timezone.utc)
             self.sync_service.db.commit()
             logger.info(f"Søvn-synk lagret {saved} dager")
 
+        if pending_missing_dates:
+            try:
+                self.sync_service.db.commit()
+            except Exception as exc:
+                self.sync_service.db.rollback()
+                logger.warning(f"Kunne ikke committe manglende søvn-datoer: {exc}")

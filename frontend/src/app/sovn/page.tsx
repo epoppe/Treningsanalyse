@@ -183,9 +183,11 @@ export default function SovnPage() {
   );
 
   const error = queryError ? String(queryError) : null;
-  const days: SleepDay[] = sleepData 
-    ? (sleepData as any[]).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-    : [];
+  const days: SleepDay[] = useMemo(() => (
+    sleepData
+      ? [...(sleepData as any[])].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      : []
+  ), [sleepData]);
 
   const handlePeriodChange = (period: string) => {
     const today = new Date();
@@ -378,5 +380,4 @@ export default function SovnPage() {
     </Container>
   );
 }
-
 

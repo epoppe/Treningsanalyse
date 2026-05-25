@@ -26,6 +26,9 @@ router = APIRouter()
 sync_jobs: Dict[str, Dict] = {}
 ACTIVE_JOB_STATUSES = {"queued", "processing"}
 
+# Synk som konkurrerer om samme aktivitetsspor — ikke kjør samtidig
+ACTIVITY_QUEUE_JOB_TYPES = frozenset({"activities_sync", "new_activities_sync"})
+
 
 def _create_job(job_type: str, message: str = "Queued") -> str:
     job_id = str(uuid.uuid4())
@@ -47,6 +50,17 @@ def _find_active_job_by_type(job_type: str) -> Optional[tuple[str, Dict[str, Any
     return None
 
 
+def _find_active_activity_queue_job() -> Optional[tuple[str, Dict[str, Any]]]:
+    """Finn aktiv aktivitetssynk eller «nye aktiviteter»-jobb (samme kø)."""
+    for existing_job_id, job in reversed(list(sync_jobs.items())):
+        if (
+            job.get("job_type") in ACTIVITY_QUEUE_JOB_TYPES
+            and job.get("status") in ACTIVE_JOB_STATUSES
+        ):
+            return existing_job_id, job
+    return None
+
+
 def _mark_job_processing(job_id: str, message: Optional[str] = None):
     if job_id in sync_jobs:
         sync_jobs[job_id]["status"] = "processing"
@@ -56,7 +70,14 @@ def _mark_job_processing(job_id: str, message: Optional[str] = None):
 
 
 def _completed_job_response(message: str, job_id: str) -> Dict[str, Any]:
-    return {"message": message, "job_id": job_id, "status": "queued", "reused_existing_job": False}
+    job = sync_jobs.get(job_id, {})
+    return {
+        "message": message,
+        "job_id": job_id,
+        "status": job.get("status", "queued"),
+        "job_type": job.get("job_type"),
+        "reused_existing_job": False,
+    }
 
 
 def _existing_job_response(message: str, job_id: str, job: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,7 +273,7 @@ async def trigger_activity_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    active = _find_active_job_by_type("activities_sync")
+    active = _find_active_activity_queue_job()
     if active:
         existing_job_id, existing_job = active
         return _existing_job_response(
@@ -293,7 +314,7 @@ async def trigger_activity_sync_historical(
     start_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    active = _find_active_job_by_type("activities_sync")
+    active = _find_active_activity_queue_job()
     if active:
         existing_job_id, existing_job = active
         return _existing_job_response(
@@ -367,7 +388,7 @@ async def trigger_recent_activity_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
-    active = _find_active_job_by_type("activities_sync")
+    active = _find_active_activity_queue_job()
     if active:
         existing_job_id, existing_job = active
         return _existing_job_response(
@@ -972,7 +993,7 @@ async def trigger_new_activities_sync(
     Starter synkronisering av nye aktiviteter fra siste lagrede aktivitet.
     Dette inkluderer aktiviteter, FIT-data, helsedata, Training Effect data og beregninger.
     """
-    active = _find_active_job_by_type("activities_sync")
+    active = _find_active_activity_queue_job()
     if active:
         existing_job_id, existing_job = active
         return _existing_job_response(
@@ -980,7 +1001,7 @@ async def trigger_new_activities_sync(
             existing_job_id,
             existing_job,
         )
-    job_id = _create_job("activities_sync", "Synk av nye aktiviteter er køet.")
+    job_id = _create_job("new_activities_sync", "Synk av nye aktiviteter er køet.")
     background_tasks.add_task(run_new_activities_sync, job_id, garmin_client, storage)
     
     return _completed_job_response(
@@ -1048,10 +1069,13 @@ async def sync_hrv_data(
         
         logger.info(f"HRV-synkronisering startet med jobb-ID: {job_id}")
         
+        job = sync_jobs[job_id]
         return {
             "job_id": job_id,
             "message": "HRV-synkronisering startet",
-            "status": sync_jobs[job_id]["status"]
+            "status": job["status"],
+            "job_type": job.get("job_type"),
+            "reused_existing_job": False,
         }
         
     except Exception as e:
@@ -1071,7 +1095,7 @@ def run_hrv_sync_task(job_id: str, start_date: Optional[str] = None, end_date: O
                 "status": result["status"],
                 "message": result["message"],
                 "result": result,
-                "end_time": datetime.utcnow()
+                "end_time": datetime.now(timezone.utc)
             })
             
             logger.info(f"HRV-synkronisering fullført for jobb {job_id}: {result['message']}")
@@ -1085,7 +1109,7 @@ def run_hrv_sync_task(job_id: str, start_date: Optional[str] = None, end_date: O
             "status": "failed",
             "message": f"Feil ved HRV-synkronisering: {str(e)}",
             "error": str(e),
-            "end_time": datetime.utcnow()
+            "end_time": datetime.now(timezone.utc)
         })
 
 async def run_body_battery_sync(start_date: Optional[str] = None, end_date: Optional[str] = None, db_session: Session = None) -> Dict[str, Any]:
@@ -1152,10 +1176,13 @@ async def sync_body_battery_data(
         
         logger.info(f"Body Battery-synkronisering startet med jobb-ID: {job_id}")
         
+        job = sync_jobs[job_id]
         return {
             "job_id": job_id,
             "message": "Body Battery-synkronisering startet",
-            "status": sync_jobs[job_id]["status"]
+            "status": job["status"],
+            "job_type": job.get("job_type"),
+            "reused_existing_job": False,
         }
         
     except Exception as e:
@@ -1177,7 +1204,7 @@ def run_body_battery_sync_task(job_id: str, start_date: Optional[str] = None, en
                 "status": result["status"],
                 "message": result["message"],
                 "result": result,
-                "end_time": datetime.utcnow()
+                "end_time": datetime.now(timezone.utc)
             })
             
             logger.info(f"Body Battery-synkronisering fullført for jobb {job_id}: {result['message']}")
@@ -1191,5 +1218,5 @@ def run_body_battery_sync_task(job_id: str, start_date: Optional[str] = None, en
             "status": "failed",
             "message": f"Feil ved Body Battery-synkronisering: {str(e)}",
             "error": str(e),
-            "end_time": datetime.utcnow()
+            "end_time": datetime.now(timezone.utc)
         })

@@ -8,6 +8,7 @@ from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage
 from ..database.models.activity import Activity, ActivityType
+from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from .sync_modules.fit_sync_service import FitSyncService
 from .sync_modules.hrv_sync_service import HRVSyncService
@@ -63,6 +64,36 @@ class SyncService:
         self.stress_sync = StressSyncService(self)
         self.metrics_service = SyncMetricsService(self)
 
+    def _record_lactate_threshold_history(
+        self,
+        threshold_info: Optional[Dict[str, Any]],
+        sync_context: str,
+    ) -> Optional[LactateThresholdHistory]:
+        """Lagrer terskelobservasjon for denne synken slik at utvikling kan spores over tid."""
+        if not threshold_info:
+            return None
+
+        has_speed = threshold_info.get("speed_mps") is not None
+        has_raw_speed = threshold_info.get("raw_speed_mps") is not None
+        has_heart_rate = threshold_info.get("heart_rate_bpm") is not None
+        if not (has_speed or has_raw_speed or has_heart_rate):
+            return None
+
+        observed_at = datetime.now(timezone.utc)
+
+        record = LactateThresholdHistory(
+            observed_at=observed_at,
+            source=threshold_info.get("source") or "unknown",
+            sync_context=sync_context,
+            lactate_threshold_speed=threshold_info.get("speed_mps"),
+            lactate_threshold_heart_rate=threshold_info.get("heart_rate_bpm"),
+            raw_lactate_threshold_speed=threshold_info.get("raw_speed_mps"),
+            is_fallback=bool(threshold_info.get("is_fallback", False)),
+        )
+        self.db.add(record)
+        self.db.commit()
+        return record
+
     def _extract_numeric_value(self, value) -> Optional[float]:
         """Ekstraherer numerisk verdi fra FIT-data som kan inneholde enheter."""
         return self.fit_sync.extract_numeric_value(value)
@@ -78,8 +109,13 @@ class SyncService:
         logger.info("Starter synkronisering fra JSON-filer til database.")
 
         lactate_threshold_speed: Optional[float] = None
+        lactate_threshold_heart_rate: Optional[float] = None
         try:
-            lactate_threshold_speed = asyncio.run(self.garmin_client.get_lactate_threshold_speed())
+            threshold_info = asyncio.run(self.garmin_client.get_lactate_threshold_info())
+            if threshold_info:
+                lactate_threshold_speed = threshold_info.get("speed_mps")
+                lactate_threshold_heart_rate = threshold_info.get("heart_rate_bpm")
+                self._record_lactate_threshold_history(threshold_info, sync_context="json_sync")
         except Exception as e:
             logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
 
@@ -90,7 +126,8 @@ class SyncService:
             return {"status": "Ingen JSON-filer funnet", "added": 0, "skipped": 0}
 
         # 2. Hent alle eksisterende Garmin-aktivitets-ID-er (PK) for å unngå duplikater
-        existing_ids = {str(row[0]) for row in self.db.query(Activity.activity_id).all()}
+        candidate_ids = [str(act.get("activityId")) for act in json_activities if act.get("activityId") is not None]
+        existing_ids = self.storage.get_existing_activity_ids(self.db, candidate_ids)
         logger.info(f"Fant {len(existing_ids)} eksisterende aktiviteter i databasen.")
         
         added_count = 0
@@ -155,6 +192,7 @@ class SyncService:
                 average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                 total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                 total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                lactate_threshold_heart_rate=lactate_threshold_heart_rate,
                 lactate_threshold_speed=lactate_threshold_speed  # Lactate threshold speed
             )
             self.db.add(new_activity)
@@ -301,16 +339,22 @@ class SyncService:
                 summary_service = SummaryService()
                 
                 # Oppdater sammendrag for perioden som ble synkronisert
-                summary_service.bulk_update_summaries(start_date.date(), end_date.date())
-                
-                # Oppdater også alle månedlige sammendrag for å sikre at de er à jour
-                logger.info("Oppdaterer alle månedlige sammendrag...")
-                monthly_count = summary_service.calculate_monthly_summaries()
-                logger.info(f"Oppdatert {monthly_count} månedlige sammendrag")
+                summary_counts = summary_service.bulk_update_summaries(start_date.date(), end_date.date())
+                logger.info(
+                    "Oppdaterte sammendrag for berørt periode: "
+                    f"dag={summary_counts.get('daily_count', 0)}, "
+                    f"uke={summary_counts.get('weekly_count', 0)}, "
+                    f"måned={summary_counts.get('monthly_count', 0)}"
+                )
                 
                 summary_result = {
                     "status": "Fullført", 
-                    "message": f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()}, {monthly_count} månedlige sammendrag oppdatert"
+                    "message": (
+                        f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()} "
+                        f"(dag={summary_counts.get('daily_count', 0)}, "
+                        f"uke={summary_counts.get('weekly_count', 0)}, "
+                        f"måned={summary_counts.get('monthly_count', 0)})"
+                    )
                 }
                 logger.info("Sammendragstabeller oppdatert automatisk")
             except Exception as e:
@@ -376,9 +420,6 @@ class SyncService:
             
             activities_raw = await self.garmin_client.get_activities(effective_start, end_date)
             
-            # Filtrer bort duplikater basert på 'activityId'
-            existing_ids = self.storage.get_existing_activity_ids(self.db)
-            
             # Beregn grensen for "nylige" data (siste 2 dager)
             recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
 
@@ -389,16 +430,31 @@ class SyncService:
                 if act.get('activityId') is not None  # Bare sørg for at vi har en gyldig ID
             ]
 
+            candidate_ids = [str(act.get('activityId')) for act in activities_to_save]
+            existing_ids = self.storage.get_existing_activity_ids(self.db, candidate_ids)
+
             if not activities_to_save:
                 summary["status"] = "Fant ingen nye aktiviteter med GPS-data hos Garmin."
                 logger.info(summary["status"])
                 return summary
 
             logger.info(f"Fant {len(activities_to_save)} aktiviteter hos Garmin. Lagrer til database.")
+
+            lactate_threshold_speed = None
+            lactate_threshold_heart_rate = None
+            try:
+                threshold_info = await self.garmin_client.get_lactate_threshold_info()
+                if threshold_info:
+                    lactate_threshold_speed = threshold_info.get("speed_mps")
+                    lactate_threshold_heart_rate = threshold_info.get("heart_rate_bpm")
+                    self._record_lactate_threshold_history(threshold_info, sync_context="activity_sync")
+            except Exception as e:
+                logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
             
             activity_type_cache = {}
             added_count = 0
             inserted_activity_ids: List[str] = []
+            buffered_parquet_records: List[Dict[str, Any]] = []
             logged_one = False  # Flagg for å bare logge én gang
 
             for i, act_data in enumerate(activities_to_save):
@@ -458,15 +514,14 @@ class SyncService:
                     
                     # Lagre FIT-data også i parquet-format for decoupling-beregninger
                     if details_json and 'records' in details_json:
-                        logger.info(f"Lagrer FIT-data for aktivitet {activity_id} til parquet-fil...")
                         parquet_records = self.fit_sync._to_parquet_records(int(activity_id), details_json)
                         
                         if parquet_records:
-                            try:
-                                self.storage.save_activity_details(parquet_records)
-                                logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
-                            except Exception as e:
-                                logger.error(f"Feil ved lagring av FIT-data til parquet for aktivitet {activity_id}: {e}")
+                            buffered_parquet_records.extend(parquet_records)
+                            logger.info(
+                                f"Bufret {len(parquet_records)} FIT-records for aktivitet {activity_id} "
+                                f"(buffer totalt: {len(buffered_parquet_records)})"
+                            )
                         else:
                             logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
                     else:
@@ -501,13 +556,6 @@ class SyncService:
                 if start_time.tzinfo is None:
                     start_time = start_time.replace(tzinfo=timezone.utc)
                 
-                # Hent lactate threshold speed fra Garmin-klienten
-                lactate_threshold_speed = None
-                try:
-                    lactate_threshold_speed = await self.garmin_client.get_lactate_threshold_speed()
-                except Exception as e:
-                    logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
-
                 # Hent elevation gain fra Garmin API (kan være i ulike felter)
                 elevation_gain = (
                     act_data.get('elevationGain') or 
@@ -554,6 +602,7 @@ class SyncService:
                     total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                     epoc=act_data.get('activityTrainingLoad'),  # EPOC data
+                    lactate_threshold_heart_rate=lactate_threshold_heart_rate,
                     lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
                     total_ascent=elevation_gain,  # Elevation gain i meter
                     total_descent=elevation_loss,  # Elevation loss i meter
@@ -563,9 +612,19 @@ class SyncService:
                 added_count += 1
                 inserted_activity_ids.append(activity_id)
 
+            if buffered_parquet_records:
+                try:
+                    logger.info(
+                        f"Lagrer {len(buffered_parquet_records)} bufrede FIT-records til parquet i én batch..."
+                    )
+                    self.storage.save_activity_details(buffered_parquet_records)
+                except Exception as e:
+                    logger.error(f"Feil ved batch-lagring av FIT-data til parquet: {e}")
+
             self.db.commit()
 
-            # Oppdater lactate threshold for alle løpeaktiviteter hvis det er en ny verdi
+            # Fyll inn lactate threshold på eldre løpeaktiviteter som mangler verdi.
+            # Eksisterende historiske verdier skal bevares.
             try:
                 await self._update_lactate_threshold_for_all_running_activities()
             except Exception as e:
@@ -589,7 +648,7 @@ class SyncService:
                         act_state = SyncState(key="activities")
                         self.db.add(act_state)
                     act_state.last_synced_date = last_date
-                    act_state.last_synced_at = datetime.utcnow()
+                    act_state.last_synced_at = datetime.now(timezone.utc)
                     self.db.commit()
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
@@ -678,7 +737,7 @@ class SyncService:
                         bb_state = SyncState(key="body_battery")
                         self.db.add(bb_state)
                     bb_state.last_synced_date = datetime.strptime(bb_end_str, '%Y-%m-%d').date()
-                    bb_state.last_synced_at = datetime.utcnow()
+                    bb_state.last_synced_at = datetime.now(timezone.utc)
                     self.db.commit()
                 except Exception as e:
                     logger.warning(f"Kunne ikke oppdatere Body Battery sync state: {e}")
@@ -826,7 +885,7 @@ class SyncService:
                         te_state = SyncState(key="training_effect")
                         self.db.add(te_state)
                     te_state.last_synced_date = end_date.date()
-                    te_state.last_synced_at = datetime.utcnow()
+                    te_state.last_synced_at = datetime.now(timezone.utc)
                     self.db.commit()
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for training_effect: {e}")
@@ -906,7 +965,7 @@ class SyncService:
 
     async def _update_lactate_threshold_for_all_running_activities(self):
         """
-        Oppdaterer lactate threshold for alle løpeaktiviteter når en ny verdi oppdages.
-        Hvis det er en ny verdi fra Garmin, oppdateres alle løpeaktiviteter som mangler eller har en annen verdi.
+        Fyller inn lactate threshold på løpeaktiviteter som mangler verdi.
+        Eksisterende verdier beholdes slik at historiske terskelendringer kan spores over tid.
         """
         await self.metrics_service.update_lactate_threshold_for_all_running_activities()

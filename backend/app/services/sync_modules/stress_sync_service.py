@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 import asyncio
 import logging
@@ -42,6 +42,7 @@ class StressSyncService:
             )
             .all()
         }
+        pending_missing_dates: set[date] = set()
 
         missing_count = max(
             0, (end_date - stress_start_date).days + 1 - len(existing_stress_dates) - len(stress_missing_dates)
@@ -73,21 +74,18 @@ class StressSyncService:
                         low_stress_time=to_sec(stress_data.get("low_stress_time")),
                         medium_stress_time=to_sec(stress_data.get("medium_stress_time")),
                         high_stress_time=to_sec(stress_data.get("high_stress_time")),
-                        created_at=datetime.utcnow(),
-                        updated_at=datetime.utcnow(),
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc),
                     )
                     self.sync_service.db.add(row)
                     saved += 1
                 else:
                     try:
-                        existing = self.sync_service.db.query(HealthDataMissing).filter_by(
-                            data_type="stress", missing_date=current_date.date()
-                        ).first()
-                        if not existing:
+                        if current_date.date() not in stress_missing_dates and current_date.date() not in pending_missing_dates:
                             self.sync_service.db.add(
                                 HealthDataMissing(data_type="stress", missing_date=current_date.date())
                             )
-                            self.sync_service.db.commit()
+                            pending_missing_dates.add(current_date.date())
                         stress_missing_dates.add(current_date.date())
                     except Exception as add_exc:
                         logger.debug(f"Kunne ikke lagre stress manglende dato {current_date.date()}: {add_exc}")
@@ -102,7 +100,13 @@ class StressSyncService:
                 stress_state = SyncState(key="stress")
                 self.sync_service.db.add(stress_state)
             stress_state.last_synced_date = end_date.date()
-            stress_state.last_synced_at = datetime.utcnow()
+            stress_state.last_synced_at = datetime.now(timezone.utc)
             self.sync_service.db.commit()
             logger.info(f"Stress-synk lagret {saved} dager")
 
+        if pending_missing_dates:
+            try:
+                self.sync_service.db.commit()
+            except Exception as exc:
+                self.sync_service.db.rollback()
+                logger.warning(f"Kunne ikke committe manglende stress-datoer: {exc}")

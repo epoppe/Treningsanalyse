@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 import asyncio
 import logging
@@ -90,6 +90,7 @@ class HRVSyncService:
             )
             .all()
         }
+        pending_missing_dates: set[date] = set()
 
         current_date = hrv_start_date
         while current_date <= end_date:
@@ -114,14 +115,11 @@ class HRVSyncService:
                         all_hrv_data.append(normalized_hrv)
                 else:
                     try:
-                        existing = self.sync_service.db.query(HealthDataMissing).filter_by(
-                            data_type="hrv", missing_date=current_date.date()
-                        ).first()
-                        if not existing:
+                        if current_date.date() not in hrv_missing_dates and current_date.date() not in pending_missing_dates:
                             self.sync_service.db.add(
                                 HealthDataMissing(data_type="hrv", missing_date=current_date.date())
                             )
-                            self.sync_service.db.commit()
+                            pending_missing_dates.add(current_date.date())
                         hrv_missing_dates.add(current_date.date())
                     except Exception as add_exc:
                         logger.debug(f"Kunne ikke lagre HRV manglende dato {date_str}: {add_exc}")
@@ -141,10 +139,16 @@ class HRVSyncService:
                     hrv_state = SyncState(key="hrv")
                     self.sync_service.db.add(hrv_state)
                 hrv_state.last_synced_date = last_date
-                hrv_state.last_synced_at = datetime.utcnow()
+                hrv_state.last_synced_at = datetime.now(timezone.utc)
                 self.sync_service.db.commit()
             except Exception as exc:
                 logger.warning(f"Kunne ikke oppdatere HRV sync state: {exc}")
         else:
             logger.info("Ingen nye HRV-data å lagre.")
 
+        if pending_missing_dates:
+            try:
+                self.sync_service.db.commit()
+            except Exception as exc:
+                self.sync_service.db.rollback()
+                logger.warning(f"Kunne ikke committe manglende HRV-datoer: {exc}")

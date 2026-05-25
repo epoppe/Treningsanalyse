@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import logging
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
@@ -8,11 +8,54 @@ from ..services.garmin_client import GarminClient
 from ..dependencies import get_garmin_client, get_db, get_data_storage
 from ..storage import DataStorage
 from ..database.models import HRV, Sleep, BodyBattery, Stress
+from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from ..database.models.health_data_missing import HealthDataMissing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _speed_to_pace_min_per_km(speed_mps: Optional[float]) -> Optional[float]:
+    if not speed_mps or speed_mps <= 0:
+        return None
+    return 1000.0 / (speed_mps * 60.0)
+
+
+@router.get("/lactate-threshold/history", response_model=List[Dict[str, Any]])
+async def get_lactate_threshold_history(
+    start_date: Optional[date] = Query(None, description="Startdato (YYYY-MM-DD)"),
+    end_date: Optional[date] = Query(None, description="Sluttdato (YYYY-MM-DD)"),
+    limit: int = Query(200, ge=1, le=1000, description="Maks antall rader"),
+    db: Session = Depends(get_db),
+):
+    """Returnerer lagret historikk for melkesyreterskel observert ved synk."""
+    query = db.query(LactateThresholdHistory)
+
+    if start_date:
+        query = query.filter(LactateThresholdHistory.observed_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        query = query.filter(LactateThresholdHistory.observed_at <= datetime.combine(end_date, datetime.max.time()))
+
+    records = (
+        query.order_by(LactateThresholdHistory.observed_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return [
+        {
+            "observed_at": record.observed_at.isoformat() if record.observed_at else None,
+            "source": record.source,
+            "sync_context": record.sync_context,
+            "lactate_threshold_speed": record.lactate_threshold_speed,
+            "lactate_threshold_pace_min_per_km": _speed_to_pace_min_per_km(record.lactate_threshold_speed),
+            "lactate_threshold_heart_rate": record.lactate_threshold_heart_rate,
+            "raw_lactate_threshold_speed": record.raw_lactate_threshold_speed,
+            "is_fallback": record.is_fallback,
+        }
+        for record in records
+    ]
 
 # Range-endepunkter først (unngå kollisjon med {request_date})
 
@@ -70,8 +113,8 @@ async def get_stress_range_endpoint(
                                 low_stress_time=to_sec(stress_data.get('low_stress_time')),
                                 medium_stress_time=to_sec(stress_data.get('medium_stress_time')),
                                 high_stress_time=to_sec(stress_data.get('high_stress_time')),
-                                created_at=datetime.utcnow(),
-                                updated_at=datetime.utcnow()
+                                created_at=datetime.now(timezone.utc),
+                                updated_at=datetime.now(timezone.utc)
                             )
                             db.add(new_stress)
                             all_stress.append(new_stress)
@@ -170,8 +213,8 @@ async def get_hrv_range_endpoint(
                                 baseline_balanced_upper=hrv_summary.get('baseline_balanced_upper'),
                                 baseline_low_upper=hrv_summary.get('baseline_low_upper'),
                                 status=hrv_summary.get('status'),
-                                created_at=datetime.utcnow(),
-                                updated_at=datetime.utcnow()
+                                created_at=datetime.now(timezone.utc),
+                                updated_at=datetime.now(timezone.utc)
                             )
                             db.add(new_hrv)
                             logger.debug(f"✅ HRV: Lagret data for {missing_date} (baseline: {hrv_summary.get('baseline_balanced_lower')}-{hrv_summary.get('baseline_balanced_upper')})")
@@ -320,8 +363,8 @@ async def get_sleep_range_endpoint(
                                 awake_time=to_sec(sleep_data.get('awake_time')),
                                 sleep_score=sleep_data.get('sleep_score'),
                                 overall_score=sleep_data.get('overall_score'),
-                                created_at=datetime.utcnow(),
-                                updated_at=datetime.utcnow()
+                                created_at=datetime.now(timezone.utc),
+                                updated_at=datetime.now(timezone.utc)
                             )
                             db.add(new_sleep)
                             logger.debug(f"✅ Søvn: Lagret ny data for {fetch_date}")
@@ -330,7 +373,7 @@ async def get_sleep_range_endpoint(
                             existing_record = next((s for s in existing_sleep if s.sleep_date == fetch_date), None)
                             if existing_record and sleep_data.get('overall_score') is not None:
                                 existing_record.overall_score = sleep_data.get('overall_score')
-                                existing_record.updated_at = datetime.utcnow()
+                                existing_record.updated_at = datetime.now(timezone.utc)
                                 logger.debug(f"✅ Søvn: Oppdatert overall_score for {fetch_date}: {sleep_data.get('overall_score')}")
                         else:
                             if fetch_date in missing_dates:

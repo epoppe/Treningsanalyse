@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import styled from 'styled-components';
 import { analysisApi } from '../../utils/api';
 
@@ -159,11 +159,7 @@ export default function TrainingStatusPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState(30);
 
-  useEffect(() => {
-    fetchTrainingOverview();
-  }, [selectedPeriod]);
-
-  const fetchTrainingOverview = async () => {
+  const fetchTrainingOverview = useCallback(async () => {
     setLoading(true);
     setError(null);
     
@@ -177,7 +173,11 @@ export default function TrainingStatusPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedPeriod]);
+
+  useEffect(() => {
+    fetchTrainingOverview();
+  }, [fetchTrainingOverview]);
 
   if (loading) {
     return (

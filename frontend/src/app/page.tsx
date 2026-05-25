@@ -190,7 +190,7 @@ export default function Home() {
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [dispatch, activities.length, hasRestoredFromStorage]);
+  }, [dispatch, activities, hasRestoredFromStorage]);
 
   const getReadableActivityTypeName = (typeKey: string): string => {
     const nameMap: { [key: string]: string } = {
