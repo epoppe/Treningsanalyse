@@ -284,8 +284,18 @@ class PerformanceMetricsService:
         )
         if samples.empty or len(samples) < 20:
             return None
+
+        total_activity_s = float(activity.duration or 0)
+        if details is not None and not details.empty and "timestamp" in details.columns:
+            ts = pd.to_datetime(details["timestamp"], errors="coerce").dropna()
+            if len(ts) >= 2:
+                total_activity_s = max(total_activity_s, (ts.iloc[-1] - ts.iloc[0]).total_seconds())
+
+        if total_activity_s < 45 * 60:
+            return None
+
         duration = samples["elapsed_s"].iloc[-1] - samples["elapsed_s"].iloc[0]
-        if duration < 45 * 60:
+        if duration < 30 * 60:
             return None
 
         first_cut = samples["elapsed_s"].iloc[0] + duration * 0.35

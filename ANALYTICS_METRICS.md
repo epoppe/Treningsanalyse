@@ -108,6 +108,9 @@ Lagret snapshot returnerer:
 ## Fatigue Resistance
 
 Fatigue Resistance beregnes per langøkt fra filtrerte FIT-samples etter warmup.
+Økten må være minst **45 min totalt** (Garmin-varighet/FIT-span); sammenligningen bruker data etter
+10 min oppvarming og krever minst **30 min** gyldig tid der.
+
 Tidlig del sammenlignes med sen del:
 
 | Felt | Beskrivelse |
