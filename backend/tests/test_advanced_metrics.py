@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database.models import Base
-from app.database.models.activity import Activity
+from app.database.models.activity import Activity, ActivityType
 from app.routers.activities import get_activity_efficiency_metrics
 from app.routers.analytics import list_decoupling_trends, list_efficiency_trends
 from app.services.analysis_service import AnalysisService
@@ -24,6 +24,10 @@ class AdvancedMetricsTests(unittest.TestCase):
         self.Session = sessionmaker(bind=engine)
         self.db = self.Session()
         self.storage = DataStorage(str(Path(self.tmpdir.name) / "data"))
+        running_type = ActivityType(type_key="running", type_name="Running")
+        self.db.add(running_type)
+        self.db.commit()
+        self.running_type_id = running_type.id
 
     def tearDown(self):
         self.db.close()
@@ -47,6 +51,7 @@ class AdvancedMetricsTests(unittest.TestCase):
                 distance=7200,
                 duration=duration_minutes * 60,
                 total_ascent=total_ascent,
+                activity_type_id=self.running_type_id,
             )
         )
         self.db.commit()

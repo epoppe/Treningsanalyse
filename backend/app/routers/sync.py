@@ -182,6 +182,35 @@ async def run_health_sync_with_force(job_id: str, garmin_client: GarminClient, s
         if db_session:
             db_session.close()
 
+async def run_garmin_performance_metrics_sync(
+    job_id: str,
+    garmin_client: GarminClient,
+    storage: DataStorage,
+    start_date: datetime,
+    end_date: datetime,
+    force_refresh_recent: bool = False,
+    ignore_sync_state: bool = False,
+):
+    """Kjører synk av dagsbaserte Garmin performance-metrikker i bakgrunnen."""
+    db_session = None
+    try:
+        _mark_job_processing(job_id, "Synkroniserer Garmin performance metrics...")
+        db_session = SessionLocal()
+        sync_service = SyncService(garmin_client, storage, db_session)
+        result = await sync_service.sync_garmin_performance_metrics(
+            start_date,
+            end_date,
+            force_refresh_recent=force_refresh_recent,
+            ignore_sync_state=ignore_sync_state,
+        )
+        sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
+    except Exception as e:
+        logger.critical(f"Feil i Garmin performance metrics-synk (jobb {job_id}): {e}", exc_info=True)
+        sync_jobs[job_id].update({"status": "failed", "error": str(e), "end_time": datetime.now(timezone.utc)})
+    finally:
+        if db_session:
+            db_session.close()
+
 async def run_fit_data_download(job_id: str, garmin_client: GarminClient, storage: DataStorage, activity_ids: list = None, limit: int = None):
     """Kjører FIT-data nedlasting i bakgrunnen."""
     db_session = None
@@ -465,6 +494,69 @@ async def trigger_recent_health_sync(
         job_id,
     )
 
+@router.post("/garmin-performance", status_code=202)
+async def trigger_garmin_performance_metrics_sync(
+    request: SyncRequest,
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter synkronisering av Garmin VO2max/status/load/endurance/hill-metrikker."""
+    start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
+
+    active = _find_active_job_by_type("garmin_performance_metrics_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Garmin performance metrics-synk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("garmin_performance_metrics_sync", "Garmin performance metrics-synk er køet.")
+    background_tasks.add_task(
+        run_garmin_performance_metrics_sync,
+        job_id,
+        garmin_client,
+        storage,
+        start_datetime,
+        end_datetime,
+        True,
+        request.ignore_sync_state,
+    )
+    return _completed_job_response("Synkronisering av Garmin performance metrics startet.", job_id)
+
+@router.post("/garmin-performance/recent", status_code=202)
+async def trigger_recent_garmin_performance_metrics_sync(
+    background_tasks: BackgroundTasks,
+    storage: DataStorage = Depends(get_data_storage),
+    garmin_client: GarminClient = Depends(get_garmin_client)
+):
+    """Starter synkronisering av Garmin performance metrics for de siste 90 dagene."""
+    end_datetime = datetime.now(timezone.utc)
+    start_datetime = end_datetime - timedelta(days=90)
+
+    active = _find_active_job_by_type("garmin_performance_metrics_sync")
+    if active:
+        existing_job_id, existing_job = active
+        return _existing_job_response(
+            "Garmin performance metrics-synk er allerede i gang. Returnerer eksisterende jobb.",
+            existing_job_id,
+            existing_job,
+        )
+    job_id = _create_job("garmin_performance_metrics_sync", "Garmin performance metrics recent-synk er køet.")
+    background_tasks.add_task(
+        run_garmin_performance_metrics_sync,
+        job_id,
+        garmin_client,
+        storage,
+        start_datetime,
+        end_datetime,
+        True,
+        False,
+    )
+    return _completed_job_response("Synkronisering av siste 90 dagers Garmin performance metrics startet.", job_id)
+
 @router.post("/fit-data/download", status_code=202)
 async def trigger_fit_data_download(
     background_tasks: BackgroundTasks,
@@ -645,8 +737,17 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
             force_refresh_recent=True,
             ignore_sync_state=ignore_sync_state,
         )
+
+        # 4. Synkroniser dagsbaserte Garmin performance metrics
+        sync_jobs[job_id]["message"] = "Synkroniserer Garmin performance metrics..."
+        performance_result = await sync_service.sync_garmin_performance_metrics(
+            health_start_date,
+            end_date,
+            force_refresh_recent=True,
+            ignore_sync_state=ignore_sync_state,
+        )
         
-        # 4. Synkroniser HRV-data til database (kun fra 2020)
+        # 5. Synkroniser HRV-data til database (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
         hrv_service = HRVService(storage)
         hrv_result = hrv_service.sync_hrv_data_to_database(
@@ -655,7 +756,7 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
             end_date.strftime('%Y-%m-%d')
         )
         
-        # 5. Synkroniser Body Battery-data til database (kun fra 2020)
+        # 6. Synkroniser Body Battery-data til database (kun fra 2020)
         sync_jobs[job_id]["message"] = "Synkroniserer Body Battery-data til database..."
         body_battery_service = BodyBatteryService(garmin_client)
         body_battery_result = await body_battery_service.sync_body_battery_data_to_database(
@@ -664,13 +765,14 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
             end_date.strftime('%Y-%m-%d')
         )
         
-        # 6. Kjør beregninger og caching
+        # 7. Kjør beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
         await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
         # Sammenslå resultater
         combined_result = {
             "activities": activity_result,
+            "garmin_performance_metrics": performance_result,
             "hrv_sync": hrv_result,
             "body_battery_sync": body_battery_result,
             "message": "Full synkronisering fullført"
@@ -900,8 +1002,17 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
         # 3. Synkroniser Training Effect data
         sync_jobs[job_id]["message"] = "Synkroniserer Training Effect data..."
         await sync_service.sync_training_effect_data(start_date, end_date)
+
+        # 4. Synkroniser Garmin performance metrics
+        sync_jobs[job_id]["message"] = "Synkroniserer Garmin performance metrics..."
+        performance_result = await sync_service.sync_garmin_performance_metrics(
+            start_date,
+            end_date,
+            force_refresh_recent=True,
+            ignore_sync_state=True,
+        )
         
-        # 4. Synkroniser HRV-data til database
+        # 5. Synkroniser HRV-data til database
         sync_jobs[job_id]["message"] = "Synkroniserer HRV-data til database..."
         hrv_service = HRVService(storage)
         hrv_result = hrv_service.sync_hrv_data_to_database(
@@ -910,7 +1021,7 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             end_date.strftime('%Y-%m-%d')
         )
         
-        # 5. Synkroniser Body Battery-data til database
+        # 6. Synkroniser Body Battery-data til database
         sync_jobs[job_id]["message"] = "Synkroniserer Body Battery-data til database..."
         body_battery_service = BodyBatteryService(garmin_client)
         body_battery_result = await body_battery_service.sync_body_battery_data_to_database(
@@ -919,13 +1030,14 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             end_date.strftime('%Y-%m-%d')
         )
         
-        # 6. Kjør beregninger og caching
+        # 7. Kjør beregninger og caching
         sync_jobs[job_id]["message"] = "Kjører beregninger og caching..."
         await run_calculations_and_caching(job_id, db_session, start_date, end_date, storage)
         
         # Sammenslå resultater
         combined_result = {
             "activities": activity_result,
+            "garmin_performance_metrics": performance_result,
             "hrv_sync": hrv_result,
             "body_battery_sync": body_battery_result,
             "period": {

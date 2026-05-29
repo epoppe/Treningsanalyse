@@ -10,9 +10,16 @@ from ..database.models.activity import Activity
 from ..dependencies import get_data_storage
 from ..storage import DataStorage
 from ..services.performance_metrics_service import PerformanceMetricsService
+from ..services.coaching_analysis_service import CoachingAnalysisService
 from ..utils.activity_filters import apply_running_activity_filter
 
 router = APIRouter()
+
+
+def _coerce_query_default(value, default):
+    if isinstance(value, type(default)):
+        return value
+    return default
 
 
 class EfficiencyTrendItem(BaseModel):
@@ -56,6 +63,34 @@ class FatigueResistanceItem(BaseModel):
 class AnalyticsListResponse(BaseModel):
     activities: List[dict]
     count: int = Field(description="Antall aktiviteter returnert")
+
+
+@router.get("/coaching")
+def get_coaching_analysis(
+    days: int = Query(90, ge=14, le=365, description="Analyseperiode i dager"),
+    recalculate: bool = Query(False, description="Beregn på nytt og lagre snapshot"),
+    include_treadmill: bool = Query(
+        False,
+        description="Inkluder tredemølle og innendørs løping i intensitetsanalysen",
+    ),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+):
+    """Samlet coachinganalyse: fitness/fatigue, 80/20, terskler og HRV-readiness."""
+    service = CoachingAnalysisService(db, storage)
+    if not recalculate:
+        snapshot = service.get_snapshot_payload()
+        if (
+            snapshot
+            and snapshot.get("period", {}).get("days") == days
+            and snapshot.get("period", {}).get("include_treadmill") == include_treadmill
+        ):
+            return snapshot
+    return service.build_coaching_analysis(
+        days=days,
+        include_treadmill=include_treadmill,
+        persist_snapshot=True,
+    )
 
 
 @router.get("/efficiency", response_model=AnalyticsListResponse)
@@ -240,6 +275,10 @@ def get_duration_curve(
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ):
+    metric = _coerce_query_default(metric, "speed")
+    scope = _coerce_query_default(scope, "all_time")
+    include_treadmill = _coerce_query_default(include_treadmill, False)
+    recalculate = _coerce_query_default(recalculate, False)
     service = PerformanceMetricsService(db, storage)
     scope_days = {"all_time": None, "last_90_days": 90, "last_365_days": 365}
     if recalculate or include_treadmill:

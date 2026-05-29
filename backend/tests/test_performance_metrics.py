@@ -171,7 +171,7 @@ class PerformanceMetricsTests(unittest.TestCase):
             self._add_constant_activity(str(8100 + idx), start + timedelta(days=idx), 3.1, duration_s)
 
         service = PerformanceMetricsService(self.db, self.storage)
-        result = service.calculate_critical_speed()
+        result = service.calculate_critical_speed(days=None)
 
         self.assertIsNotNone(result["critical_speed_mps"])
         self.assertLess(result["critical_speed_mps"], 5.0)
@@ -186,7 +186,7 @@ class PerformanceMetricsTests(unittest.TestCase):
             self._add_constant_activity(str(5000 + idx), start + timedelta(days=idx), speed, duration_s)
 
         service = PerformanceMetricsService(self.db, self.storage)
-        result = service.calculate_critical_speed()
+        result = service.calculate_critical_speed(days=None)
 
         self.assertIsNotNone(result["critical_speed_mps"])
         self.assertLess(result["critical_speed_mps"], 6.0)

@@ -96,6 +96,10 @@ setup.py
 test_*.py
 !backend/tests/test_advanced_metrics.py
 !backend/tests/test_performance_metrics.py
+!backend/tests/test_route_analysis.py
+!backend/tests/test_garmin_performance_metrics.py
+!backend/tests/test_coaching_analysis.py
+!backend/tests/test_mcp_training_tools.py
 !ANALYTICS_METRICS.md
 
 # Virtualenv

@@ -564,6 +564,188 @@ class GarminClient:
             logger.error(traceback.format_exc())
             return None
 
+    def _extract_activity_summary_metrics(self, activity_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Normaliserer nyttige summaryDTO-felter fra activity-service."""
+        if not isinstance(activity_data, dict):
+            return None
+        summary = activity_data.get("summaryDTO")
+        if not isinstance(summary, dict):
+            return None
+
+        return {
+            "vo2_max": summary.get("vO2MaxValue"),
+            "vo2_max_precise": summary.get("vO2MaxPreciseValue"),
+            "average_moving_speed": summary.get("averageMovingSpeed"),
+            "avg_grade_adjusted_speed": summary.get("avgGradeAdjustedSpeed"),
+            "ground_contact_time": summary.get("groundContactTime"),
+            "stride_length": summary.get("strideLength"),
+            "vertical_oscillation": summary.get("verticalOscillation"),
+            "vertical_ratio": summary.get("verticalRatio"),
+            "begin_potential_stamina": summary.get("beginPotentialStamina"),
+            "end_potential_stamina": summary.get("endPotentialStamina"),
+            "min_available_stamina": summary.get("minAvailableStamina"),
+            "activity_body_battery_delta": summary.get("differenceBodyBattery"),
+            "training_load": summary.get("activityTrainingLoad"),
+            "aerobic_training_effect": summary.get("aerobicTrainingEffect") or summary.get("trainingEffect"),
+            "anaerobic_training_effect": summary.get("anaerobicTrainingEffect"),
+            "training_effect_label": summary.get("trainingEffectLabel"),
+            "aerobic_training_effect_message": summary.get("aerobicTrainingEffectMessage"),
+            "anaerobic_training_effect_message": summary.get("anaerobicTrainingEffectMessage"),
+            "elevation_gain": summary.get("elevationGain") or summary.get("totalElevationGain"),
+            "elevation_loss": summary.get("elevationLoss") or summary.get("totalElevationLoss"),
+        }
+
+    async def get_activity_summary_metrics(self, activity_id: str) -> Optional[Dict[str, Any]]:
+        """Henter utvidede aktivitetsfelter fra Garmin activity-service."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente activity summary metrics.")
+            return None
+
+        try:
+            activity_data = await asyncio.to_thread(
+                garth.connectapi,
+                f"/activity-service/activity/{activity_id}",
+            )
+            metrics = self._extract_activity_summary_metrics(activity_data)
+            if metrics:
+                logger.info(f"Hentet utvidede activity summary metrics for {activity_id}")
+            return metrics
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen activity summary metrics funnet for aktivitet {activity_id}")
+                return None
+            logger.error(f"HTTP-feil ved henting av activity summary metrics for {activity_id}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av activity summary metrics for {activity_id}: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
+    def _first_primary_map_value(self, data: Optional[Dict[str, Any]], map_key: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(data, dict):
+            return None
+        value_map = data.get(map_key)
+        if not isinstance(value_map, dict):
+            return None
+        fallback = None
+        for value in value_map.values():
+            if isinstance(value, dict):
+                if fallback is None:
+                    fallback = value
+                if value.get("primaryTrainingDevice"):
+                    return value
+        return fallback
+
+    def _extract_daily_garmin_performance_metrics(
+        self,
+        date_str: str,
+        maxmet: Optional[Dict[str, Any]],
+        load_balance: Optional[Dict[str, Any]],
+        training_status: Optional[Dict[str, Any]],
+        endurance_score: Optional[Dict[str, Any]],
+        hill_score: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        generic = maxmet.get("generic", {}) if isinstance(maxmet, dict) else {}
+        heat_altitude = maxmet.get("heatAltitudeAcclimation", {}) if isinstance(maxmet, dict) else {}
+        load = self._first_primary_map_value(load_balance, "metricsTrainingLoadBalanceDTOMap") or {}
+        status = dict(self._first_primary_map_value(training_status, "latestTrainingStatusData") or {})
+        acute_load = status.pop("acuteTrainingLoadDTO", None) if isinstance(status, dict) else None
+        if isinstance(acute_load, dict):
+            status = {**status, **acute_load}
+
+        return {
+            "date": date_str,
+            "vo2_max": generic.get("vo2MaxValue"),
+            "vo2_max_precise": generic.get("vo2MaxPreciseValue"),
+            "fitness_age": generic.get("fitnessAge"),
+            "max_met_category": generic.get("maxMetCategory"),
+            "altitude_acclimation": heat_altitude.get("altitudeAcclimation"),
+            "previous_altitude_acclimation": heat_altitude.get("previousAltitudeAcclimation"),
+            "heat_acclimation_percentage": heat_altitude.get("heatAcclimationPercentage"),
+            "previous_heat_acclimation_percentage": heat_altitude.get("previousHeatAcclimationPercentage"),
+            "current_altitude": heat_altitude.get("currentAltitude"),
+            "heat_trend": heat_altitude.get("heatTrend"),
+            "altitude_trend": heat_altitude.get("altitudeTrend"),
+            "monthly_load_aerobic_low": load.get("monthlyLoadAerobicLow"),
+            "monthly_load_aerobic_high": load.get("monthlyLoadAerobicHigh"),
+            "monthly_load_anaerobic": load.get("monthlyLoadAnaerobic"),
+            "monthly_load_aerobic_low_target_min": load.get("monthlyLoadAerobicLowTargetMin"),
+            "monthly_load_aerobic_low_target_max": load.get("monthlyLoadAerobicLowTargetMax"),
+            "monthly_load_aerobic_high_target_min": load.get("monthlyLoadAerobicHighTargetMin"),
+            "monthly_load_aerobic_high_target_max": load.get("monthlyLoadAerobicHighTargetMax"),
+            "monthly_load_anaerobic_target_min": load.get("monthlyLoadAnaerobicTargetMin"),
+            "monthly_load_anaerobic_target_max": load.get("monthlyLoadAnaerobicTargetMax"),
+            "training_balance_feedback_phrase": load.get("trainingBalanceFeedbackPhrase"),
+            "training_status": status.get("trainingStatus"),
+            "training_status_feedback_phrase": status.get("trainingStatusFeedbackPhrase"),
+            "sport": status.get("sport"),
+            "sub_sport": status.get("subSport"),
+            "fitness_trend": status.get("fitnessTrend"),
+            "fitness_trend_sport": status.get("fitnessTrendSport"),
+            "acwr_percent": status.get("acwrPercent"),
+            "acwr_status": status.get("acwrStatus"),
+            "acwr_status_feedback": status.get("acwrStatusFeedback"),
+            "daily_training_load_acute": status.get("dailyTrainingLoadAcute"),
+            "daily_training_load_chronic": status.get("dailyTrainingLoadChronic"),
+            "daily_acute_chronic_workload_ratio": status.get("dailyAcuteChronicWorkloadRatio"),
+            "load_tunnel_min": status.get("loadTunnelMin"),
+            "load_tunnel_max": status.get("loadTunnelMax"),
+            "endurance_score": endurance_score.get("overallScore") if isinstance(endurance_score, dict) else None,
+            "endurance_classification": endurance_score.get("classification") if isinstance(endurance_score, dict) else None,
+            "hill_score": hill_score.get("overallScore") if isinstance(hill_score, dict) else None,
+            "hill_endurance_score": hill_score.get("enduranceScore") if isinstance(hill_score, dict) else None,
+            "hill_strength_score": hill_score.get("strengthScore") if isinstance(hill_score, dict) else None,
+            "raw_maxmet": maxmet,
+            "raw_training_load_balance": load_balance,
+            "raw_training_status": training_status,
+            "raw_endurance_score": endurance_score,
+            "raw_hill_score": hill_score,
+        }
+
+    async def get_daily_garmin_performance_metrics(self, target_date: date | datetime | str) -> Dict[str, Any]:
+        """Henter dagsbaserte Garmin performance-metrikker uten å kreve nyere garth-klasser."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente Garmin performance metrics.")
+            return {}
+
+        if isinstance(target_date, datetime):
+            date_str = target_date.strftime("%Y-%m-%d")
+        elif isinstance(target_date, date):
+            date_str = target_date.strftime("%Y-%m-%d")
+        else:
+            date_str = str(target_date)
+
+        async def _fetch(name: str, endpoint: str, params: Optional[Dict[str, Any]] = None):
+            try:
+                data = await asyncio.to_thread(garth.connectapi, endpoint, params=params)
+                return name, data
+            except GarthHTTPError as exc:
+                if "404" in str(exc) or "not found" in str(exc).lower():
+                    logger.info(f"Ingen Garmin performance-data fra {endpoint} for {date_str}")
+                else:
+                    logger.warning(f"Kunne ikke hente {endpoint} for {date_str}: {exc}")
+                return name, None
+            except Exception as exc:
+                logger.warning(f"Kunne ikke hente {endpoint} for {date_str}: {exc}")
+                return name, None
+
+        results = await asyncio.gather(
+            _fetch("maxmet", f"/metrics-service/metrics/maxmet/latest/{date_str}"),
+            _fetch("load_balance", f"/metrics-service/metrics/trainingloadbalance/latest/{date_str}"),
+            _fetch("training_status", f"/metrics-service/metrics/trainingstatus/daily/{date_str}"),
+            _fetch("endurance_score", "/metrics-service/metrics/endurancescore", {"calendarDate": date_str}),
+            _fetch("hill_score", "/metrics-service/metrics/hillscore", {"calendarDate": date_str}),
+        )
+        data = {name: value for name, value in results}
+        return self._extract_daily_garmin_performance_metrics(
+            date_str,
+            data.get("maxmet"),
+            data.get("load_balance"),
+            data.get("training_status"),
+            data.get("endurance_score"),
+            data.get("hill_score"),
+        )
+
     # Nye metoder basert på Garmy metrics
 
     async def get_training_status(self) -> Optional[Dict[str, Any]]:

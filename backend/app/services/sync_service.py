@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage
-from ..database.models.activity import Activity, ActivityType
+from ..database.models.activity import Activity, ActivityType, GarminPerformanceMetric
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from .sync_modules.fit_sync_service import FitSyncService
@@ -185,13 +185,19 @@ class SyncService:
                 duration=act_data.get('duration'),
                 calories=act_data.get('calories'),
                 vo2_max=act_data.get('vO2MaxValue'),
+                vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
                 average_heart_rate=act_data.get('averageHR'),
                 average_speed=avg_speed,
+                average_moving_speed=act_data.get('averageMovingSpeed'),
+                avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
                 average_pace=avg_pace,
                 activity_type_id=activity_type_obj.id if activity_type_obj else None,
                 average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                 total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                 total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                training_effect_label=act_data.get('trainingEffectLabel'),
+                aerobic_training_effect_message=act_data.get('aerobicTrainingEffectMessage'),
+                anaerobic_training_effect_message=act_data.get('anaerobicTrainingEffectMessage'),
                 lactate_threshold_heart_rate=lactate_threshold_heart_rate,
                 lactate_threshold_speed=lactate_threshold_speed  # Lactate threshold speed
             )
@@ -594,13 +600,19 @@ class SyncService:
                     duration=act_data.get('duration'),
                     calories=act_data.get('calories'),
                     vo2_max=act_data.get('vO2MaxValue'),
+                    vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
                     average_heart_rate=act_data.get('averageHR'),
                     average_speed=avg_speed,
+                    average_moving_speed=act_data.get('averageMovingSpeed'),
+                    avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
                     average_pace=avg_pace,
                     activity_type_id=activity_type_obj.id if activity_type_obj else None,
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
                     total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
+                    training_effect_label=act_data.get('trainingEffectLabel'),
+                    aerobic_training_effect_message=act_data.get('aerobicTrainingEffectMessage'),
+                    anaerobic_training_effect_message=act_data.get('anaerobicTrainingEffectMessage'),
                     epoc=act_data.get('activityTrainingLoad'),  # EPOC data
                     lactate_threshold_heart_rate=lactate_threshold_heart_rate,
                     lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
@@ -766,6 +778,141 @@ class SyncService:
         """Laster ned FIT-data for aktiviteter i en spesifikk periode."""
         return await self.fit_sync.download_fit_data_for_period(start_date, end_date)
 
+    def _apply_activity_summary_metrics(self, activity: Activity, metrics: Dict[str, Any]) -> bool:
+        """Lagrer utvidede Garmin activity-service-felter på aktiviteten."""
+        field_map = {
+            "vo2_max": "vo2_max",
+            "vo2_max_precise": "vo2_max_precise",
+            "average_moving_speed": "average_moving_speed",
+            "avg_grade_adjusted_speed": "avg_grade_adjusted_speed",
+            "ground_contact_time": "ground_contact_time",
+            "stride_length": "stride_length",
+            "vertical_oscillation": "vertical_oscillation",
+            "vertical_ratio": "vertical_ratio",
+            "begin_potential_stamina": "begin_potential_stamina",
+            "end_potential_stamina": "end_potential_stamina",
+            "min_available_stamina": "min_available_stamina",
+            "activity_body_battery_delta": "activity_body_battery_delta",
+            "training_load": "epoc",
+            "aerobic_training_effect": "total_training_effect",
+            "anaerobic_training_effect": "total_anaerobic_training_effect",
+            "training_effect_label": "training_effect_label",
+            "aerobic_training_effect_message": "aerobic_training_effect_message",
+            "anaerobic_training_effect_message": "anaerobic_training_effect_message",
+            "elevation_gain": "total_ascent",
+            "elevation_loss": "total_descent",
+        }
+        changed = False
+        for source_key, attr in field_map.items():
+            value = metrics.get(source_key)
+            if value is not None and getattr(activity, attr, None) != value:
+                setattr(activity, attr, value)
+                changed = True
+        return changed
+
+    async def sync_garmin_performance_metrics(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+        ignore_sync_state: bool = False,
+    ) -> dict:
+        """Synkroniserer dagsbaserte Garmin performance-metrikker til databasen."""
+        effective_start = start_date
+        if not ignore_sync_state:
+            try:
+                state = self.db.query(SyncState).filter_by(key="garmin_performance_metrics").first()
+                if state and state.last_synced_date and not force_refresh_recent:
+                    effective_start = max(
+                        effective_start,
+                        datetime.combine(state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc) + timedelta(days=1),
+                    )
+            except Exception as e:
+                logger.debug(f"Kunne ikke lese SyncState for garmin_performance_metrics: {e}")
+
+        if effective_start > end_date:
+            return {"status": "Fullført", "updated_count": 0, "skipped_count": 0, "failed_count": 0}
+
+        if not await self.garmin_client.initialize():
+            return {"status": "Feil", "message": "Kunne ikke autentisere mot Garmin"}
+
+        recent_cutoff = datetime.now(timezone.utc).date() - timedelta(days=7)
+        current_day = effective_start.date()
+        end_day = end_date.date()
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+
+        while current_day <= end_day:
+            row_date = datetime.combine(current_day, datetime.min.time(), tzinfo=timezone.utc)
+            existing = self.db.query(GarminPerformanceMetric).filter_by(date=row_date).first()
+            is_recent = current_day >= recent_cutoff
+            if existing and not (force_refresh_recent and is_recent):
+                skipped_count += 1
+                current_day += timedelta(days=1)
+                continue
+
+            try:
+                data = await self.garmin_client.get_daily_garmin_performance_metrics(current_day)
+                if not data:
+                    skipped_count += 1
+                    current_day += timedelta(days=1)
+                    continue
+
+                row = existing or GarminPerformanceMetric(date=row_date)
+                if existing is None:
+                    self.db.add(row)
+
+                fields = [
+                    "vo2_max", "vo2_max_precise", "fitness_age", "max_met_category",
+                    "altitude_acclimation", "previous_altitude_acclimation",
+                    "heat_acclimation_percentage", "previous_heat_acclimation_percentage",
+                    "current_altitude", "heat_trend", "altitude_trend",
+                    "monthly_load_aerobic_low", "monthly_load_aerobic_high",
+                    "monthly_load_anaerobic", "monthly_load_aerobic_low_target_min",
+                    "monthly_load_aerobic_low_target_max", "monthly_load_aerobic_high_target_min",
+                    "monthly_load_aerobic_high_target_max", "monthly_load_anaerobic_target_min",
+                    "monthly_load_anaerobic_target_max", "training_balance_feedback_phrase",
+                    "training_status", "training_status_feedback_phrase", "sport", "sub_sport",
+                    "fitness_trend", "fitness_trend_sport", "acwr_percent", "acwr_status",
+                    "acwr_status_feedback", "daily_training_load_acute",
+                    "daily_training_load_chronic", "daily_acute_chronic_workload_ratio",
+                    "load_tunnel_min", "load_tunnel_max", "endurance_score",
+                    "endurance_classification", "hill_score", "hill_endurance_score",
+                    "hill_strength_score", "raw_maxmet", "raw_training_load_balance",
+                    "raw_training_status", "raw_endurance_score", "raw_hill_score",
+                ]
+                for field in fields:
+                    setattr(row, field, data.get(field))
+                row.calculated_at = datetime.now(timezone.utc)
+                updated_count += 1
+            except Exception as e:
+                logger.warning(f"Kunne ikke synkronisere Garmin performance metrics for {current_day}: {e}")
+                failed_count += 1
+
+            current_day += timedelta(days=1)
+
+        self.db.commit()
+        if updated_count > 0:
+            try:
+                state = self.db.query(SyncState).filter_by(key="garmin_performance_metrics").first()
+                if not state:
+                    state = SyncState(key="garmin_performance_metrics")
+                    self.db.add(state)
+                state.last_synced_date = end_day
+                state.last_synced_at = datetime.now(timezone.utc)
+                self.db.commit()
+            except Exception as e:
+                logger.warning(f"Kunne ikke oppdatere SyncState for garmin_performance_metrics: {e}")
+
+        return {
+            "status": "Fullført",
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "period": {"start": str(effective_start.date()), "end": str(end_day)},
+        }
+
     async def sync_training_effect_data(
         self,
         start_date: datetime,
@@ -840,10 +987,17 @@ class SyncService:
                     activity.total_anaerobic_training_effect is not None
                     and activity.total_anaerobic_training_effect > 0
                 )
-                # Skip kun når begge TE-verdier allerede er gyldige.
+                has_extended_summary = (
+                    activity.vo2_max_precise is not None
+                    or activity.training_effect_label is not None
+                    or activity.avg_grade_adjusted_speed is not None
+                    or activity.begin_potential_stamina is not None
+                )
+                # Skip kun når både TE og de nye activity-service-feltene allerede finnes.
                 if (
                     has_valid_aerobic_te
                     and has_valid_anaerobic_te
+                    and has_extended_summary
                     and not (force_refresh_recent and is_recent)
                     and not is_latest
                 ):
@@ -853,16 +1007,9 @@ class SyncService:
                 logger.info(f"Prosesserer Training Effect for aktivitet {activity_id} ({i}/{len(activities)}) - {activity.activity_name}")
                 
                 try:
-                    # Hent Training Effect data
-                    te_data = await self.garmin_client.get_activity_training_effect(activity_id)
-                    if te_data:
-                        activity.total_training_effect = te_data.get('aerobic_training_effect')
-                        activity.total_anaerobic_training_effect = te_data.get('anaerobic_training_effect')
-                    
-                    # Hent EPOC data
-                    epoc_data = await self.garmin_client.get_activity_epoc_data(activity_id)
-                    if epoc_data:
-                        activity.epoc = epoc_data.get('activity_training_load')
+                    summary_metrics = await self.garmin_client.get_activity_summary_metrics(activity_id)
+                    if summary_metrics:
+                        self._apply_activity_summary_metrics(activity, summary_metrics)
                     
                     # Oppdater databasen
                     logger.info(f"✅ Oppdatert Training Effect for aktivitet {activity_id}: "
@@ -934,10 +1081,9 @@ class SyncService:
             failed = 0
             for i, act in enumerate(activities, 1):
                 try:
-                    te_data = await self.garmin_client.get_activity_training_effect(str(act.activity_id))
-                    if te_data:
-                        act.total_training_effect = te_data.get("aerobic_training_effect")
-                        act.total_anaerobic_training_effect = te_data.get("anaerobic_training_effect")
+                    summary_metrics = await self.garmin_client.get_activity_summary_metrics(str(act.activity_id))
+                    if summary_metrics:
+                        self._apply_activity_summary_metrics(act, summary_metrics)
                         updated += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:

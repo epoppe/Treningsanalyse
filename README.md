@@ -85,6 +85,46 @@ Verdiene lagres i databasen og er umiddelbart tilgjengelige uten re-beregning!
 - `GET /api/hrv` - HRV-data
 - `GET /api/body-battery` - Body Battery data
 
+## 🤖 MCP-lag for AI-coaching
+
+Backend har et lokalt stdio-basert MCP-lag som gjør treningsdata tilgjengelig for Cursor, Claude Desktop og andre MCP-klienter.
+
+Start serveren fra `backend`:
+
+```bash
+.venv/bin/python mcp_server.py
+```
+
+Eksempel på MCP-klientkonfigurasjon:
+
+```json
+{
+  "mcpServers": {
+    "treningsanalyse": {
+      "command": "/home/erik-poppe/.openclaw/workspace/Treningsanalyse/backend/.venv/bin/python",
+      "args": ["/home/erik-poppe/.openclaw/workspace/Treningsanalyse/backend/mcp_server.py"]
+    }
+  }
+}
+```
+
+MCP-serveren eksponerer få, rike verktøy:
+
+- `athlete_profile` - profil, terskler, siste VO2max/HRV og datadekning
+- `analyze_recent_training` - Banister, 80/20, terskel/drift og HRV-guidance
+- `training_readiness_check` - praktisk vurdering av hard/moderat/rolig/hvile
+- `list_recent_activities` - kompakt aktivitetsliste med eksplisitt dato/ukedag
+- `activity_deep_dive` - fysiologi og kilometersplits
+- `route_comparison` - sammenligning mot historiske samme-rute-løp
+- `compare_recent_runs` - siste løp eller samme-rute-sammenligning
+- `metric_catalog` - liste over whitelisted metrics som kan hentes
+- `query_metric_timeseries` - hent én metric som kompakt tidsserie
+
+Resources:
+
+- `treningsanalyse://athlete-profile`
+- `treningsanalyse://coaching-snapshot`
+
 ## 🎯 Ytelse
 
 Med automatisk beregning og intelligent caching:

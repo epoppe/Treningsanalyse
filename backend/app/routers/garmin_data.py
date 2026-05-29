@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Query, Depends, HTTPException
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from sqlalchemy.orm import Session
 from ..services.garmin_client import GarminClient
-from ..dependencies import get_garmin_client
+from ..dependencies import get_garmin_client, get_db
+from ..database.models.activity import GarminPerformanceMetric
 import asyncio
 from typing import Optional
 from garth.exc import GarthException
@@ -9,6 +11,30 @@ import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+@router.get("/garmin-performance")
+async def get_garmin_performance_metrics(
+    start_date: date = Query(..., description="Startdato YYYY-MM-DD"),
+    end_date: date = Query(..., description="Sluttdato YYYY-MM-DD"),
+    db: Session = Depends(get_db),
+):
+    """Hent lagrede Garmin VO2max/status/load/endurance/hill-metrikker fra databasen."""
+    start_dt = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+    end_dt = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
+    rows = (
+        db.query(GarminPerformanceMetric)
+        .filter(GarminPerformanceMetric.date >= start_dt)
+        .filter(GarminPerformanceMetric.date <= end_dt)
+        .order_by(GarminPerformanceMetric.date)
+        .all()
+    )
+    return [
+        {
+            column.name: getattr(row, column.name)
+            for column in GarminPerformanceMetric.__table__.columns
+        }
+        for row in rows
+    ]
 
 @router.get("/heart-rate")
 async def get_heart_rate(date: Optional[str] = None, garmin_client: GarminClient = Depends(get_garmin_client)):

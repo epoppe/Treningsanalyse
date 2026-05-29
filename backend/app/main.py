@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
-from .routers import activities, analysis, analytics, garmin_data, health, sync, training_readiness, training_stress, power, cache, bulk, factor_relationships
+from .routers import activities, analysis, analytics, garmin_data, health, sync, training_readiness, training_stress, power, cache, bulk, factor_relationships, route_analysis
 from .database.models.activity import Base
 from .database.session import engine as db_engine, SessionLocal
 from .database.models import activity as activity_model
@@ -72,6 +72,22 @@ async def lifespan(app: FastAPI):
             logger.warning("Database-migrasjon for løpeanalyse fullførte ikke – sjekk backend-logg.")
     except Exception as exc:
         logger.warning("Kunne ikke kjøre database-migrasjon for løpeanalyse: %s", exc)
+    try:
+        from migrate_add_route_analysis import migrate_add_route_analysis
+        if migrate_add_route_analysis():
+            logger.info("Database-migrasjon for ruteanalyse verifisert.")
+        else:
+            logger.warning("Database-migrasjon for ruteanalyse fullførte ikke – sjekk backend-logg.")
+    except Exception as exc:
+        logger.warning("Kunne ikke kjøre database-migrasjon for ruteanalyse: %s", exc)
+    try:
+        from migrate_add_garmin_performance_metrics import migrate_add_garmin_performance_metrics
+        if migrate_add_garmin_performance_metrics():
+            logger.info("Database-migrasjon for Garmin performance metrics verifisert.")
+        else:
+            logger.warning("Database-migrasjon for Garmin performance metrics fullførte ikke – sjekk backend-logg.")
+    except Exception as exc:
+        logger.warning("Kunne ikke kjøre database-migrasjon for Garmin performance metrics: %s", exc)
     
     yield
     logger.info("Stopper applikasjonen...")
@@ -104,6 +120,7 @@ app.include_router(garmin_data.router, prefix="/api", tags=["Garmin Data"])
 app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
 
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
+app.include_router(route_analysis.router, prefix="/api/analysis", tags=["route-analysis"])
 app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
 app.include_router(factor_relationships.router, prefix="/api/analysis", tags=["factor-relationships"])
 app.include_router(health.router, prefix="/api/health", tags=["health"])

@@ -276,6 +276,12 @@ class DataStorage:
         for col, dtype in self.activity_details_columns.items():
             if col in new_df.columns:
                 new_df[col] = self._convert_to_type(new_df[col], dtype, col)
+        if 'timestamp' in new_df.columns:
+            new_df['timestamp'] = pd.to_datetime(
+                new_df['timestamp'],
+                errors='coerce',
+                utc=True,
+            ).dt.tz_convert(None)
 
         current_df = self.activity_details_df
         
@@ -307,6 +313,11 @@ class DataStorage:
             current_df = current_df.reset_index()
         
         combined_df = pd.concat([current_df, new_df], ignore_index=True)
+        combined_df['timestamp'] = pd.to_datetime(
+            combined_df['timestamp'],
+            errors='coerce',
+            utc=True,
+        ).dt.tz_convert(None)
         combined_df.set_index('timestamp', inplace=True)
         combined_df.sort_index(inplace=True)
 

@@ -7,6 +7,7 @@ import logging
 import re
 import zipfile
 import io
+import xml.etree.ElementTree as ET
 
 import polars as pl
 from dateutil import parser as date_parser
@@ -14,6 +15,7 @@ from fitparse import FitFile
 from sqlalchemy import and_
 
 from ...database.models.activity import Activity
+from ...services.route_analysis_service import RouteAnalysisService
 from ...config import data_path
 
 logger = logging.getLogger(__name__)
@@ -45,9 +47,14 @@ class FitSyncService:
                 logger.info("FIT-data er en ZIP-fil, ekstrakterer FIT-fil...")
                 try:
                     with zipfile.ZipFile(io.BytesIO(fit_data), "r") as zip_file:
-                        fit_files = [name for name in zip_file.namelist() if name.endswith(".fit")]
+                        fit_files = [name for name in zip_file.namelist() if name.lower().endswith(".fit")]
+                        tcx_files = [name for name in zip_file.namelist() if name.lower().endswith(".tcx")]
+                        if not fit_files and tcx_files:
+                            tcx_filename = tcx_files[0]
+                            logger.info(f"Ekstrakterer TCX-fil: {tcx_filename}")
+                            return self.parse_tcx_data(zip_file.read(tcx_filename))
                         if not fit_files:
-                            logger.warning("Ingen FIT-fil funnet i ZIP-arkivet")
+                            logger.warning("Ingen FIT- eller TCX-fil funnet i ZIP-arkivet")
                             return None
                         fit_filename = fit_files[0]
                         logger.info(f"Ekstrakterer FIT-fil: {fit_filename}")
@@ -94,7 +101,76 @@ class FitSyncService:
         except ImportError:
             logger.error("fitparse-biblioteket er ikke installert. Kan ikke parse FIT-data.")
             return None
+
+    def parse_tcx_data(self, tcx_data: bytes) -> Optional[dict]:
+        if not tcx_data:
+            return None
+        try:
+            root = ET.fromstring(tcx_data)
+            records = []
+            total_ascent = 0.0
+            total_descent = 0.0
+            previous_altitude = None
+
+            def local_name(tag: str) -> str:
+                return tag.rsplit("}", 1)[-1]
+
+            def child_text(element, name: str) -> Optional[str]:
+                for child in list(element):
+                    if local_name(child.tag) == name:
+                        return child.text
+                return None
+
+            def nested_text(element, path: list[str]) -> Optional[str]:
+                current = element
+                for part in path:
+                    current = next((child for child in list(current) if local_name(child.tag) == part), None)
+                    if current is None:
+                        return None
+                return current.text
+
+            for trackpoint in root.iter():
+                if local_name(trackpoint.tag) != "Trackpoint":
+                    continue
+                timestamp = child_text(trackpoint, "Time")
+                latitude = nested_text(trackpoint, ["Position", "LatitudeDegrees"])
+                longitude = nested_text(trackpoint, ["Position", "LongitudeDegrees"])
+                if not timestamp:
+                    continue
+
+                altitude = child_text(trackpoint, "AltitudeMeters")
+                altitude_value = self.extract_numeric_value(altitude)
+                if previous_altitude is not None and altitude_value is not None:
+                    diff = altitude_value - previous_altitude
+                    if diff > 0:
+                        total_ascent += diff
+                    elif diff < 0:
+                        total_descent += abs(diff)
+                if altitude_value is not None:
+                    previous_altitude = altitude_value
+
+                record = {
+                    "timestamp": timestamp,
+                    "position_lat": self.extract_numeric_value(latitude),
+                    "position_long": self.extract_numeric_value(longitude),
+                    "distance": self.extract_numeric_value(child_text(trackpoint, "DistanceMeters")),
+                    "enhanced_altitude": altitude_value,
+                    "heart_rate": self.extract_numeric_value(nested_text(trackpoint, ["HeartRateBpm", "Value"])),
+                    "cadence": self.extract_numeric_value(child_text(trackpoint, "Cadence")),
+                }
+                records.append(record)
+
+            result = {"records": records}
+            if total_ascent > 0:
+                result["total_ascent"] = total_ascent
+            if total_descent > 0:
+                result["total_descent"] = total_descent
+            logger.info("Parsed %s TCX-trackpoints, total_ascent=%s, total_descent=%s", len(records), total_ascent, total_descent)
+            return result
         except Exception as exc:
+            logger.warning("Kunne ikke parse TCX-data: %s", exc)
+            return None
+        except BaseException as exc:
             logger.warning(f"Kunne ikke parse FIT-data: {exc}")
             return None
 
@@ -163,6 +239,11 @@ class FitSyncService:
                     metrics_result["negative_split_calculated"],
                     metrics_result["decoupling_calculated"],
                 )
+                try:
+                    route_result = RouteAnalysisService(self.sync_service.storage).analyze_activity(str(activity_id), self.sync_service.db)
+                    logger.info("Ruteanalyse for aktivitet %s: %s", activity_id, route_result)
+                except Exception as exc:
+                    logger.warning("Kunne ikke beregne ruteanalyse for aktivitet %s: %s", activity_id, exc)
             return True
         except Exception as exc:
             logger.error(f"Feil ved nedlasting av FIT-data for aktivitet {activity_id}: {exc}")
@@ -322,4 +403,3 @@ class FitSyncService:
         except Exception as exc:
             logger.error(f"Feil under FIT-data nedlasting for periode: {exc}")
             return {"status": "Feil", "message": str(exc)}
-
