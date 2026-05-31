@@ -427,6 +427,34 @@ def coaching_snapshot() -> Dict[str, Any]:
         return snapshot.payload if snapshot and snapshot.payload else {"status": "missing"}
 
 
+
+
+def duration_curve_snapshot() -> Dict[str, Any]:
+    """Best-effort duration curve (power and speed) from performance snapshots."""
+    from datetime import date as date_cls
+    from .mcp_derived_metrics_service import McpDerivedMetricsService
+    from .ppap_metrics_service import DURATION_CURVE_METRICS
+
+    with training_context() as (db, storage):
+        derived = McpDerivedMetricsService(db, storage)
+        day = date_cls.today()
+        power: Dict[str, Any] = {}
+        speed: Dict[str, Any] = {}
+        for key, (metric_type, _duration) in DURATION_CURVE_METRICS.items():
+            value = derived._ppap.get_duration_curve_value(key, day)
+            if value is None:
+                continue
+            if metric_type == "power":
+                power[key] = value
+            else:
+                speed[key] = value
+        return {
+            "date": day.isoformat(),
+            "power": power,
+            "speed": speed,
+            "source": "duration_curve_snapshot",
+        }
+
 def metric_catalog() -> Dict[str, Any]:
     metrics = [
         {
@@ -453,8 +481,8 @@ def metric_catalog() -> Dict[str, Any]:
     )
     categories = sorted({metric["category"] for metric in metrics})
     return {
-        "schema_version": "ppap-1",
-        "ppap_phase": 1,
+        "schema_version": "ppap-2",
+        "ppap_phase": 2,
         "metrics": metrics,
         "count": len(metrics),
         "categories": categories,

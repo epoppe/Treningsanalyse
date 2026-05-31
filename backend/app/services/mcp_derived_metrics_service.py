@@ -14,7 +14,12 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .coaching_analysis_service import CoachingAnalysisService
 from .performance_metrics_service import PerformanceMetricsService
-from .ppap_metrics_service import PpapMetricsService
+from .ppap_metrics_service import (
+    COACHING_ZONE_METRICS,
+    DURATION_CURVE_METRICS,
+    PpapMetricsService,
+    READINESS_COMPONENT_METRICS,
+)
 
 
 RACE_DISTANCES_M = {
@@ -201,6 +206,28 @@ class McpDerivedMetricsService:
             _cs, w_prime = self._ppap.get_critical_speed_snapshot(day)
             return w_prime
 
+        if metric_key in DURATION_CURVE_METRICS:
+            return self._ppap.get_duration_curve_value(metric_key, day)
+        if metric_key in COACHING_ZONE_METRICS:
+            return self._ppap.get_coaching_zone_pct(day, metric_key)
+        if metric_key in READINESS_COMPONENT_METRICS:
+            return self._ppap.get_readiness_component(day, metric_key)
+        if metric_key == "sleep.sleep_debt_7d":
+            return self._ppap.get_sleep_debt_hours(day, 7)
+        if metric_key == "sleep.sleep_debt_14d":
+            return self._ppap.get_sleep_debt_hours(day, 14)
+        if metric_key == "sleep.sleep_debt_28d":
+            return self._ppap.get_sleep_debt_hours(day, 28)
+        if metric_key == "sleep.consistency_score":
+            return self._ppap.get_sleep_consistency_score(day)
+        if metric_key == "running.critical_power":
+            cp, _wp = self._ppap.get_critical_power_snapshot(day)
+            return cp
+        if metric_key == "running.w_prime_power":
+            _cp, wp = self._ppap.get_critical_power_snapshot(day)
+            return wp
+
+
         if metric_key in {"cardio.hrv_7d", "cardio.hrv_30d", "cardio.hrv_90d"}:
             window = int(metric_key.rsplit("_", 1)[-1].replace("d", ""))
             return self._hrv_rolling(day, window)
@@ -273,6 +300,10 @@ class McpDerivedMetricsService:
 
         if metric_key == "running.economy_power":
             return self._ppap.get_running_economy_power(activity)
+
+        if metric_key == "running.form_degradation_index":
+            return self._ppap.get_form_degradation_index(activity)
+
 
         return None
 
@@ -618,29 +649,8 @@ class McpDerivedMetricsService:
         return None
 
     def _weather_pace(self, activity: Activity) -> Tuple[Optional[float], Optional[float]]:
-        pace = self._pace_sec_per_km(activity)
-        if pace is None:
-            return None, None
-        temperature = activity.temperature
-        if temperature is None and self.storage is not None:
-            try:
-                details = self.storage.get_activity_details(int(activity.activity_id))
-            except Exception:
-                details = None
-            if details is not None and not details.empty and "temperature" in details.columns:
-                values = details["temperature"].dropna()
-                if not values.empty:
-                    temperature = float(values.mean())
-        if temperature is None:
-            return round(pace, 1), 0.0
+        return self._ppap.get_weather_adjusted_pace(activity)
 
-        penalty = 0.0
-        if temperature > 15.0:
-            penalty += min(12.0, (float(temperature) - 15.0) * 0.8)
-        elif temperature < 5.0:
-            penalty += min(8.0, (5.0 - float(temperature)) * 0.5)
-        adjusted_pace = pace * (1.0 + penalty / 100.0)
-        return round(adjusted_pace, 1), round(penalty, 2)
 
     def _training_zone(self, activity: Activity) -> Optional[float]:
         if not activity.average_heart_rate:
@@ -684,6 +694,35 @@ DERIVED_METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "running.w_prime": {"category": "running", "unit": "m", "scope": "snapshot", "heuristic": False},
     "running.economy_hr": {"category": "running", "unit": "ratio", "scope": "activity", "heuristic": False},
     "running.economy_power": {"category": "running", "unit": "ratio", "scope": "activity", "heuristic": False},
+    "coaching.zone1_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
+    "coaching.zone2_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
+    "coaching.zone3_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
+    "readiness.sleep_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
+    "readiness.hrv_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
+    "readiness.form_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
+    "sleep.sleep_debt_7d": {"category": "sleep", "unit": "hours", "scope": "daily", "heuristic": False},
+    "sleep.sleep_debt_14d": {"category": "sleep", "unit": "hours", "scope": "daily", "heuristic": False},
+    "sleep.sleep_debt_28d": {"category": "sleep", "unit": "hours", "scope": "daily", "heuristic": False},
+    "sleep.consistency_score": {"category": "sleep", "unit": "score", "scope": "daily", "heuristic": True},
+    "running.critical_power": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.w_prime_power": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.form_degradation_index": {"category": "running", "unit": "score", "scope": "activity", "heuristic": False},
+    "running.power_30s": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_1m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_3m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_5m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_10m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_20m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_40m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.power_60m": {"category": "running", "unit": "W", "scope": "snapshot", "heuristic": False},
+    "running.speed_30s": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_1m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_3m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_5m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_10m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_20m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_40m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.speed_60m": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
     "cardio.hrv_7d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},
     "cardio.hrv_30d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},
     "cardio.hrv_90d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},

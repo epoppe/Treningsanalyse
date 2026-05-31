@@ -48,6 +48,12 @@ def athlete_profile_resource() -> str:
     return json.dumps(_call_tool(training_tools.athlete_profile), ensure_ascii=False, indent=2)
 
 
+@mcp.resource("treningsanalyse://duration-curve")
+def duration_curve_resource() -> str:
+    """Best power/speed duration curve points (all-time snapshot)."""
+    return json.dumps(_call_tool(training_tools.duration_curve_snapshot), ensure_ascii=False, indent=2)
+
+
 @mcp.resource("treningsanalyse://coaching-snapshot")
 def coaching_snapshot_resource() -> str:
     """Latest persisted coaching snapshot, if one has been calculated."""
