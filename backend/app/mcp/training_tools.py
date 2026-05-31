@@ -22,6 +22,7 @@ from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.session import SessionLocal
 from ..services.coaching_analysis_service import CoachingAnalysisService
 from ..services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG, McpDerivedMetricsService
+from ..services.ppap_metrics_service import PpapMetricsService
 from ..services.route_analysis_service import RouteAnalysisService
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
@@ -42,8 +43,6 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.vo2_max": {"model": Activity, "date_field": "start_time", "column": "vo2_max", "category": "performance", "unit": "ml/kg/min"},
     "activity.vo2_max_precise": {"model": Activity, "date_field": "start_time", "column": "vo2_max_precise", "category": "performance", "unit": "ml/kg/min"},
     "activity.decoupling_percent": {"model": Activity, "date_field": "start_time", "column": "decoupling_percent", "category": "aerobic_efficiency", "unit": "%"},
-    "activity.decoupling_pct": {"model": Activity, "date_field": "start_time", "column": "decoupling_percent", "category": "aerobic_efficiency", "unit": "%"},
-    "activity.efficiency_factor": {"model": Activity, "date_field": "start_time", "column": "avg_efficiency_factor", "category": "aerobic_efficiency", "unit": "m_per_s_per_bpm"},
     "activity.hr_drift_pct": {"model": Activity, "date_field": "start_time", "column": "hr_drift_pct", "category": "aerobic_efficiency", "unit": "%"},
     "activity.fatigue_resistance_score": {"model": Activity, "date_field": "start_time", "column": "fatigue_resistance_score", "category": "fatigue", "unit": "score"},
     "activity.average_power": {"model": Activity, "date_field": "start_time", "column": "average_power", "category": "power", "unit": "W"},
@@ -185,10 +184,6 @@ def _infer_metric_unit(column_name: str) -> str:
 
 _augment_metric_catalog()
 
-METRIC_KEY_ALIASES: Dict[str, str] = {
-    "activity.decoupling_pct": "activity.decoupling_percent",
-}
-
 
 @contextmanager
 def training_context() -> Iterator[tuple[Session, DataStorage]]:
@@ -225,11 +220,6 @@ def athlete_profile() -> Dict[str, Any]:
             for activity in db.query(Activity).options(selectinload(Activity.activity_type)).all()
             if is_running_activity(activity)
         ]
-        derived = McpDerivedMetricsService(db, None)
-        ppap = derived._ppap
-        today = date.today()
-        load = ppap.get_load_metrics(today)
-        composites = derived.get_readiness_composites(today)
 
         return {
             "athlete": {
@@ -255,13 +245,6 @@ def athlete_profile() -> Dict[str, Any]:
                 "rmssd": latest_hrv.rmssd if latest_hrv else None,
                 "status": latest_hrv.status if latest_hrv else None,
             },
-            "training_load_ppap": {
-                "ctl": load.get("ctl"),
-                "atl": load.get("atl"),
-                "tsb": load.get("tsb"),
-                "daily_tss": load.get("tss"),
-            },
-            "readiness_composites": composites,
             "stable_context": [
                 "Use metric units and min/km pace.",
                 "Prefer route-matched comparisons when evaluating repeated runs.",
@@ -296,23 +279,12 @@ def training_readiness_check(target_date: Optional[str] = None) -> Dict[str, Any
         else:
             recommendation = "normal_training"
 
-        derived = McpDerivedMetricsService(db, storage)
-        load = derived._ppap.get_load_metrics(end_date)
-        composites = derived.get_readiness_composites(end_date)
-
         return {
             "date": end_date.isoformat(),
             "recommendation": recommendation,
             "banister": banister,
             "hrv_guidance": hrv,
             "flags": flags,
-            "training_load_ppap": {
-                "ctl": load.get("ctl"),
-                "atl": load.get("atl"),
-                "tsb": load.get("tsb"),
-                "daily_tss": load.get("tss"),
-            },
-            "readiness_composites": composites,
         }
 
 
@@ -428,32 +400,60 @@ def coaching_snapshot() -> Dict[str, Any]:
 
 
 
-
-def duration_curve_snapshot() -> Dict[str, Any]:
-    """Best-effort duration curve (power and speed) from performance snapshots."""
-    from datetime import date as date_cls
-    from .mcp_derived_metrics_service import McpDerivedMetricsService
-    from .ppap_metrics_service import DURATION_CURVE_METRICS
-
+def duration_curve_snapshot(
+    scope: str = "all_time",
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
     with training_context() as (db, storage):
-        derived = McpDerivedMetricsService(db, storage)
-        day = date_cls.today()
-        power: Dict[str, Any] = {}
-        speed: Dict[str, Any] = {}
-        for key, (metric_type, _duration) in DURATION_CURVE_METRICS.items():
-            value = derived._ppap.get_duration_curve_value(key, day)
-            if value is None:
-                continue
-            if metric_type == "power":
-                power[key] = value
-            else:
-                speed[key] = value
-        return {
-            "date": day.isoformat(),
-            "power": power,
-            "speed": speed,
-            "source": "duration_curve_snapshot",
-        }
+        return PpapMetricsService(db, storage).duration_curve_snapshot(
+            scope=scope,
+            include_treadmill=include_treadmill,
+        )
+
+
+def duration_curve_year_comparison(
+    years: int = 3,
+    metric: str = "speed",
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
+    years = max(1, min(int(years), 10))
+    with training_context() as (db, storage):
+        return PpapMetricsService(db, storage).duration_curve_year_comparison(
+            years=years,
+            metric=metric,
+            include_treadmill=include_treadmill,
+        )
+
+
+def critical_speed_pace_by_year(
+    years: int = 3,
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
+    years = max(1, min(int(years), 10))
+    with training_context() as (db, storage):
+        return PpapMetricsService(db, storage).critical_speed_pace_by_year(
+            years=years,
+            include_treadmill=include_treadmill,
+        )
+
+
+def running_analysis_year_views(
+    years: int = 3,
+    metric: str = "speed",
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
+    return {
+        "duration_curve_year_comparison": duration_curve_year_comparison(
+            years=years,
+            metric=metric,
+            include_treadmill=include_treadmill,
+        ),
+        "critical_speed_pace_by_year": critical_speed_pace_by_year(
+            years=years,
+            include_treadmill=include_treadmill,
+        ),
+    }
+
 
 def metric_catalog() -> Dict[str, Any]:
     metrics = [
@@ -481,8 +481,7 @@ def metric_catalog() -> Dict[str, Any]:
     )
     categories = sorted({metric["category"] for metric in metrics})
     return {
-        "schema_version": "ppap-2",
-        "ppap_phase": 2,
+        "schema_version": "ppap-3",
         "metrics": metrics,
         "count": len(metrics),
         "categories": categories,
@@ -496,8 +495,6 @@ def query_metric_timeseries(
     end_date: Optional[str] = None,
     limit: int = 365,
 ) -> Dict[str, Any]:
-    metric_key = METRIC_KEY_ALIASES.get(metric_key, metric_key)
-
     if metric_key in DERIVED_METRIC_CATALOG:
         limit = max(1, min(int(limit), 5000))
         with training_context() as (db, storage):

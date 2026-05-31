@@ -12,6 +12,8 @@ from app.database.models import Base
 from app.database.models.activity import Activity, ActivityType
 from app.database.models.lactate_threshold_history import LactateThresholdHistory
 from app.mcp import training_tools
+from app.services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG
+from app.services.ppap_metrics_service import PpapMetricsService
 from app.storage import DataStorage
 
 
@@ -110,6 +112,26 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(series["status"], "ok")
         self.assertEqual(series["count"], 1)
         self.assertEqual(series["points"][0]["value"], 55.0)
+
+    def test_metric_catalog_exposes_ppap3_metrics(self):
+        with patch.object(training_tools, "training_context", self._context):
+            catalog = training_tools.metric_catalog()
+        keys = {metric["key"] for metric in catalog["metrics"]}
+        self.assertEqual(catalog["schema_version"], "ppap-3")
+        self.assertIn("readiness.total_score", keys)
+        self.assertIn("running.speed_5m_hist", keys)
+        self.assertIn("training.class_8_pct", keys)
+
+    def test_eight_training_classes_and_recovery_hours(self):
+        service = PpapMetricsService(self.db, self.storage)
+        self.assertEqual(service.hr_to_training_class(120, lt1=140, lt2=170, hr_max=185), 1)
+        self.assertIn("readiness.total_score", DERIVED_METRIC_CATALOG)
+        with patch.object(service, "get_readiness_component", return_value=40.0):
+            with patch.object(service, "get_tsb", return_value=-20.0):
+                with patch.object(service, "get_hrv_delta_pct", return_value=-10.0):
+                    hours = service.get_predicted_recovery_hours(datetime(2026, 5, 28).date())
+        self.assertGreaterEqual(hours, 6.0)
+        self.assertLessEqual(hours, 120.0)
 
 
 if __name__ == "__main__":
