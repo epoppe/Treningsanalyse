@@ -1,5 +1,11 @@
 import numpy as np
 import pandas as pd
+
+try:
+    import polars as pl
+except ImportError:  # pragma: no cover
+    pl = None
+
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Any
 from sqlalchemy.orm import Session
@@ -221,6 +227,12 @@ class TrainingStressService:
         Form = CTL - ATL
         """
         try:
+            if pl is None:
+                logger.warning(
+                    "Polars ikke installert — bruker calculate_training_load_metrics_simple"
+                )
+                return self.calculate_training_load_metrics_simple(start_date, end_date)
+
             logger.info(f"Starter beregning av Training Load metrics fra {start_date} til {end_date}")
             
             # Hent aktiviteter for perioden

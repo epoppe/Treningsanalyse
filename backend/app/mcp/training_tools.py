@@ -23,6 +23,7 @@ from ..database.session import SessionLocal
 from ..services.coaching_analysis_service import CoachingAnalysisService
 from ..services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG, McpDerivedMetricsService
 from .metric_glossary import build_metric_glossary, get_glossary_entry
+from .metric_quality import build_metric_quality_report, format_metric_quality_markdown
 from ..services.route_analysis_service import RouteAnalysisService
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
@@ -518,6 +519,28 @@ def query_metric_timeseries(
             "points": points,
             "count": len(points),
         }
+
+
+def metric_quality_report(
+    target_date: Optional[str] = None,
+    lookback_days: int = 14,
+    markdown: bool = False,
+) -> Dict[str, Any]:
+    """
+    Kvalitetsrapport for alle metrikker i metric_catalog: status, siste verdi, dato, heuristikk.
+    """
+    lookback_days = max(1, min(int(lookback_days), 90))
+    ref = _parse_date(target_date) if target_date else date.today()
+    catalog = metric_catalog()
+    report = build_metric_quality_report(
+        catalog_metrics=catalog["metrics"],
+        query_timeseries_fn=query_metric_timeseries,
+        reference_date=ref,
+        lookback_days=lookback_days,
+    )
+    if markdown:
+        report["markdown"] = format_metric_quality_markdown(report)
+    return report
 
 
 def _resolve_activity(

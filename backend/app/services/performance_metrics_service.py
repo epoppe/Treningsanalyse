@@ -404,9 +404,14 @@ class PerformanceMetricsService:
         days: Optional[int] = None,
         *,
         include_treadmill: bool = False,
+        end_date: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         efforts: List[Dict[str, Any]] = []
-        for activity in self._running_activities(days=days, include_treadmill=include_treadmill):
+        for activity in self._running_activities(
+            days=days,
+            include_treadmill=include_treadmill,
+            end_date=end_date,
+        ):
             efforts.extend(self.extract_activity_best_efforts(activity))
         return efforts
 
@@ -476,9 +481,14 @@ class PerformanceMetricsService:
         days: Optional[int] = None,
         *,
         include_treadmill: bool = False,
+        end_date: Optional[date] = None,
     ) -> Dict[str, Any]:
         return self._build_duration_curve_from_efforts(
-            self.collect_best_efforts(days=days, include_treadmill=include_treadmill),
+            self.collect_best_efforts(
+                days=days,
+                include_treadmill=include_treadmill,
+                end_date=end_date,
+            ),
             days=days,
         )
 

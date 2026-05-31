@@ -68,6 +68,60 @@ class PredictedRaceTimeTests(unittest.TestCase):
         activities = svc._running_activities(days=30, end_date=date(2026, 5, 31))
         self.assertIsInstance(activities, list)
 
+    def test_build_duration_curve_accepts_end_date(self):
+        from app.services.performance_metrics_service import PerformanceMetricsService
+
+        svc = PerformanceMetricsService(self.db, self.storage)
+        curve = svc.build_duration_curve(days=90, end_date=date(2026, 5, 31))
+        self.assertIn("curves", curve)
+
+
+class RollingDailySeriesTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        engine = create_engine(f"sqlite:///{Path(self.tmpdir.name) / 'test.db'}")
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.db = self.Session()
+        self.service = McpDerivedMetricsService(self.db, MagicMock())
+        self.service._ppap = MagicMock()
+        self.service._ppap.get_rolling_duration_curve_value.return_value = 4.2
+
+    def tearDown(self):
+        self.db.close()
+        self.tmpdir.cleanup()
+
+    def test_rolling_daily_series_calls_ppap(self):
+        points = self.service._rolling_daily_scope_series(
+            "running.speed_5m_hist",
+            date(2026, 5, 28),
+            date(2026, 5, 31),
+            4,
+        )
+        self.assertEqual(len(points), 4)
+        self.assertEqual(points[-1]["value"], 4.2)
+
+
+class RecoveryEfficiencyTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        engine = create_engine(f"sqlite:///{Path(self.tmpdir.name) / 'test.db'}")
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.db = self.Session()
+        self.service = McpDerivedMetricsService(self.db, MagicMock())
+        self.service._ppap = MagicMock()
+        self.service._ppap.get_predicted_recovery_hours.return_value = 36.0
+
+    def tearDown(self):
+        self.db.close()
+        self.tmpdir.cleanup()
+
+    @patch.object(McpDerivedMetricsService, "_recovery_score", return_value=80.0)
+    def test_recovery_efficiency_score(self, _mock_recovery):
+        score = self.service._recovery_efficiency_score(date(2026, 5, 31))
+        self.assertEqual(score, 80.0)
+
 
 if __name__ == "__main__":
     unittest.main()

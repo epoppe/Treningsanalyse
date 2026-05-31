@@ -146,6 +146,21 @@ def query_metric_timeseries(
     )
 
 
+@mcp.tool()
+def metric_quality_report(
+    target_date: Optional[str] = None,
+    lookback_days: int = 14,
+    markdown: bool = False,
+) -> dict:
+    """Quality report for all catalog metrics: ok / no_data / bug, latest value, date, heuristic flag."""
+    return _call_tool(
+        training_tools.metric_quality_report,
+        target_date=target_date,
+        lookback_days=lookback_days,
+        markdown=markdown,
+    )
+
+
 @mcp.prompt()
 def training_readiness_prompt(target_date: Optional[str] = None) -> str:
     return (

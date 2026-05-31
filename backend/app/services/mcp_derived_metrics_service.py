@@ -148,6 +148,42 @@ class McpDerivedMetricsService:
             return []
         return [{"date": end.isoformat(), "timestamp": None, "value": value}]
 
+    def _rolling_daily_scope_series(
+        self,
+        metric_key: str,
+        start: date,
+        end: date,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Daglig rullerende beste (typisk 365d) for duration-curve *_hist-metrikker."""
+        dates: List[date] = []
+        current = end
+        while current >= start and len(dates) < limit:
+            dates.append(current)
+            current -= timedelta(days=1)
+        dates.reverse()
+
+        points: List[Dict[str, Any]] = []
+        for day in dates:
+            value = self._ppap.get_rolling_duration_curve_value(metric_key, day)
+            if value is None:
+                continue
+            points.append({"date": day.isoformat(), "timestamp": None, "value": value})
+        return points
+
+    def _recovery_efficiency_score(self, day: date) -> Optional[float]:
+        """
+        Heuristikk: recovery_score justert for forventet restitusjonstid (kortere = bedre).
+        """
+        recovery = self._recovery_score(day)
+        if recovery is None:
+            return None
+        hours = self._ppap.get_predicted_recovery_hours(day)
+        if hours is None:
+            return round(max(0.0, min(100.0, float(recovery))), 1)
+        efficiency = float(recovery) * (36.0 / max(float(hours), 6.0))
+        return round(max(0.0, min(100.0, efficiency)), 1)
+
     def _activity_scope_series(
         self,
         metric_key: str,
