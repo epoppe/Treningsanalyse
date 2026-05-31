@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 import logging
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 
 from ...database.models.activity import Activity, ActivityType
 from ...utils.activity_filters import is_running_activity
@@ -12,11 +12,105 @@ from ...utils.activity_filters import is_running_activity
 logger = logging.getLogger(__name__)
 
 
+def tss_needs_refresh(activity: Activity) -> bool:
+    """True når TSS bør beregnes på nytt (mangler eller avviker fra EPOC)."""
+    if activity.training_stress_score is None:
+        return True
+    if activity.epoc and float(activity.epoc) > 0:
+        expected = round(float(activity.epoc), 1)
+        stored = round(float(activity.training_stress_score), 1)
+        return abs(stored - expected) > 0.05
+    return False
+
+
 class SyncMetricsService:
     def __init__(self, sync_service: Any):
         self.sync_service = sync_service
+        self._defer_snapshot_recalc = False
+        self._snapshot_recalc_pending = False
 
-    def calculate_metrics_for_new_activity(self, activity_id: str) -> dict:
+    def begin_batch(self) -> None:
+        """Unngå full performance-snapshot per aktivitet under batch-synk."""
+        self._defer_snapshot_recalc = True
+        self._snapshot_recalc_pending = False
+
+    def end_batch(self) -> None:
+        """Kjør utsatt performance-snapshot én gang etter batch."""
+        self._defer_snapshot_recalc = False
+        if self._snapshot_recalc_pending:
+            self._recalculate_performance_snapshots_once()
+
+    def _recalculate_performance_snapshots_once(self) -> None:
+        try:
+            from ..performance_metrics_service import PerformanceMetricsService
+
+            performance_service = PerformanceMetricsService(
+                self.sync_service.db,
+                self.sync_service.storage,
+            )
+            performance_service.recalculate_performance_snapshots()
+            self._snapshot_recalc_pending = False
+            logger.info("✅ Performance snapshots oppdatert (batch)")
+        except Exception as exc:
+            logger.warning(f"Kunne ikke oppdatere performance snapshots: {exc}")
+
+    def refresh_metrics_after_te_sync(self, start_date: datetime, end_date: datetime) -> dict:
+        """
+        Oppdater TSS etter Training Effect har satt EPOC (TSS = EPOC når tilgjengelig).
+        Kalles etter sync_training_effect_data i sync_activities_with_fit_data.
+        """
+        summary = {"tss_refreshed": 0, "activities_checked": 0}
+        activities = (
+            self.sync_service.db.query(Activity)
+            .filter(
+                and_(
+                    Activity.start_time >= start_date,
+                    Activity.start_time <= end_date,
+                )
+            )
+            .all()
+        )
+        summary["activities_checked"] = len(activities)
+        for activity in activities:
+            if not tss_needs_refresh(activity):
+                continue
+            if self._calculate_tss(activity, str(activity.activity_id)):
+                summary["tss_refreshed"] += 1
+        try:
+            self.sync_service.db.commit()
+        except Exception as exc:
+            self.sync_service.db.rollback()
+            logger.error(f"Feil ved lagring etter TE-metrics refresh: {exc}")
+        if summary["tss_refreshed"] > 0:
+            self._recalculate_performance_snapshots_once()
+        return summary
+
+    def _calculate_tss(self, activity: Activity, activity_id: str) -> bool:
+        try:
+            from ..training_stress_service import TrainingStressService
+
+            tss_service = TrainingStressService(self.sync_service.db)
+            tss = tss_service.calculate_tss_for_activity(activity)
+            if tss is None:
+                return False
+            activity.training_stress_score = tss
+            logger.info(
+                "✅ Oppdatert TSS for aktivitet %s: %s (EPOC=%s)",
+                activity_id,
+                tss,
+                activity.epoc,
+            )
+            return True
+        except Exception as exc:
+            logger.warning(f"Feil ved TSS-oppdatering for aktivitet {activity_id}: {exc}")
+            return False
+
+    def calculate_metrics_for_new_activity(
+        self,
+        activity_id: str,
+        *,
+        skip_snapshot_recalc: bool = False,
+    ) -> dict:
         results = {
             "activity_id": activity_id,
             "tss_calculated": False,
@@ -37,19 +131,9 @@ class SyncMetricsService:
                 results["errors"].append("Aktivitet ikke funnet i database")
                 return results
 
-            if activity.training_stress_score is None:
-                try:
-                    from ..training_stress_service import TrainingStressService
-
-                    tss_service = TrainingStressService(self.sync_service.db)
-                    tss = tss_service.calculate_tss_for_activity(activity)
-                    if tss is not None:
-                        activity.training_stress_score = tss
-                        results["tss_calculated"] = True
-                        logger.info(f"✅ Beregnet TSS for aktivitet {activity_id}: {tss}")
-                except Exception as exc:
-                    logger.warning(f"Feil ved beregning av TSS for aktivitet {activity_id}: {exc}")
-                    results["errors"].append(f"TSS feil: {str(exc)}")
+            if tss_needs_refresh(activity):
+                if self._calculate_tss(activity, activity_id):
+                    results["tss_calculated"] = True
 
             if is_running_activity(activity):
                 if activity.average_power is None:
@@ -137,8 +221,12 @@ class SyncMetricsService:
                             activity_id,
                             fatigue.get("fatigue_resistance_score"),
                         )
-                    performance_service.recalculate_performance_snapshots()
-                    results["performance_snapshots_updated"] = True
+                    if skip_snapshot_recalc or self._defer_snapshot_recalc:
+                        self._snapshot_recalc_pending = True
+                        results["performance_snapshots_updated"] = False
+                    else:
+                        performance_service.recalculate_performance_snapshots()
+                        results["performance_snapshots_updated"] = True
                 except Exception as exc:
                     logger.debug(f"Kunne ikke oppdatere performance metrics for aktivitet {activity_id}: {exc}")
 

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -104,6 +105,39 @@ class GarminPerformanceMetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(activity.total_training_effect, 4.2)
         self.assertEqual(activity.total_anaerobic_training_effect, 1.1)
         self.assertEqual(activity.training_effect_label, "TEMPO")
+
+    @patch("app.services.training_stress_service.TrainingStressService")
+    async def test_training_effect_sync_triggers_tss_refresh_when_epoc_differs(
+        self, mock_tss_cls
+    ):
+        mock_tss_cls.return_value.calculate_tss_for_activity.return_value = 180.0
+        self.db.add(
+            Activity(
+                activity_id="23032886496",
+                activity_name="Test løp",
+                start_time=datetime(2026, 5, 27, 14, 39, tzinfo=timezone.utc),
+                distance=5000,
+                duration=1800,
+                training_stress_score=55.0,
+            )
+        )
+        self.db.commit()
+
+        await self.service.sync_training_effect_data(
+            datetime(2026, 5, 27, tzinfo=timezone.utc),
+            datetime(2026, 5, 28, tzinfo=timezone.utc),
+            force_refresh_recent=True,
+            ignore_sync_state=True,
+        )
+
+        refreshed = self.service.metrics_service.refresh_metrics_after_te_sync(
+            datetime(2026, 5, 27, tzinfo=timezone.utc),
+            datetime(2026, 5, 28, tzinfo=timezone.utc),
+        )
+        activity = self.db.query(Activity).filter_by(activity_id="23032886496").one()
+        self.assertEqual(activity.epoc, 180.0)
+        self.assertEqual(refreshed["tss_refreshed"], 1)
+        self.assertEqual(activity.training_stress_score, 180.0)
 
 
 if __name__ == "__main__":
