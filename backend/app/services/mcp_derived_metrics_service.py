@@ -422,12 +422,16 @@ class McpDerivedMetricsService:
                 drift_values.append(float(decoupling))
         if not drift_values:
             analysis = self._coaching(day)
-            median = analysis.get("thresholds", {}).get("drift", {}).get("recent_median_hr_drift_pct")
-            if median is None:
-                median = analysis.get("thresholds", {}).get("drift", {}).get("recent_median_decoupling_pct")
-            if median is None:
+            fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
+                "recent_median_hr_drift_pct"
+            )
+            if fallback_drift is None:
+                fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
+                    "recent_median_decoupling_pct"
+                )
+            if fallback_drift is None:
                 return None
-            drift_values = [float(median)]
+            drift_values = [float(fallback_drift)]
         median_drift = median(drift_values)
         return round(max(0.0, min(100.0, 100.0 - median_drift * 2.5)), 1)
 

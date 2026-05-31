@@ -463,12 +463,19 @@ def query_metric_timeseries(
         limit = max(1, min(int(limit), 5000))
         with training_context() as (db, storage):
             service = McpDerivedMetricsService(db, storage)
-            return service.query_timeseries(
-                metric_key,
-                start_date=_parse_date(start_date) if start_date else None,
-                end_date=_parse_date(end_date) if end_date else None,
-                limit=limit,
-            )
+            try:
+                return service.query_timeseries(
+                    metric_key,
+                    start_date=_parse_date(start_date) if start_date else None,
+                    end_date=_parse_date(end_date) if end_date else None,
+                    limit=limit,
+                )
+            except Exception as exc:
+                return {
+                    "status": "error",
+                    "metric_key": metric_key,
+                    "message": str(exc),
+                }
 
     if metric_key not in METRIC_CATALOG:
         return {

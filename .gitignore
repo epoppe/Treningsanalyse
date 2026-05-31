@@ -102,6 +102,7 @@ test_*.py
 !backend/tests/test_mcp_training_tools.py
 !backend/tests/test_coaching_decision_metrics.py
 !backend/tests/test_sync_metrics.py
+!backend/tests/test_mcp_derived_metrics_bugs.py
 !ANALYTICS_METRICS.md
 
 # Virtualenv
