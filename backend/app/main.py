@@ -125,6 +125,7 @@ app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"]
 app.include_router(factor_relationships.router, prefix="/api/analysis", tags=["factor-relationships"])
 app.include_router(health.router, prefix="/api/health", tags=["health"])
 app.include_router(training_readiness.router, prefix="/api", tags=["Training Readiness"])
+app.include_router(readiness_v1.router)
 app.include_router(training_stress.router, prefix="/api", tags=["Training Stress"])
 app.include_router(power.router, prefix="/api", tags=["Power"])
 app.include_router(cache.router, prefix="/api", tags=["Cache"])

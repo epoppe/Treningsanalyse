@@ -100,9 +100,8 @@ test_*.py
 !backend/tests/test_garmin_performance_metrics.py
 !backend/tests/test_coaching_analysis.py
 !backend/tests/test_mcp_training_tools.py
+!backend/tests/test_ppap_metrics.py
 !ANALYTICS_METRICS.md
-!docs/PPAP_MCP_IMPLEMENTERINGSPLAN.md
-!docs/PERSONAL_PERFORMANCE_ANALYTICS_SPEC.md
 
 # Virtualenv
 .venv
