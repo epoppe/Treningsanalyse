@@ -50,6 +50,13 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.normalized_power": {"model": Activity, "date_field": "start_time", "column": "normalized_power", "category": "power", "unit": "W"},
     "activity.average_running_cadence": {"model": Activity, "date_field": "start_time", "column": "average_running_cadence", "category": "running_dynamics", "unit": "spm"},
     "activity.stride_length": {"model": Activity, "date_field": "start_time", "column": "stride_length", "category": "running_dynamics", "unit": "m"},
+    "activity.ground_contact_time": {
+        "model": Activity,
+        "date_field": "start_time",
+        "column": "ground_contact_time",
+        "category": "running_dynamics",
+        "unit": "ms",
+    },
     "activity.vertical_oscillation": {"model": Activity, "date_field": "start_time", "column": "vertical_oscillation", "category": "running_dynamics", "unit": "cm"},
     "activity.vertical_ratio": {"model": Activity, "date_field": "start_time", "column": "vertical_ratio", "category": "running_dynamics", "unit": "%"},
     "activity.training_readiness_score": {"model": Activity, "date_field": "start_time", "column": "training_readiness_score", "category": "readiness", "unit": "score"},
@@ -150,15 +157,32 @@ def _augment_metric_catalog() -> None:
                     "auto_discovered": True,
                 },
             )
+    _refresh_metric_catalog_units()
+
+
+def _refresh_metric_catalog_units() -> None:
+    """Oppdater enheter for auto-oppdagede felt (inkl. eksisterende catalog-nøkler)."""
+    for definition in METRIC_CATALOG.values():
+        column = definition.get("column")
+        if column:
+            definition["unit"] = _infer_metric_unit(column)
 
 
 def _infer_metric_unit(column_name: str) -> str:
     name = column_name.lower()
-    if name in {"year", "week_number", "month"} or name.endswith("_count") or "count" in name:
+    if name in {"year", "week_number", "month"} or name.endswith("_count") or name == "count":
         return "count"
-    if "percent" in name or name.endswith("_pct") or "ratio" in name:
+    if name.endswith("_trend"):
         return "%"
-    if "heart_rate" in name or name.endswith("_hr") or "hr_" in name:
+    if "percent" in name or name.endswith("_pct"):
+        return "%"
+    if name.endswith("_ratio") or name.endswith("_ratio_pct"):
+        return "%"
+    if name in {"ground_contact_time", "stance_time"} or name.endswith("contact_time"):
+        return "ms"
+    if "duration" in name:
+        return "s"
+    if "heart_rate" in name or name.endswith("_hr") or name.startswith("hr_"):
         return "bpm"
     if "speed" in name:
         return "m/s"
@@ -166,7 +190,7 @@ def _infer_metric_unit(column_name: str) -> str:
         return "s/km"
     if "distance" in name:
         return "m"
-    if "duration" in name or "time" in name:
+    if "time" in name:
         return "s"
     if "power" in name:
         return "W"
