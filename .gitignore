@@ -104,6 +104,7 @@ test_*.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
 !backend/tests/test_metric_quality_report.py
+!backend/tests/test_activity_data_validation.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 

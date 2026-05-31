@@ -16,6 +16,10 @@ from sqlalchemy import and_
 
 from ...database.models.activity import Activity
 from ...services.route_analysis_service import RouteAnalysisService
+from ...services.activity_data_validation import (
+    max_hr_from_fit_records,
+    validate_and_repair_activity,
+)
 from ...config import data_path
 
 logger = logging.getLogger(__name__)
@@ -69,6 +73,8 @@ class FitSyncService:
             records = []
             total_ascent = None
             total_descent = None
+            session_max_hr = None
+            session_min_hr = None
 
             for message in fitfile.get_messages("session"):
                 for field in message.fields:
@@ -76,6 +82,10 @@ class FitSyncService:
                         total_ascent = field.value
                     elif field.name == "total_descent":
                         total_descent = field.value
+                    elif field.name == "max_heart_rate":
+                        session_max_hr = self.extract_numeric_value(field.value)
+                    elif field.name == "min_heart_rate":
+                        session_min_hr = self.extract_numeric_value(field.value)
 
             for record in fitfile.get_messages("record"):
                 parsed_record = {}
@@ -93,6 +103,10 @@ class FitSyncService:
                 result["total_ascent"] = total_ascent
             if total_descent is not None:
                 result["total_descent"] = total_descent
+            if session_max_hr is not None:
+                result["max_heart_rate"] = session_max_hr
+            if session_min_hr is not None:
+                result["min_heart_rate"] = session_min_hr
 
             logger.info(
                 f"Parsed {len(records)} FIT-records, total_ascent={total_ascent}, total_descent={total_descent}"
@@ -240,6 +254,15 @@ class FitSyncService:
             activity = self.sync_service.db.query(Activity).filter_by(activity_id=activity_id).first()
             if activity:
                 activity.detailed_metrics = details_json
+                fit_max = details_json.get("max_heart_rate") or max_hr_from_fit_records(details_json)
+                if fit_max is not None:
+                    avg = activity.average_heart_rate
+                    if avg is None or fit_max >= avg:
+                        activity.max_heart_rate = fit_max
+                fit_min = details_json.get("min_heart_rate")
+                if fit_min is not None:
+                    activity.min_heart_rate = fit_min
+                validate_and_repair_activity(activity, storage=self.sync_service.storage)
                 self.sync_service.db.commit()
                 logger.info(f"Oppdaterte database med FIT-data for aktivitet {activity_id}")
 
