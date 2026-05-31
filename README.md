@@ -59,7 +59,9 @@ Verdiene lagres i databasen og er umiddelbart tilgjengelige uten re-beregning!
 
 ## 📚 Dokumentasjon
 
-- **START_HERE.md** - Start her! Komplett guide
+- **START_HERE.md** - Start her! Komplett guide og trygg oppstart
+- **REPO_NOTES.md** - Struktur og lavrisiko vedlikeholdsnotater
+- **DEVELOPMENT_NOTES.md** - Utviklernotater om frontend-/Node-struktur
 - **AUTO_CALCULATION_SYSTEM.md** - Automatisk beregningssystem
 - **IMPLEMENTATION_SUMMARY.md** - Oversikt over optimaliseringer
 - **OPTIMIZATION_CHANGES.md** - Detaljerte endringer
@@ -156,4 +158,4 @@ Personlig prosjekt - Ikke for kommersiell bruk
 ---
 
 **Status:** ✅ Produksjonsklar  
-**Siste oppdatering:** Oktober 2025
+**Siste oppdatering:** Mai 2026
