@@ -107,6 +107,7 @@ test_*.py
 !backend/tests/test_activity_data_validation.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
+!MCP_CURRENT_METRICS.md
 
 # Virtualenv
 .venv
