@@ -408,6 +408,17 @@ def metric_glossary(
     return build_metric_glossary(metric_key=metric_key, category=category, search=search)
 
 
+
+def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, Any]:
+    """Samlet coaching-beslutningsbilde: consistency, event readiness, limiters, anbefalt økt."""
+    day = _parse_date(target_date) if target_date else date.today()
+    with training_context() as (db, storage):
+        from ..services.ppap_metrics_service import PpapMetricsService
+        from ..services.coaching_decision_metrics_service import CoachingDecisionMetricsService
+        service = CoachingDecisionMetricsService(db, PpapMetricsService(db, storage))
+        return service.build_coaching_snapshot(day)
+
+
 def metric_catalog() -> Dict[str, Any]:
     metrics = []
     for key, definition in sorted(METRIC_CATALOG.items()):

@@ -278,7 +278,8 @@ class PpapMetricsService:
             try:
                 self._readiness_cache[day] = service.calculate_training_readiness(day)
             finally:
-                service.close()
+                if hasattr(service, "close"):
+                    service.close()
         payload = self._readiness_cache[day]
         if field == "total_score":
             value = payload.get("total_score")

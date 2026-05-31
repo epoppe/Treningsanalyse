@@ -119,6 +119,49 @@ CATEGORY_GLOSSARY: Dict[str, Dict[str, str]] = {
 
 # Eksplisitte oppføringer for alle derived + viktige lagrede nøkler
 METRIC_GLOSSARY: Dict[str, Dict[str, Any]] = {
+    "consistency.score": {
+        "title": "Training Consistency Score",
+        "definition": "Andel av siste 28 dager med minst én løpeøkt (0–100).",
+        "interpretation": "85+ svært bra, 70–85 bra, under 60 inkonsistent.",
+        "coaching_use": "Vurder om fremgang stoppes av hull i treningen, ikke bare CTL.",
+        "source": "computed",
+    },
+    "fitness.gain_rate": {
+        "title": "Fitness gain rate (CTL)",
+        "definition": "Endring i CTL per dag over siste 42 dager.",
+        "interpretation": "Positiv = bygger form; negativ = taper eller sykdom.",
+        "coaching_use": "Retning viktigere enn dagens CTL-nivå.",
+        "source": "computed",
+    },
+    "coaching.polarization_score": {
+        "title": "Polarization score",
+        "definition": "Hvor nær 80/20-fordeling (lav/høy) brukeren er.",
+        "interpretation": "100 = ideell polarisert profil siste 28 dager.",
+        "coaching_use": "Juster volum mot rolig vs hard trening.",
+        "source": "computed",
+    },
+    "running.durability_score": {
+        "title": "Durability score",
+        "definition": "Evnen til å holde prestasjon på langkjøringer (drift, fatigue resistance).",
+        "interpretation": "Høyere = bedre utholdenhet sent i lange økter.",
+        "coaching_use": "Maraton/HM-planlegging og langtur-kvalitet.",
+        "source": "computed",
+    },
+    "readiness.5k": {
+        "title": "Event readiness 5K",
+        "definition": "Konkurransespesifikk readiness 0–100 for 5 km.",
+        "interpretation": "Kombinerer Garmin readiness, TSB, HRV og søvn for kort race.",
+        "coaching_use": "Anbefal start eller utsettelse av 5K/10K.",
+        "source": "heuristic",
+    },
+    "coaching.recommended_workout": {
+        "title": "Anbefalt neste økt",
+        "definition": "Enum: rest, recovery_run, easy_run, threshold, vo2_intervals, long_run, …",
+        "interpretation": "Samlet anbefaling fra readiness, belastning og treningsfase.",
+        "coaching_use": "Konkret «hva bør du gjøre i dag».",
+        "source": "heuristic",
+    },
+
   "readiness.total_score": {
     "title": "Garmin training readiness (total)",
     "definition": "Samlet dags-score 0–100 fra TrainingReadinessService (søvn, HRV, form).",

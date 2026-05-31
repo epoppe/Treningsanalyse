@@ -39,6 +39,13 @@ class McpDerivedMetricsService:
         self._coaching_cache: Dict[Tuple[date, int], Dict[str, Any]] = {}
         self._cs_cache: Optional[Dict[str, Any]] = None
         self._ppap = PpapMetricsService(db, storage)
+        self._coaching_decision = None
+
+    def _coaching_decision_service(self):
+        if self._coaching_decision is None:
+            from .coaching_decision_metrics_service import CoachingDecisionMetricsService
+            self._coaching_decision = CoachingDecisionMetricsService(self.db, self._ppap)
+        return self._coaching_decision
 
     def metric_definition(self, metric_key: str) -> Optional[Dict[str, Any]]:
         return DERIVED_METRIC_CATALOG.get(metric_key)
@@ -285,6 +292,50 @@ class McpDerivedMetricsService:
         if metric_key == "injury_risk_score":
             return self._injury_risk_score(day)
 
+        cd = self._coaching_decision_service()
+        if metric_key == "consistency.score":
+            return cd.get_consistency_score(day)
+        if metric_key == "fitness.gain_rate":
+            return cd.get_fitness_gain_rate(day)
+        if metric_key == "coaching.polarization_score":
+            return cd.get_polarization_score(day)
+        if metric_key == "training.block":
+            return cd.get_training_block(day)
+        if metric_key == "readiness.5k":
+            return cd.get_event_readiness(day, "5k")
+        if metric_key == "readiness.10k":
+            return cd.get_event_readiness(day, "10k")
+        if metric_key == "readiness.hm":
+            return cd.get_event_readiness(day, "hm")
+        if metric_key == "readiness.marathon":
+            return cd.get_event_readiness(day, "marathon")
+        if metric_key == "performance.pb_probability_5k":
+            return cd.get_pb_probability(day, "5k")
+        if metric_key == "performance.pb_probability_10k":
+            return cd.get_pb_probability(day, "10k")
+        if metric_key == "performance.pb_probability_hm":
+            return cd.get_pb_probability(day, "hm")
+        if metric_key == "performance.pb_probability_marathon":
+            return cd.get_pb_probability(day, "marathon")
+        if metric_key == "long_run.quality_score":
+            return cd.get_long_run_quality_score(day)
+        if metric_key == "running.durability_score":
+            return cd.get_durability_score(day)
+        if metric_key == "running.form_stability":
+            return cd.get_form_stability_score(day)
+        if metric_key == "recovery.hrv_resilience_score":
+            return cd.get_hrv_resilience_score(day)
+        if metric_key == "fueling.score":
+            return cd.get_fueling_score(day)
+        if metric_key == "recovery.model_accuracy":
+            return cd.get_recovery_model_accuracy(day)
+        if metric_key.startswith("coaching.limiter_"):
+            limiter = metric_key.replace("coaching.limiter_", "")
+            return cd.get_limiter_score(day, limiter)
+        if metric_key == "coaching.recommended_workout":
+            return cd.get_recommended_workout(day)
+
+
         return None
 
     def _activity_metric_value(self, metric_key: str, activity: Activity) -> Any:
@@ -307,6 +358,14 @@ class McpDerivedMetricsService:
 
         if metric_key == "running.economy_power":
             return self._ppap.get_running_economy_power(activity)
+
+
+        if metric_key == "long_run.quality_score":
+            if not activity.start_time:
+                return None
+            return self._coaching_decision_service().compute_long_run_quality(activity)
+        if metric_key == "running.mechanical_efficiency":
+            return self._coaching_decision_service().compute_mechanical_efficiency(activity)
 
         if metric_key == "training.training_class":
             day = activity.start_time.date() if activity.start_time else date.today()

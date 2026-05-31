@@ -124,6 +124,12 @@ def metric_glossary(
 
 
 @mcp.tool()
+def coaching_decision_snapshot(target_date: Optional[str] = None) -> dict:
+    """Training decision metrics: consistency, event readiness, limiters, recommended workout."""
+    return _call_tool(training_tools.coaching_decision_snapshot, target_date=target_date)
+
+
+@mcp.tool()
 def query_metric_timeseries(
     metric_key: str,
     start_date: Optional[str] = None,
