@@ -54,14 +54,10 @@ def coaching_snapshot_resource() -> str:
     return json.dumps(_call_tool(training_tools.coaching_snapshot), ensure_ascii=False, indent=2)
 
 
-@mcp.resource("treningsanalyse://duration-curve")
-def duration_curve_resource() -> str:
-    """Beste duration curve (all-time snapshot) med speed og power punkter."""
-    return json.dumps(
-        _call_tool(training_tools.duration_curve_snapshot, scope="all_time"),
-        ensure_ascii=False,
-        indent=2,
-    )
+@mcp.resource("treningsanalyse://metric-glossary")
+def metric_glossary_resource() -> str:
+    """Coaching glossary: how to interpret every MCP metric."""
+    return json.dumps(_call_tool(training_tools.metric_glossary), ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
@@ -113,6 +109,21 @@ def metric_catalog() -> dict:
 
 
 @mcp.tool()
+def metric_glossary(
+    metric_key: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+) -> dict:
+    """Return how to interpret metrics for precise coaching."""
+    return _call_tool(
+        training_tools.metric_glossary,
+        metric_key=metric_key,
+        category=category,
+        search=search,
+    )
+
+
+@mcp.tool()
 def query_metric_timeseries(
     metric_key: str,
     start_date: Optional[str] = None,
@@ -126,63 +137,6 @@ def query_metric_timeseries(
         start_date=start_date,
         end_date=end_date,
         limit=limit,
-    )
-
-
-
-@mcp.tool()
-def duration_curve_snapshot(
-    scope: str = "all_time",
-    include_treadmill: bool = False,
-) -> dict:
-    """Return duration curve snapshot for all_time, last_90_days or last_365_days."""
-    return _call_tool(
-        training_tools.duration_curve_snapshot,
-        scope=scope,
-        include_treadmill=include_treadmill,
-    )
-
-
-@mcp.tool()
-def duration_curve_year_comparison(
-    years: int = 3,
-    metric: str = "speed",
-    include_treadmill: bool = False,
-) -> dict:
-    """Compare best duration curve points per calendar year."""
-    return _call_tool(
-        training_tools.duration_curve_year_comparison,
-        years=years,
-        metric=metric,
-        include_treadmill=include_treadmill,
-    )
-
-
-@mcp.tool()
-def critical_speed_pace_by_year(
-    years: int = 3,
-    include_treadmill: bool = False,
-) -> dict:
-    """Best critical-speed pace durations per calendar year."""
-    return _call_tool(
-        training_tools.critical_speed_pace_by_year,
-        years=years,
-        include_treadmill=include_treadmill,
-    )
-
-
-@mcp.tool()
-def running_analysis_year_views(
-    years: int = 3,
-    metric: str = "speed",
-    include_treadmill: bool = False,
-) -> dict:
-    """Combined year comparison views from the running analytics page."""
-    return _call_tool(
-        training_tools.running_analysis_year_views,
-        years=years,
-        metric=metric,
-        include_treadmill=include_treadmill,
     )
 
 

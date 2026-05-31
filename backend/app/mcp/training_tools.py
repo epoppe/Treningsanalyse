@@ -22,7 +22,7 @@ from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.session import SessionLocal
 from ..services.coaching_analysis_service import CoachingAnalysisService
 from ..services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG, McpDerivedMetricsService
-from ..services.ppap_metrics_service import PpapMetricsService
+from .metric_glossary import build_metric_glossary, get_glossary_entry
 from ..services.route_analysis_service import RouteAnalysisService
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
@@ -399,92 +399,45 @@ def coaching_snapshot() -> Dict[str, Any]:
         return snapshot.payload if snapshot and snapshot.payload else {"status": "missing"}
 
 
-
-def duration_curve_snapshot(
-    scope: str = "all_time",
-    include_treadmill: bool = False,
+def metric_glossary(
+    metric_key: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
 ) -> Dict[str, Any]:
-    with training_context() as (db, storage):
-        return PpapMetricsService(db, storage).duration_curve_snapshot(
-            scope=scope,
-            include_treadmill=include_treadmill,
-        )
-
-
-def duration_curve_year_comparison(
-    years: int = 3,
-    metric: str = "speed",
-    include_treadmill: bool = False,
-) -> Dict[str, Any]:
-    years = max(1, min(int(years), 10))
-    with training_context() as (db, storage):
-        return PpapMetricsService(db, storage).duration_curve_year_comparison(
-            years=years,
-            metric=metric,
-            include_treadmill=include_treadmill,
-        )
-
-
-def critical_speed_pace_by_year(
-    years: int = 3,
-    include_treadmill: bool = False,
-) -> Dict[str, Any]:
-    years = max(1, min(int(years), 10))
-    with training_context() as (db, storage):
-        return PpapMetricsService(db, storage).critical_speed_pace_by_year(
-            years=years,
-            include_treadmill=include_treadmill,
-        )
-
-
-def running_analysis_year_views(
-    years: int = 3,
-    metric: str = "speed",
-    include_treadmill: bool = False,
-) -> Dict[str, Any]:
-    return {
-        "duration_curve_year_comparison": duration_curve_year_comparison(
-            years=years,
-            metric=metric,
-            include_treadmill=include_treadmill,
-        ),
-        "critical_speed_pace_by_year": critical_speed_pace_by_year(
-            years=years,
-            include_treadmill=include_treadmill,
-        ),
-    }
+    """Return coaching glossary for metrics — definitions, interpretation and caveats."""
+    return build_metric_glossary(metric_key=metric_key, category=category, search=search)
 
 
 def metric_catalog() -> Dict[str, Any]:
-    metrics = [
-        {
+    metrics = []
+    for key, definition in sorted(METRIC_CATALOG.items()):
+        gloss = get_glossary_entry(key)
+        metrics.append({
             "key": key,
             "category": definition["category"],
             "unit": definition["unit"],
             "source": definition["model"].__tablename__,
             "scope": "stored",
-        }
-        for key, definition in sorted(METRIC_CATALOG.items())
-    ]
-    metrics.extend(
-        [
-            {
-                "key": key,
-                "category": definition["category"],
-                "unit": definition["unit"],
-                "scope": definition["scope"],
-                "source": "derived",
-                "heuristic": definition.get("heuristic", False),
-            }
-            for key, definition in sorted(DERIVED_METRIC_CATALOG.items())
-        ]
-    )
-    categories = sorted({metric["category"] for metric in metrics})
+            "summary": gloss.get("definition"),
+        })
+    for key, definition in sorted(DERIVED_METRIC_CATALOG.items()):
+        gloss = get_glossary_entry(key)
+        metrics.append({
+            "key": key,
+            "category": definition["category"],
+            "unit": definition["unit"],
+            "scope": definition["scope"],
+            "source": "derived",
+            "heuristic": definition.get("heuristic", False),
+            "summary": gloss.get("definition"),
+        })
+    categories = sorted({m["category"] for m in metrics})
     return {
         "schema_version": "ppap-3",
         "metrics": metrics,
         "count": len(metrics),
         "categories": categories,
+        "glossary_hint": "Bruk metric_glossary eller treningsanalyse://metric-glossary.",
         "note": "Use query_metric_timeseries with one of these whitelisted metric keys.",
     }
 
