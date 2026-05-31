@@ -335,6 +335,20 @@ class SyncService:
         except Exception as e:
             logger.error(f"Feil under Training Effect synkronisering: {e}")
             te_result = {"status": "Feil", "message": str(e)}
+
+        # TSS beregnes ofte før EPOC finnes — oppdater når Training Effect er synket
+        post_te_metrics = {"status": "Ikke kjørt"}
+        if te_result.get("status") != "Feil":
+            try:
+                post_te_metrics = self.metrics_service.refresh_metrics_after_te_sync(start_date, end_date)
+                logger.info(
+                    "TSS oppdatert etter Training Effect: %s av %s aktiviteter i perioden",
+                    post_te_metrics.get("tss_refreshed"),
+                    post_te_metrics.get("activities_checked"),
+                )
+            except Exception as e:
+                logger.error(f"Feil ved oppfriskning av TSS etter Training Effect: {e}")
+                post_te_metrics = {"status": "Feil", "message": str(e)}
         
         # Oppdater sammendragstabeller automatisk hvis nye aktiviteter ble synkronisert
         summary_result = {"status": "Ikke kjørt", "message": "Ingen nye aktiviteter"}
@@ -373,6 +387,7 @@ class SyncService:
             "fit_data_result": fit_result,
             "hrv_result": hrv_result,
             "te_result": te_result,
+            "post_te_metrics": post_te_metrics,
             "summary_result": summary_result,
             "status": "Fullført med FIT-data, HRV, Training Effect og sammendrag",
             "summary": {
@@ -390,7 +405,8 @@ class SyncService:
                 "fit_status": fit_result.get("status", "Ukjent"),
                 "hrv_status": hrv_result.get("status", "Ukjent"),
                 "te_status": te_result.get("status", "Ukjent"),
-                "summary_status": summary_result.get("status", "Ukjent")
+                "summary_status": summary_result.get("status", "Ukjent"),
+                "post_te_metrics": post_te_metrics,
             }
         }
         
@@ -668,9 +684,13 @@ class SyncService:
             # Beregn ALLE metrics for aktiviteter som faktisk ble lagt inn i denne kjøringen
             logger.info("Starter beregning av alle metrics for nye aktiviteter...")
             metrics_results = []
-            for aid in inserted_activity_ids:
-                metrics_result = self._calculate_metrics_for_new_activity(aid)
-                metrics_results.append(metrics_result)
+            self.metrics_service.begin_batch()
+            try:
+                for aid in inserted_activity_ids:
+                    metrics_result = self._calculate_metrics_for_new_activity(aid)
+                    metrics_results.append(metrics_result)
+            finally:
+                self.metrics_service.end_batch()
             
             # Logg resultater
             successful_tss = sum(1 for r in metrics_results if r["tss_calculated"])

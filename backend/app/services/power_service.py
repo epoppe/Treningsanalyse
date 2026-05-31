@@ -2,9 +2,10 @@ import math
 import polars as pl
 import logging
 from typing import Optional, Dict, Any, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from ..storage import DataStorage
 from ..database.models.activity import Activity
+from ..utils.activity_filters import is_running_activity
 from ..cache.cache_manager import get_cache_manager
 from fastapi import HTTPException
 
@@ -111,14 +112,19 @@ class PowerService:
                 return cached_power
             
             # Hent aktivitet fra database
-            activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
+            activity = (
+                db.query(Activity)
+                .options(selectinload(Activity.activity_type))
+                .filter(Activity.activity_id == str(activity_id))
+                .first()
+            )
             if not activity:
                 logger.warning(f"Aktivitet {activity_id} ikke funnet i database")
                 return None
             
-            # Sjekk at det er en løpeaktivitet
-            if not activity.activity_type or activity.activity_type.type_key != 'running':
-                logger.info(f"Aktivitet {activity_id} er ikke en løpeaktivitet: {activity.activity_type.type_key if activity.activity_type else 'None'}")
+            if not is_running_activity(activity):
+                type_key = activity.activity_type.type_key if activity.activity_type else None
+                logger.info(f"Aktivitet {activity_id} er ikke en utendørs løpeaktivitet: {type_key}")
                 return None
             
             # Bruk standard masse hvis ikke spesifisert

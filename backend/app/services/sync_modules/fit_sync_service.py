@@ -204,27 +204,39 @@ class FitSyncService:
                 parquet_records.append(parquet_record)
         return parquet_records
 
-    async def download_and_store_fit_file(self, activity_id: int) -> bool:
+    @staticmethod
+    def _aggregate_metrics_counts(metrics_calculated: dict, metrics_result: dict | None) -> None:
+        if not metrics_result:
+            return
+        if metrics_result.get("negative_split_calculated"):
+            metrics_calculated["negative_split"] += 1
+        if metrics_result.get("decoupling_calculated"):
+            metrics_calculated["decoupling"] += 1
+        if metrics_result.get("hrv_calculated"):
+            metrics_calculated["hrv_available"] += 1
+
+    async def download_and_store_fit_file(self, activity_id: int) -> tuple[bool, dict | None]:
         try:
             logger.info(f"Laster ned FIT-data for aktivitet {activity_id}...")
             fit_data = await self.sync_service.garmin_client.get_activity_details(activity_id)
             if not fit_data:
                 logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
-                return False
+                return False, None
 
             details_json = self.parse_fit_data(fit_data)
             if not details_json or "records" not in details_json:
                 logger.warning(f"Kunne ikke parse FIT-data for aktivitet {activity_id}")
-                return False
+                return False, None
 
             parquet_records = self._to_parquet_records(activity_id, details_json)
             if not parquet_records:
                 logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
-                return False
+                return False, None
 
             self.sync_service.storage.save_activity_details(parquet_records)
             logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
 
+            metrics_result = None
             activity = self.sync_service.db.query(Activity).filter_by(activity_id=activity_id).first()
             if activity:
                 activity.detailed_metrics = details_json
@@ -236,18 +248,18 @@ class FitSyncService:
                 logger.info(
                     "Metrics-beregning for aktivitet %s: Negative split=%s, Decoupling=%s",
                     activity_id,
-                    metrics_result["negative_split_calculated"],
-                    metrics_result["decoupling_calculated"],
+                    metrics_result.get("negative_split_calculated"),
+                    metrics_result.get("decoupling_calculated"),
                 )
                 try:
                     route_result = RouteAnalysisService(self.sync_service.storage).analyze_activity(str(activity_id), self.sync_service.db)
                     logger.info("Ruteanalyse for aktivitet %s: %s", activity_id, route_result)
                 except Exception as exc:
                     logger.warning("Kunne ikke beregne ruteanalyse for aktivitet %s: %s", activity_id, exc)
-            return True
+            return True, metrics_result
         except Exception as exc:
             logger.error(f"Feil ved nedlasting av FIT-data for aktivitet {activity_id}: {exc}")
-            return False
+            return False, None
 
     def get_existing_fit_ids(self) -> set[int]:
         try:
@@ -296,18 +308,10 @@ class FitSyncService:
 
             for i, activity_id in enumerate(activity_ids):
                 logger.info(f"Prosesserer aktivitet {activity_id} ({i + 1}/{total_count})")
-                if await self.download_and_store_fit_file(activity_id):
+                ok, metrics_result = await self.download_and_store_fit_file(activity_id)
+                if ok:
                     success_count += 1
-                    try:
-                        metrics_result = self.sync_service._calculate_metrics_for_new_activity(str(activity_id))
-                        if metrics_result["negative_split_calculated"]:
-                            metrics_calculated["negative_split"] += 1
-                        if metrics_result["decoupling_calculated"]:
-                            metrics_calculated["decoupling"] += 1
-                        if metrics_result["hrv_calculated"]:
-                            metrics_calculated["hrv_available"] += 1
-                    except Exception as exc:
-                        logger.warning(f"Kunne ikke sjekke metrics for aktivitet {activity_id}: {exc}")
+                    self._aggregate_metrics_counts(metrics_calculated, metrics_result)
                 await asyncio.sleep(0.5)
 
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
@@ -369,18 +373,10 @@ class FitSyncService:
                     f"Prosesserer aktivitet {activity.activity_id} ({i + 1}/{total_count}) - "
                     f"{activity.start_time.strftime('%Y-%m-%d')} - {activity.activity_name}"
                 )
-                if await self.download_and_store_fit_file(activity.activity_id):
+                ok, metrics_result = await self.download_and_store_fit_file(activity.activity_id)
+                if ok:
                     success_count += 1
-                    try:
-                        metrics_result = self.sync_service._calculate_metrics_for_new_activity(str(activity.activity_id))
-                        if metrics_result["negative_split_calculated"]:
-                            metrics_calculated["negative_split"] += 1
-                        if metrics_result["decoupling_calculated"]:
-                            metrics_calculated["decoupling"] += 1
-                        if metrics_result["hrv_calculated"]:
-                            metrics_calculated["hrv_available"] += 1
-                    except Exception as exc:
-                        logger.warning(f"Kunne ikke sjekke metrics for aktivitet {activity.activity_id}: {exc}")
+                    self._aggregate_metrics_counts(metrics_calculated, metrics_result)
                 await asyncio.sleep(1)
 
             message = (

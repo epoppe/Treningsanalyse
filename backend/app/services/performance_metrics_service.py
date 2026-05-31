@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
@@ -362,10 +362,16 @@ class PerformanceMetricsService:
         days: Optional[int] = None,
         *,
         include_treadmill: bool = False,
+        end_date: Optional[date] = None,
     ) -> List[Activity]:
-        query = self.db.query(Activity).order_by(Activity.start_time.asc())
+        end_dt = datetime.combine(end_date or date.today(), time.max).replace(tzinfo=timezone.utc)
+        query = (
+            self.db.query(Activity)
+            .filter(Activity.start_time <= end_dt)
+            .order_by(Activity.start_time.asc())
+        )
         if days is not None:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            cutoff = end_dt - timedelta(days=days)
             query = query.filter(Activity.start_time >= cutoff)
         activities = query.all()
         return [

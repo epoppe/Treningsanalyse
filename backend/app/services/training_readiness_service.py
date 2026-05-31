@@ -20,13 +20,8 @@ class TrainingReadinessService:
     """Service for å beregne training readiness score."""
     
     def __init__(self, db: Optional[Session] = None):
-        self._owns_db = db is None
-        self.db = db or SessionLocal()
+        self.db = db if db is not None else SessionLocal()
         self.tss_service = TrainingStressService(self.db)
-
-    def close(self) -> None:
-        if self._owns_db:
-            self.db.close()
     
     def calculate_training_readiness(self, target_date: date = None) -> Dict[str, Any]:
         """

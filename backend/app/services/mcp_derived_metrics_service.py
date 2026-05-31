@@ -39,6 +39,13 @@ class McpDerivedMetricsService:
         self._coaching_cache: Dict[Tuple[date, int], Dict[str, Any]] = {}
         self._cs_cache: Optional[Dict[str, Any]] = None
         self._ppap = PpapMetricsService(db, storage)
+        self._coaching_decision = None
+
+    def _coaching_decision_service(self):
+        if self._coaching_decision is None:
+            from .coaching_decision_metrics_service import CoachingDecisionMetricsService
+            self._coaching_decision = CoachingDecisionMetricsService(self.db, self._ppap)
+        return self._coaching_decision
 
     def metric_definition(self, metric_key: str) -> Optional[Dict[str, Any]]:
         return DERIVED_METRIC_CATALOG.get(metric_key)
@@ -96,6 +103,8 @@ class McpDerivedMetricsService:
             points = self._activity_scope_series(metric_key, start, end, limit)
         elif scope == "snapshot":
             points = self._snapshot_series(metric_key, end)
+        elif scope == "rolling_daily":
+            points = self._rolling_daily_scope_series(metric_key, start, end, limit)
         else:
             points = self._daily_scope_series(metric_key, start, end, limit)
 
@@ -220,6 +229,11 @@ class McpDerivedMetricsService:
             return self._ppap.get_sleep_debt_hours(day, 28)
         if metric_key == "sleep.consistency_score":
             return self._ppap.get_sleep_consistency_score(day)
+        if metric_key == "recovery.predicted_hours_to_baseline":
+            return self._ppap.get_predicted_recovery_hours(day)
+        if metric_key.startswith("training.class_") and metric_key.endswith("_pct"):
+            return self._ppap.get_training_class_pct(day, metric_key)
+
         if metric_key == "running.critical_power":
             cp, _wp = self._ppap.get_critical_power_snapshot(day)
             return cp
@@ -278,6 +292,50 @@ class McpDerivedMetricsService:
         if metric_key == "injury_risk_score":
             return self._injury_risk_score(day)
 
+        cd = self._coaching_decision_service()
+        if metric_key == "consistency.score":
+            return cd.get_consistency_score(day)
+        if metric_key == "fitness.gain_rate":
+            return cd.get_fitness_gain_rate(day)
+        if metric_key == "coaching.polarization_score":
+            return cd.get_polarization_score(day)
+        if metric_key == "training.block":
+            return cd.get_training_block(day)
+        if metric_key == "readiness.5k":
+            return cd.get_event_readiness(day, "5k")
+        if metric_key == "readiness.10k":
+            return cd.get_event_readiness(day, "10k")
+        if metric_key == "readiness.hm":
+            return cd.get_event_readiness(day, "hm")
+        if metric_key == "readiness.marathon":
+            return cd.get_event_readiness(day, "marathon")
+        if metric_key == "performance.pb_probability_5k":
+            return cd.get_pb_probability(day, "5k")
+        if metric_key == "performance.pb_probability_10k":
+            return cd.get_pb_probability(day, "10k")
+        if metric_key == "performance.pb_probability_hm":
+            return cd.get_pb_probability(day, "hm")
+        if metric_key == "performance.pb_probability_marathon":
+            return cd.get_pb_probability(day, "marathon")
+        if metric_key == "long_run.quality_score":
+            return cd.get_long_run_quality_score(day)
+        if metric_key == "running.durability_score":
+            return cd.get_durability_score(day)
+        if metric_key == "running.form_stability":
+            return cd.get_form_stability_score(day)
+        if metric_key == "recovery.hrv_resilience_score":
+            return cd.get_hrv_resilience_score(day)
+        if metric_key == "fueling.score":
+            return cd.get_fueling_score(day)
+        if metric_key == "recovery.model_accuracy":
+            return cd.get_recovery_model_accuracy(day)
+        if metric_key.startswith("coaching.limiter_"):
+            limiter = metric_key.replace("coaching.limiter_", "")
+            return cd.get_limiter_score(day, limiter)
+        if metric_key == "coaching.recommended_workout":
+            return cd.get_recommended_workout(day)
+
+
         return None
 
     def _activity_metric_value(self, metric_key: str, activity: Activity) -> Any:
@@ -300,6 +358,18 @@ class McpDerivedMetricsService:
 
         if metric_key == "running.economy_power":
             return self._ppap.get_running_economy_power(activity)
+
+
+        if metric_key == "long_run.quality_score":
+            if not activity.start_time:
+                return None
+            return self._coaching_decision_service().compute_long_run_quality(activity)
+        if metric_key == "running.mechanical_efficiency":
+            return self._coaching_decision_service().compute_mechanical_efficiency(activity)
+
+        if metric_key == "training.training_class":
+            day = activity.start_time.date() if activity.start_time else date.today()
+            return self._ppap.get_training_class_for_activity(activity, day)
 
         if metric_key == "running.form_degradation_index":
             return self._ppap.get_form_degradation_index(activity)
@@ -544,33 +614,8 @@ class McpDerivedMetricsService:
         )
 
     def _performance_driver(self, day: date) -> Tuple[Optional[str], Optional[float]]:
-        analysis = self._coaching(day)
-        drivers: List[Tuple[str, float]] = []
-
-        guidance = analysis.get("hrv_guidance", {})
-        if guidance.get("rmssd_delta_pct") is not None:
-            drivers.append(("hrv_trend", abs(min(0.0, float(guidance["rmssd_delta_pct"])))))
-        if guidance.get("resting_hr_delta_bpm") is not None:
-            drivers.append(("resting_hr", abs(max(0.0, float(guidance["resting_hr_delta_bpm"])) * 4.0)))
-        if guidance.get("sleep_score_recent") is not None:
-            drivers.append(("sleep_quality", max(0.0, 75.0 - float(guidance["sleep_score_recent"]))))
-
-        summary = analysis.get("banister", {}).get("summary", {})
-        if summary.get("load_ratio_7d_to_28d_week") is not None:
-            drivers.append(("training_load", abs(float(summary["load_ratio_7d_to_28d_week"]) - 1.0) * 40.0))
-        if summary.get("performance") is not None:
-            drivers.append(("form_balance", abs(min(0.0, float(summary["performance"])) * 2.0)))
-
-        polarized = analysis.get("polarized_training", {})
-        for flag in polarized.get("flags", []):
-            drivers.append((flag, 20.0))
-
-        if not drivers:
-            return None, None
-        name, weight = max(drivers, key=lambda item: item[1])
-        total = sum(value for _key, value in drivers)
-        normalized_weight = round(weight / total, 3) if total > 0 else None
-        return name, normalized_weight
+        name, weight, _features = self._ppap.extended_performance_driver(day)
+        return name, weight
 
     def _critical_speed(self) -> Dict[str, Any]:
         if self._cs_cache is None:
@@ -697,6 +742,38 @@ DERIVED_METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "coaching.zone1_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
     "coaching.zone2_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
     "coaching.zone3_pct": {"category": "coaching", "unit": "%", "scope": "daily", "heuristic": False},
+    "readiness.total_score": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
+    "recovery.predicted_hours_to_baseline": {
+        "category": "recovery",
+        "unit": "hours",
+        "scope": "daily",
+        "heuristic": True,
+    },
+    "training.training_class": {"category": "training", "unit": "class", "scope": "activity", "heuristic": False},
+    "training.class_1_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_2_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_3_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_4_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_5_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_6_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_7_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "training.class_8_pct": {"category": "training", "unit": "%", "scope": "daily", "heuristic": False},
+    "running.power_30s_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_1m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_3m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_5m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_10m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_20m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_40m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.power_60m_hist": {"category": "running", "unit": "W", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_30s_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_1m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_3m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_5m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_10m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_20m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_40m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
+    "running.speed_60m_hist": {"category": "running", "unit": "m/s", "scope": "rolling_daily", "heuristic": False},
     "readiness.sleep_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
     "readiness.hrv_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},
     "readiness.form_component": {"category": "readiness", "unit": "score", "scope": "daily", "heuristic": False},

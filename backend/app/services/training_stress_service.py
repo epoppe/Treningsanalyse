@@ -33,11 +33,16 @@ class TrainingStressService:
         TSS er det samme som EPOC-verdien fra Garmin Connect.
         """
         try:
-            # Sjekk cache først
+            # Sjekk cache — hopp over hvis EPOC nå tilsier annen TSS (typisk etter TE-sync)
             cached_tss = self.cache.get_tss(str(activity.activity_id))
             if cached_tss is not None:
-                logger.debug(f"TSS cache hit for activity {activity.activity_id}")
-                return cached_tss
+                if activity.epoc and float(activity.epoc) > 0:
+                    if abs(round(float(cached_tss), 1) - round(float(activity.epoc), 1)) <= 0.05:
+                        logger.debug(f"TSS cache hit for activity {activity.activity_id}")
+                        return cached_tss
+                else:
+                    logger.debug(f"TSS cache hit for activity {activity.activity_id}")
+                    return cached_tss
             
             if not activity.duration or activity.duration <= 0:
                 return 0.0

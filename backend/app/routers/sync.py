@@ -809,14 +809,16 @@ async def run_calculations_and_caching(job_id: str, db_session: Session, start_d
         
         # Hent løpeaktiviteter i perioden som mangler power
         from sqlalchemy import and_
-        from ..database.models.activity import Activity, ActivityType
+        from ..database.models.activity import Activity
+        from ..utils.activity_filters import apply_running_activity_filter
         
-        running_activities = db_session.query(Activity).join(ActivityType).filter(
-            and_(
-                Activity.start_time >= start_date,
-                Activity.start_time <= end_date,
-                ActivityType.type_key == 'running',
-                Activity.average_power.is_(None)
+        running_activities = apply_running_activity_filter(
+            db_session.query(Activity).filter(
+                and_(
+                    Activity.start_time >= start_date,
+                    Activity.start_time <= end_date,
+                    Activity.average_power.is_(None),
+                )
             )
         ).all()
         
@@ -833,20 +835,22 @@ async def run_calculations_and_caching(job_id: str, db_session: Session, start_d
         sync_jobs[job_id]["message"] = "Beregner Training Stress Score..."
         training_stress_service = TrainingStressService(db_session)
         
-        # Hent aktiviteter i perioden som mangler TSS
-        activities_without_tss = db_session.query(Activity).filter(
+        from ..services.sync_modules.metrics_service import tss_needs_refresh
+
+        activities_in_period = db_session.query(Activity).filter(
             and_(
                 Activity.start_time >= start_date,
                 Activity.start_time <= end_date,
-                Activity.training_stress_score.is_(None)
             )
         ).all()
-        
+
         tss_calculated = 0
-        for activity in activities_without_tss:
+        for activity in activities_in_period:
+            if not tss_needs_refresh(activity):
+                continue
             try:
                 tss = training_stress_service.calculate_tss_for_activity(activity)
-                if tss is not None and tss > 0:
+                if tss is not None and tss >= 0:
                     activity.training_stress_score = tss
                     tss_calculated += 1
             except Exception as e:
