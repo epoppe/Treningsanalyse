@@ -134,5 +134,18 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertLessEqual(hours, 120.0)
 
 
+    def test_metric_catalog_has_glossary_summary(self):
+        with patch.object(training_tools, "training_context", self._context):
+            catalog = training_tools.metric_catalog()
+        self.assertEqual(catalog.get("schema_version"), "ppap-3")
+        entry = next(m for m in catalog["metrics"] if m["key"] == "readiness.total_score")
+        self.assertIn("summary", entry)
+
+    def test_metric_glossary_entry(self):
+        g = training_tools.metric_glossary(metric_key="readiness.total_score")
+        self.assertEqual(g["status"], "ok")
+        self.assertIn("TrainingReadinessService", g["entry"]["definition"])
+
+
 if __name__ == "__main__":
     unittest.main()
