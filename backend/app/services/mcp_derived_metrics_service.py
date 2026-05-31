@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta, timezone
-from statistics import mean, median, pstdev
+from statistics import mean, median as stats_median, pstdev
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func
@@ -468,7 +468,7 @@ class McpDerivedMetricsService:
             if fallback_drift is None:
                 return None
             drift_values = [float(fallback_drift)]
-        median_drift = median(drift_values)
+        median_drift = stats_median(drift_values)
         return round(max(0.0, min(100.0, 100.0 - median_drift * 2.5)), 1)
 
     def _garmin_row(self, day: date) -> Optional[GarminPerformanceMetric]:
@@ -744,6 +744,10 @@ class McpDerivedMetricsService:
         thresholds = self._coaching(day).get("thresholds", {})
         lt1 = thresholds.get("lt1", {}).get("heart_rate_bpm")
         lt2 = thresholds.get("lt2", {}).get("heart_rate_bpm")
+        if lt2 is None and activity.lactate_threshold_heart_rate:
+            lt2 = float(activity.lactate_threshold_heart_rate)
+        if lt1 is None and lt2 is not None:
+            lt1 = float(lt2) * 0.85
         if lt1 is None or lt2 is None:
             return None
         hr = float(activity.average_heart_rate)
