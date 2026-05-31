@@ -48,16 +48,16 @@ def athlete_profile_resource() -> str:
     return json.dumps(_call_tool(training_tools.athlete_profile), ensure_ascii=False, indent=2)
 
 
-@mcp.resource("treningsanalyse://duration-curve")
-def duration_curve_resource() -> str:
-    """Best power/speed duration curve points (all-time snapshot)."""
-    return json.dumps(_call_tool(training_tools.duration_curve_snapshot), ensure_ascii=False, indent=2)
-
-
 @mcp.resource("treningsanalyse://coaching-snapshot")
 def coaching_snapshot_resource() -> str:
     """Latest persisted coaching snapshot, if one has been calculated."""
     return json.dumps(_call_tool(training_tools.coaching_snapshot), ensure_ascii=False, indent=2)
+
+
+@mcp.resource("treningsanalyse://metric-glossary")
+def metric_glossary_resource() -> str:
+    """Coaching glossary: how to interpret every MCP metric."""
+    return json.dumps(_call_tool(training_tools.metric_glossary), ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
@@ -106,6 +106,27 @@ def compare_recent_runs(limit: int = 5, same_route_as_latest: bool = False) -> d
 def metric_catalog() -> dict:
     """List whitelisted metrics that can be queried through MCP timeseries."""
     return _call_tool(training_tools.metric_catalog)
+
+
+@mcp.tool()
+def metric_glossary(
+    metric_key: Optional[str] = None,
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+) -> dict:
+    """Return how to interpret metrics for precise coaching."""
+    return _call_tool(
+        training_tools.metric_glossary,
+        metric_key=metric_key,
+        category=category,
+        search=search,
+    )
+
+
+@mcp.tool()
+def coaching_decision_snapshot(target_date: Optional[str] = None) -> dict:
+    """Training decision metrics: consistency, event readiness, limiters, recommended workout."""
+    return _call_tool(training_tools.coaching_decision_snapshot, target_date=target_date)
 
 
 @mcp.tool()
