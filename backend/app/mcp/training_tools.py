@@ -42,6 +42,8 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.vo2_max": {"model": Activity, "date_field": "start_time", "column": "vo2_max", "category": "performance", "unit": "ml/kg/min"},
     "activity.vo2_max_precise": {"model": Activity, "date_field": "start_time", "column": "vo2_max_precise", "category": "performance", "unit": "ml/kg/min"},
     "activity.decoupling_percent": {"model": Activity, "date_field": "start_time", "column": "decoupling_percent", "category": "aerobic_efficiency", "unit": "%"},
+    "activity.decoupling_pct": {"model": Activity, "date_field": "start_time", "column": "decoupling_percent", "category": "aerobic_efficiency", "unit": "%"},
+    "activity.efficiency_factor": {"model": Activity, "date_field": "start_time", "column": "avg_efficiency_factor", "category": "aerobic_efficiency", "unit": "m_per_s_per_bpm"},
     "activity.hr_drift_pct": {"model": Activity, "date_field": "start_time", "column": "hr_drift_pct", "category": "aerobic_efficiency", "unit": "%"},
     "activity.fatigue_resistance_score": {"model": Activity, "date_field": "start_time", "column": "fatigue_resistance_score", "category": "fatigue", "unit": "score"},
     "activity.average_power": {"model": Activity, "date_field": "start_time", "column": "average_power", "category": "power", "unit": "W"},
@@ -183,6 +185,10 @@ def _infer_metric_unit(column_name: str) -> str:
 
 _augment_metric_catalog()
 
+METRIC_KEY_ALIASES: Dict[str, str] = {
+    "activity.decoupling_pct": "activity.decoupling_percent",
+}
+
 
 @contextmanager
 def training_context() -> Iterator[tuple[Session, DataStorage]]:
@@ -219,6 +225,11 @@ def athlete_profile() -> Dict[str, Any]:
             for activity in db.query(Activity).options(selectinload(Activity.activity_type)).all()
             if is_running_activity(activity)
         ]
+        derived = McpDerivedMetricsService(db, None)
+        ppap = derived._ppap
+        today = date.today()
+        load = ppap.get_load_metrics(today)
+        composites = derived.get_readiness_composites(today)
 
         return {
             "athlete": {
@@ -244,6 +255,13 @@ def athlete_profile() -> Dict[str, Any]:
                 "rmssd": latest_hrv.rmssd if latest_hrv else None,
                 "status": latest_hrv.status if latest_hrv else None,
             },
+            "training_load_ppap": {
+                "ctl": load.get("ctl"),
+                "atl": load.get("atl"),
+                "tsb": load.get("tsb"),
+                "daily_tss": load.get("tss"),
+            },
+            "readiness_composites": composites,
             "stable_context": [
                 "Use metric units and min/km pace.",
                 "Prefer route-matched comparisons when evaluating repeated runs.",
@@ -278,12 +296,23 @@ def training_readiness_check(target_date: Optional[str] = None) -> Dict[str, Any
         else:
             recommendation = "normal_training"
 
+        derived = McpDerivedMetricsService(db, storage)
+        load = derived._ppap.get_load_metrics(end_date)
+        composites = derived.get_readiness_composites(end_date)
+
         return {
             "date": end_date.isoformat(),
             "recommendation": recommendation,
             "banister": banister,
             "hrv_guidance": hrv,
             "flags": flags,
+            "training_load_ppap": {
+                "ctl": load.get("ctl"),
+                "atl": load.get("atl"),
+                "tsb": load.get("tsb"),
+                "daily_tss": load.get("tss"),
+            },
+            "readiness_composites": composites,
         }
 
 
@@ -424,6 +453,8 @@ def metric_catalog() -> Dict[str, Any]:
     )
     categories = sorted({metric["category"] for metric in metrics})
     return {
+        "schema_version": "ppap-1",
+        "ppap_phase": 1,
         "metrics": metrics,
         "count": len(metrics),
         "categories": categories,
@@ -437,6 +468,8 @@ def query_metric_timeseries(
     end_date: Optional[str] = None,
     limit: int = 365,
 ) -> Dict[str, Any]:
+    metric_key = METRIC_KEY_ALIASES.get(metric_key, metric_key)
+
     if metric_key in DERIVED_METRIC_CATALOG:
         limit = max(1, min(int(limit), 5000))
         with training_context() as (db, storage):

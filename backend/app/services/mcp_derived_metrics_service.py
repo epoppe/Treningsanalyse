@@ -14,6 +14,7 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .coaching_analysis_service import CoachingAnalysisService
 from .performance_metrics_service import PerformanceMetricsService
+from .ppap_metrics_service import PpapMetricsService
 
 
 RACE_DISTANCES_M = {
@@ -32,9 +33,28 @@ class McpDerivedMetricsService:
         self.storage = storage
         self._coaching_cache: Dict[Tuple[date, int], Dict[str, Any]] = {}
         self._cs_cache: Optional[Dict[str, Any]] = None
+        self._ppap = PpapMetricsService(db, storage)
 
     def metric_definition(self, metric_key: str) -> Optional[Dict[str, Any]]:
         return DERIVED_METRIC_CATALOG.get(metric_key)
+
+    def get_readiness_composites(self, day: Optional[date] = None) -> Dict[str, Any]:
+        target = day or date.today()
+        return {
+            "date": target.isoformat(),
+            "fitness_score": self._daily_metric_value("fitness_score", target),
+            "fatigue_score": self._daily_metric_value("fatigue_score", target),
+            "readiness_score": self._daily_metric_value("readiness_score", target),
+            "recovery_score": self._daily_metric_value("recovery_score", target),
+            "performance_score": self._daily_metric_value("performance_score", target),
+            "injury_risk_score": self._daily_metric_value("injury_risk_score", target),
+            "overtraining_score": self._daily_metric_value("overtraining_score", target),
+            "fitness_ctl": self._ppap.get_ctl(target),
+            "fitness_atl": self._ppap.get_atl(target),
+            "fitness_tsb": self._ppap.get_tsb(target),
+            "recovery_hrv_baseline": self._ppap.get_hrv_baseline(target),
+            "recovery_hrv_delta_pct": self._ppap.get_hrv_delta_pct(target),
+        }
 
     def list_metric_definitions(self) -> List[Dict[str, Any]]:
         return [
@@ -156,6 +176,31 @@ class McpDerivedMetricsService:
         return list(reversed(points))
 
     def _daily_metric_value(self, metric_key: str, day: date) -> Any:
+        if metric_key == "fitness.ctl":
+            return self._ppap.get_ctl(day)
+        if metric_key == "fitness.atl":
+            return self._ppap.get_atl(day)
+        if metric_key in {"fitness.tsb", "fitness.form"}:
+            return self._ppap.get_tsb(day)
+        if metric_key in {"fitness.ef_30d", "fitness.ef_60d", "fitness.ef_90d"}:
+            window = int(metric_key.rsplit("_", 1)[-1].replace("d", ""))
+            return self._ppap.get_ef_rolling(day, window)
+        if metric_key == "recovery.hrv_baseline":
+            return self._ppap.get_hrv_baseline(day)
+        if metric_key == "recovery.hrv_delta_pct":
+            return self._ppap.get_hrv_delta_pct(day)
+        if metric_key == "recovery.recovery_efficiency_score":
+            return self._recovery_efficiency_score(day)
+        if metric_key in {"cardio.rhr_7d", "cardio.rhr_30d"}:
+            window = int(metric_key.rsplit("_", 1)[-1].replace("d", ""))
+            return self._ppap.get_rhr_rolling(day, window)
+        if metric_key == "running.critical_speed":
+            cs, _w = self._ppap.get_critical_speed_snapshot(day)
+            return cs
+        if metric_key == "running.w_prime":
+            _cs, w_prime = self._ppap.get_critical_speed_snapshot(day)
+            return w_prime
+
         if metric_key in {"cardio.hrv_7d", "cardio.hrv_30d", "cardio.hrv_90d"}:
             window = int(metric_key.rsplit("_", 1)[-1].replace("d", ""))
             return self._hrv_rolling(day, window)
@@ -222,6 +267,12 @@ class McpDerivedMetricsService:
 
         if metric_key == "training.training_zone":
             return self._training_zone(activity)
+
+        if metric_key == "running.economy_hr":
+            return self._ppap.get_running_economy_hr(activity)
+
+        if metric_key == "running.economy_power":
+            return self._ppap.get_running_economy_power(activity)
 
         return None
 
@@ -617,6 +668,22 @@ class McpDerivedMetricsService:
 
 
 DERIVED_METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
+    "fitness.ctl": {"category": "fitness", "unit": "load", "scope": "daily", "heuristic": False},
+    "fitness.atl": {"category": "fitness", "unit": "load", "scope": "daily", "heuristic": False},
+    "fitness.tsb": {"category": "fitness", "unit": "load", "scope": "daily", "heuristic": False},
+    "fitness.form": {"category": "fitness", "unit": "load", "scope": "daily", "heuristic": False},
+    "fitness.ef_30d": {"category": "fitness", "unit": "m_per_s_per_bpm", "scope": "daily", "heuristic": False},
+    "fitness.ef_60d": {"category": "fitness", "unit": "m_per_s_per_bpm", "scope": "daily", "heuristic": False},
+    "fitness.ef_90d": {"category": "fitness", "unit": "m_per_s_per_bpm", "scope": "daily", "heuristic": False},
+    "recovery.hrv_baseline": {"category": "recovery", "unit": "ms", "scope": "daily", "heuristic": False},
+    "recovery.hrv_delta_pct": {"category": "recovery", "unit": "%", "scope": "daily", "heuristic": False},
+    "recovery.recovery_efficiency_score": {"category": "recovery", "unit": "score", "scope": "daily", "heuristic": True},
+    "cardio.rhr_7d": {"category": "cardio", "unit": "bpm", "scope": "daily", "heuristic": False},
+    "cardio.rhr_30d": {"category": "cardio", "unit": "bpm", "scope": "daily", "heuristic": False},
+    "running.critical_speed": {"category": "running", "unit": "m/s", "scope": "snapshot", "heuristic": False},
+    "running.w_prime": {"category": "running", "unit": "m", "scope": "snapshot", "heuristic": False},
+    "running.economy_hr": {"category": "running", "unit": "ratio", "scope": "activity", "heuristic": False},
+    "running.economy_power": {"category": "running", "unit": "ratio", "scope": "activity", "heuristic": False},
     "cardio.hrv_7d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},
     "cardio.hrv_30d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},
     "cardio.hrv_90d": {"category": "cardio", "unit": "ms", "scope": "daily", "heuristic": False},
