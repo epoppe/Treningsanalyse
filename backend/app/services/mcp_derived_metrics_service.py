@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import date, datetime, timedelta, timezone
-from statistics import mean, median, pstdev
+from statistics import mean, median as stats_median, pstdev
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func
@@ -147,6 +147,42 @@ class McpDerivedMetricsService:
         if value is None:
             return []
         return [{"date": end.isoformat(), "timestamp": None, "value": value}]
+
+    def _rolling_daily_scope_series(
+        self,
+        metric_key: str,
+        start: date,
+        end: date,
+        limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Daglig rullerende beste (typisk 365d) for duration-curve *_hist-metrikker."""
+        dates: List[date] = []
+        current = end
+        while current >= start and len(dates) < limit:
+            dates.append(current)
+            current -= timedelta(days=1)
+        dates.reverse()
+
+        points: List[Dict[str, Any]] = []
+        for day in dates:
+            value = self._ppap.get_rolling_duration_curve_value(metric_key, day)
+            if value is None:
+                continue
+            points.append({"date": day.isoformat(), "timestamp": None, "value": value})
+        return points
+
+    def _recovery_efficiency_score(self, day: date) -> Optional[float]:
+        """
+        Heuristikk: recovery_score justert for forventet restitusjonstid (kortere = bedre).
+        """
+        recovery = self._recovery_score(day)
+        if recovery is None:
+            return None
+        hours = self._ppap.get_predicted_recovery_hours(day)
+        if hours is None:
+            return round(max(0.0, min(100.0, float(recovery))), 1)
+        efficiency = float(recovery) * (36.0 / max(float(hours), 6.0))
+        return round(max(0.0, min(100.0, efficiency)), 1)
 
     def _activity_scope_series(
         self,
@@ -422,13 +458,17 @@ class McpDerivedMetricsService:
                 drift_values.append(float(decoupling))
         if not drift_values:
             analysis = self._coaching(day)
-            median = analysis.get("thresholds", {}).get("drift", {}).get("recent_median_hr_drift_pct")
-            if median is None:
-                median = analysis.get("thresholds", {}).get("drift", {}).get("recent_median_decoupling_pct")
-            if median is None:
+            fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
+                "recent_median_hr_drift_pct"
+            )
+            if fallback_drift is None:
+                fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
+                    "recent_median_decoupling_pct"
+                )
+            if fallback_drift is None:
                 return None
-            drift_values = [float(median)]
-        median_drift = median(drift_values)
+            drift_values = [float(fallback_drift)]
+        median_drift = stats_median(drift_values)
         return round(max(0.0, min(100.0, 100.0 - median_drift * 2.5)), 1)
 
     def _garmin_row(self, day: date) -> Optional[GarminPerformanceMetric]:
@@ -704,6 +744,10 @@ class McpDerivedMetricsService:
         thresholds = self._coaching(day).get("thresholds", {})
         lt1 = thresholds.get("lt1", {}).get("heart_rate_bpm")
         lt2 = thresholds.get("lt2", {}).get("heart_rate_bpm")
+        if lt2 is None and activity.lactate_threshold_heart_rate:
+            lt2 = float(activity.lactate_threshold_heart_rate)
+        if lt1 is None and lt2 is not None:
+            lt1 = float(lt2) * 0.85
         if lt1 is None or lt2 is None:
             return None
         hr = float(activity.average_heart_rate)

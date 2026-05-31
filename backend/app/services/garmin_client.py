@@ -575,6 +575,9 @@ class GarminClient:
         return {
             "vo2_max": summary.get("vO2MaxValue"),
             "vo2_max_precise": summary.get("vO2MaxPreciseValue"),
+            "average_heart_rate": summary.get("averageHR"),
+            "max_heart_rate": summary.get("maxHR"),
+            "min_heart_rate": summary.get("minHR"),
             "average_moving_speed": summary.get("averageMovingSpeed"),
             "avg_grade_adjusted_speed": summary.get("avgGradeAdjustedSpeed"),
             "ground_contact_time": summary.get("groundContactTime"),

@@ -91,10 +91,16 @@ class CoachingDecisionMetricsService:
         return round(max(0.0, min(100.0, 100.0 - penalty)), 1)
 
     def get_training_block(self, day: date) -> Optional[str]:
-        ctl = self._ppap.get_ctl(day) or 0
-        atl = self._ppap.get_atl(day) or 0
-        tsb = self._ppap.get_tsb(day) or 0
-        ctl_past = self._ppap.get_ctl(day - timedelta(days=14)) or ctl
+        ctl_raw = self._ppap.get_ctl(day)
+        atl_raw = self._ppap.get_atl(day)
+        tsb_raw = self._ppap.get_tsb(day)
+        if ctl_raw is None or atl_raw is None or tsb_raw is None:
+            return None
+        ctl = float(ctl_raw)
+        atl = float(atl_raw)
+        tsb = float(tsb_raw)
+        ctl_past_raw = self._ppap.get_ctl(day - timedelta(days=14))
+        ctl_past = float(ctl_past_raw) if ctl_past_raw is not None else ctl
         ctl_delta = ctl - ctl_past
 
         if tsb > 12 and atl < ctl * 0.75:
@@ -115,8 +121,11 @@ class CoachingDecisionMetricsService:
         hrv_delta = self._ppap.get_hrv_delta_pct(day)
         sleep_debt = self._ppap.get_sleep_debt_hours(day, 7)
         if total is None:
-            total = 50.0
-        score = float(total)
+            if tsb is None and hrv_delta is None and sleep_debt is None:
+                return None
+            score = 50.0
+        else:
+            score = float(total)
 
         if tsb is not None:
             if event in {"5k", "10k"}:

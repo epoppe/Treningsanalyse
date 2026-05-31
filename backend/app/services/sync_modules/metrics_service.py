@@ -8,6 +8,7 @@ from sqlalchemy import and_, or_
 
 from ...database.models.activity import Activity, ActivityType
 from ...utils.activity_filters import is_running_activity
+from ..activity_data_validation import validate_and_repair_activity
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,8 @@ class SyncMetricsService:
             "fatigue_resistance_calculated": False,
             "performance_snapshots_updated": False,
             "hrv_calculated": False,
+            "data_validated": False,
+            "validation_fixes": [],
             "errors": [],
         }
         try:
@@ -130,6 +133,16 @@ class SyncMetricsService:
             if not activity:
                 results["errors"].append("Aktivitet ikke funnet i database")
                 return results
+
+            validation = validate_and_repair_activity(
+                activity,
+                storage=self.sync_service.storage,
+            )
+            if validation.changed:
+                results["data_validated"] = True
+                results["validation_fixes"] = validation.fixes
+                if validation.warnings:
+                    results["validation_warnings"] = validation.warnings
 
             if tss_needs_refresh(activity):
                 if self._calculate_tss(activity, activity_id):

@@ -15,6 +15,11 @@ from .sync_modules.hrv_sync_service import HRVSyncService
 from .sync_modules.sleep_sync_service import SleepSyncService
 from .sync_modules.stress_sync_service import StressSyncService
 from .sync_modules.metrics_service import SyncMetricsService
+from .activity_data_validation import (
+    normalize_ground_contact_time_ms,
+    normalize_stride_length_meters,
+    validate_and_repair_activity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +192,8 @@ class SyncService:
                 vo2_max=act_data.get('vO2MaxValue'),
                 vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
                 average_heart_rate=act_data.get('averageHR'),
+                max_heart_rate=act_data.get('maxHR'),
+                min_heart_rate=act_data.get('minHR'),
                 average_speed=avg_speed,
                 average_moving_speed=act_data.get('averageMovingSpeed'),
                 avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
@@ -618,6 +625,8 @@ class SyncService:
                     vo2_max=act_data.get('vO2MaxValue'),
                     vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
                     average_heart_rate=act_data.get('averageHR'),
+                    max_heart_rate=act_data.get('maxHR'),
+                    min_heart_rate=act_data.get('minHR'),
                     average_speed=avg_speed,
                     average_moving_speed=act_data.get('averageMovingSpeed'),
                     avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
@@ -803,6 +812,9 @@ class SyncService:
         field_map = {
             "vo2_max": "vo2_max",
             "vo2_max_precise": "vo2_max_precise",
+            "average_heart_rate": "average_heart_rate",
+            "max_heart_rate": "max_heart_rate",
+            "min_heart_rate": "min_heart_rate",
             "average_moving_speed": "average_moving_speed",
             "avg_grade_adjusted_speed": "avg_grade_adjusted_speed",
             "ground_contact_time": "ground_contact_time",
@@ -825,9 +837,20 @@ class SyncService:
         changed = False
         for source_key, attr in field_map.items():
             value = metrics.get(source_key)
+            if value is None:
+                continue
+            if attr == "stride_length":
+                value = normalize_stride_length_meters(value)
+            elif attr == "ground_contact_time":
+                value = normalize_ground_contact_time_ms(value)
             if value is not None and getattr(activity, attr, None) != value:
                 setattr(activity, attr, value)
                 changed = True
+        repair = validate_and_repair_activity(activity, storage=self.storage)
+        if repair.changed:
+            changed = True
+            for fix in repair.fixes:
+                logger.info("Aktivitet %s: %s", activity.activity_id, fix)
         return changed
 
     async def sync_garmin_performance_metrics(
