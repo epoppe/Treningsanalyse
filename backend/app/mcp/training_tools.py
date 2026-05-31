@@ -21,6 +21,7 @@ from ..database.models.activity import (
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.session import SessionLocal
 from ..services.coaching_analysis_service import CoachingAnalysisService
+from ..services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG, McpDerivedMetricsService
 from ..services.route_analysis_service import RouteAnalysisService
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
@@ -404,9 +405,23 @@ def metric_catalog() -> Dict[str, Any]:
             "category": definition["category"],
             "unit": definition["unit"],
             "source": definition["model"].__tablename__,
+            "scope": "stored",
         }
         for key, definition in sorted(METRIC_CATALOG.items())
     ]
+    metrics.extend(
+        [
+            {
+                "key": key,
+                "category": definition["category"],
+                "unit": definition["unit"],
+                "scope": definition["scope"],
+                "source": "derived",
+                "heuristic": definition.get("heuristic", False),
+            }
+            for key, definition in sorted(DERIVED_METRIC_CATALOG.items())
+        ]
+    )
     categories = sorted({metric["category"] for metric in metrics})
     return {
         "metrics": metrics,
@@ -422,11 +437,22 @@ def query_metric_timeseries(
     end_date: Optional[str] = None,
     limit: int = 365,
 ) -> Dict[str, Any]:
+    if metric_key in DERIVED_METRIC_CATALOG:
+        limit = max(1, min(int(limit), 5000))
+        with training_context() as (db, storage):
+            service = McpDerivedMetricsService(db, storage)
+            return service.query_timeseries(
+                metric_key,
+                start_date=_parse_date(start_date) if start_date else None,
+                end_date=_parse_date(end_date) if end_date else None,
+                limit=limit,
+            )
+
     if metric_key not in METRIC_CATALOG:
         return {
             "status": "unknown_metric",
             "metric_key": metric_key,
-            "available_metric_count": len(METRIC_CATALOG),
+            "available_metric_count": len(METRIC_CATALOG) + len(DERIVED_METRIC_CATALOG),
         }
     definition = METRIC_CATALOG[metric_key]
     model = definition["model"]
