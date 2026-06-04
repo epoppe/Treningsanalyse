@@ -46,6 +46,11 @@ class ActivityResponse(BaseModel):
     trainingStressScore: Optional[float] = Field(None, description="Training Stress Score (TSS) - beregnet for alle aktiviteter")
     averagePowerWatts: Optional[float] = Field(None, description="Average power in watts")
     lactateThresholdSpeed: Optional[float] = Field(None, description="Lactate threshold speed in m/s")
+    temperature: Optional[float] = Field(None, description="Air temperature in celsius")
+    windSpeed: Optional[float] = Field(None, description="Wind speed in m/s")
+    windDirection: Optional[float] = Field(None, description="Wind direction in degrees (from)")
+    humidity: Optional[float] = Field(None, description="Relative humidity in percent")
+    weatherCondition: Optional[str] = Field(None, description="Weather symbol/condition")
     details: Optional[Dict[str, Any]] = Field(None, description="Detailed metrics for the activity")
 
 @router.get("/activities/date-range", response_model=List[ActivityResponse])
@@ -136,6 +141,11 @@ def get_activities_by_date_range(
                 "trainingStressScore": act.training_stress_score,  # TSS - beregnet for alle aktiviteter
                 "averagePowerWatts": average_power_watts,  # Power i watt
                 "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
+                "temperature": act.temperature,
+                "windSpeed": act.wind_speed,
+                "windDirection": act.wind_direction,
+                "humidity": act.humidity,
+                "weatherCondition": act.weather_condition,
                 # "details": act.detailed_metrics  # Fjernet for ytelse - hentes separat ved behov
             })
             
@@ -253,6 +263,11 @@ def get_activities(
                     "epoc": act.epoc,  # Exercise Post Oxygen Consumption (også brukt som TSS)
                     "averagePowerWatts": average_power_watts,  # Power i watt
                     "lactateThresholdSpeed": act.lactate_threshold_speed,  # Lactate threshold speed
+                    "temperature": act.temperature,
+                    "windSpeed": act.wind_speed,
+                    "windDirection": act.wind_direction,
+                    "humidity": act.humidity,
+                    "weatherCondition": act.weather_condition,
                     # "details": act.detailed_metrics  # Fjernet for ytelse - hentes separat ved behov
                 })
             except Exception as e:
@@ -349,6 +364,11 @@ def get_new_activities(
                 "epoc": act.epoc,
                 "averagePowerWatts": average_power_watts,
                 "lactateThresholdSpeed": act.lactate_threshold_speed,
+                "temperature": act.temperature,
+                "windSpeed": act.wind_speed,
+                "windDirection": act.wind_direction,
+                "humidity": act.humidity,
+                "weatherCondition": act.weather_condition,
                 "details": act.detailed_metrics
             })
             

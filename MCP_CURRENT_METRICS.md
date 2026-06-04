@@ -1,6 +1,6 @@
 # MCP — nåværende metrikker og ordbok
 
-Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `metric_glossary`, `athlete_profile`, `coaching_decision_snapshot`, `training_readiness_check`) og intern snapshot-henting som speiler `query_metric_timeseries`.
+Referansedato: **2026-06-03**. Generert fra MCP-verktøyene (`metric_catalog`, `metric_glossary`, `athlete_profile`, `coaching_decision_snapshot`, `training_readiness_check`) og intern snapshot-henting som speiler `query_metric_timeseries`.
 
 > Kjør på nytt med din lokale database: `cd backend && python3 scripts/generate_current_metrics_md.py`
 
@@ -10,18 +10,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 - **Metrikker i katalog:** 404
 - **Kategorier:** `acclimation`, `activity`, `aerobic_efficiency`, `cardio`, `coaching`, `fatigue`, `fitness`, `garmin_performance`, `garmin_score`, `health_hrv`, `health_recovery`, `health_sleep`, `health_stress`, `hrv`, `load_balance`, `performance`, `power`, `readiness`, `recovery`, `risk`, `route`, `running`, `running_dynamics`, `sleep`, `stamina`, `stress`, `summary`, `terrain`, `threshold`, `training`, `training_effect`, `training_load`, `training_status`, `weather`
-- **Data:** 0 aktiviteter, 0 løp, 0 rutegrupper
-
-### Observasjoner for denne kjøringen
-
-- **17** metrikker har verdi uten aktiviteter i databasen — sannsynligvis standardverdier/heuristikk, ikke målt data.
-- Consistency score er **0.0** (0 treningsdager), men limiter `consistency` er **97.5** — høy limiter-score betyr «sterk begrensning», ikke god konsistens.
-- Event readiness (5k/10k/HM/maraton) har tall uten treningsdata — `get_event_readiness` faller tilbake til `total_score=50` når Garmin-readiness mangler.
-- Training block er **peak** med CTL/ATL/TSB ≈ 0 — `get_training_block` tolker null-belastning som «peak»-grensetilfelle.
-- Training readiness anbefaler **normal_training** uten HRV-baseline — manglende data gir ofte «grønt lys» i stedet for «ukjent».
-- Banister-status er **productive_load** med fitness/fatigue 0 — status-tekst kan være misvisende ved tom historikk.
-- Bare **17/404** metrikker har verdi — forvent mange «ingen verdi»-felt; sjekk sync og at metrics er precomputet.
-
+- **Data:** 1931 aktiviteter, 1090 løp, 344 rutegrupper
 
 ---
 
@@ -64,21 +53,33 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
     "pace_unit": "min_per_km"
   },
   "data_inventory": {
-    "activities": 0,
-    "runs": 0,
-    "route_groups": 0
+    "activities": 1931,
+    "runs": 1090,
+    "route_groups": 344
   },
   "latest_threshold": {
-    "observed_at": null,
-    "lt2_heart_rate_bpm": null,
-    "lt2_speed_mps": null,
-    "lt2_pace_sec_per_km": null,
-    "source": null
+    "observed_at": "2026-06-02T16:27:49.531349",
+    "lt2_heart_rate_bpm": 164.0,
+    "lt2_speed_mps": 2.9166585,
+    "lt2_pace_sec_per_km": 342.9,
+    "source": "garmin_connect"
   },
-  "latest_garmin_performance": {},
+  "latest_garmin_performance": {
+    "date": "2026-06-02T00:00:00",
+    "vo2_max": 44.0,
+    "vo2_max_precise": 44.3,
+    "training_status": 7,
+    "training_status_feedback": "PRODUCTIVE_3",
+    "training_balance_feedback": "AEROBIC_LOW_SHORTAGE",
+    "acute_load": 607.0,
+    "chronic_load": 590.0,
+    "acwr_percent": 42.0,
+    "endurance_score": null,
+    "hill_score": null
+  },
   "latest_hrv": {
-    "date": null,
-    "rmssd": null,
+    "date": "2026-06-02",
+    "rmssd": 40.0,
     "status": null
   },
   "stable_context": [
@@ -95,47 +96,49 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 ```json
 {
-  "date": "2026-05-31",
+  "date": "2026-06-03",
   "consistency": {
-    "score": 0.0,
+    "score": 32.1,
     "interpretation": "85+ svært bra, 70–85 bra, <60 inkonsistent"
   },
   "fitness": {
-    "gain_rate_ctl_per_day": 0.0,
-    "ctl": 0.0
+    "gain_rate_ctl_per_day": 0.53,
+    "ctl": 66.3
   },
   "long_run": {
     "quality_score": null,
-    "durability_score": null
+    "durability_score": 92.2
   },
   "readiness_by_event": {
-    "5k": 58.0,
-    "10k": 58.0,
-    "hm": 55.0,
-    "marathon": 50.0
+    "5k": 69.2,
+    "10k": 69.2,
+    "hm": 81.4,
+    "marathon": 81.4
   },
   "pb_probability": {
-    "5k": 31.9,
-    "10k": 31.9,
-    "hm": 30.2,
-    "marathon": 27.5
+    "5k": 23.1,
+    "10k": 23.1,
+    "hm": 29.8,
+    "marathon": 29.8
   },
-  "polarization_score": null,
-  "training_block": "peak",
+  "polarization_score": 0.0,
+  "training_block": "build",
   "biomechanics": {
-    "form_stability": null
+    "form_stability": 91.4
   },
   "recovery": {
-    "hrv_resilience": null,
+    "hrv_resilience": 100.0,
     "fueling_score": null,
     "model_accuracy": null
   },
   "limiting_factors": {
     "sleep": 27.0,
-    "consistency": 97.5
+    "threshold": 100.0,
+    "vo2": 49.8,
+    "consistency": 49.3
   },
-  "top_limiter": "consistency",
-  "recommended_workout": "easy_run",
+  "top_limiter": "threshold",
+  "recommended_workout": "threshold",
   "data_gaps": [
     "fueling_score krever karbohydrat-/ernæringsregistrering",
     "recovery_model_accuracy krever historisk validering",
@@ -150,23 +153,23 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 ```json
 {
-  "date": "2026-05-31",
+  "date": "2026-06-03",
   "recommendation": "normal_training",
   "banister": {
-    "fitness": 0.0,
-    "fatigue": 0.0,
-    "performance": 0.0,
-    "last_7_days_load": 0.0,
-    "previous_28_days_weekly_avg_load": 0,
-    "load_ratio_7d_to_28d_week": null,
+    "fitness": 63.2,
+    "fatigue": 73.0,
+    "performance": -9.8,
+    "last_7_days_load": 353.6,
+    "previous_28_days_weekly_avg_load": 605.0,
+    "load_ratio_7d_to_28d_week": 0.58,
     "status": "productive_load"
   },
   "hrv_guidance": {
     "baseline_days": 60,
     "recent_days": 7,
-    "rmssd_baseline": null,
-    "rmssd_recent": null,
-    "rmssd_delta_pct": null,
+    "rmssd_baseline": 34.9,
+    "rmssd_recent": 37.5,
+    "rmssd_delta_pct": 7.5,
     "resting_hr_baseline": null,
     "resting_hr_recent": null,
     "resting_hr_delta_bpm": null,
@@ -174,13 +177,14 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
     "flags": [],
     "recommendation": "normal_training",
     "data_points": {
-      "hrv": 0,
-      "sleep": 0,
+      "hrv": 52,
+      "sleep": 6,
       "resting_hr": 0
     }
   },
   "flags": [
-    "missing_lt2_heart_rate"
+    "too_little_easy_volume",
+    "too_much_threshold_density"
   ]
 }
 ```
@@ -267,7 +271,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «altitude_acclimation». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -278,7 +283,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «heat_acclimation». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -302,7 +308,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `IMPROVING_AEROBIC_BASE_8` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «aerobic_training_effect_message». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -313,7 +320,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `NO_ANAEROBIC_BENEFIT_0` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «anaerobic_training_effect_message». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -324,7 +332,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `142` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_heart_rate». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -335,7 +344,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.461` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_moving_speed». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -357,7 +367,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_speed». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -368,7 +379,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_speed_mps». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -379,7 +391,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.016`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «avg_efficiency_factor». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -412,7 +425,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.9` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «cadence_drop_pct». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -423,7 +437,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `kcal` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `474` (kcal)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «calories». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -434,7 +449,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `91.7` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «decoupling_data_quality_score». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -445,7 +461,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `too_short`
+- **Per dato:** `2026-05-18`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «decoupling_reason_if_unsuitable». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -456,7 +473,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `suitable`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «decoupling_suitability_flag». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -467,7 +485,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «distance». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -478,7 +497,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «distance_m». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -489,7 +509,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «duration». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -500,7 +521,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «duration_s». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -511,7 +533,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.36` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «ef_drop_pct». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -522,7 +545,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `91.7`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «efficiency_data_quality». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -555,7 +579,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `308.7` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «ground_contact_time». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -566,7 +591,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «has_detailed_data». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -599,7 +625,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `164` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «lactate_threshold_heart_rate». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -610,7 +637,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.917` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «lactate_threshold_speed». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -632,7 +660,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `156` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «max_heart_rate». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -643,7 +672,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `W` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `5994` (W)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «max_power». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -676,7 +706,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.017`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «median_efficiency_factor». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -709,7 +740,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `106` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «min_heart_rate». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -731,7 +763,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.95` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «negative_split_percent». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -742,7 +775,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.48` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «pace_drop_pct». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -753,7 +787,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s/km` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `406.5` (s/km)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «pace_sec_per_km». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -775,7 +810,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `6.24`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «running_economy». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -786,7 +822,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.017`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «steady_state_efficiency_factor». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -808,7 +845,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «total_anaerobic_training_effect». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -819,7 +857,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `113.6` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «total_descent». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -841,7 +880,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.3` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «total_training_effect». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -852,7 +892,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `AEROBIC_BASE` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «training_effect_label». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -888,7 +929,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-0.707` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Prosent fall i efficiency factor fra 1. til 2. halvdel av økten.
 - **Tolkning:** Positiv = mer puls per fart sent i økta (aerob stress).
 - **Coaching:** Kun på steady-state økter >45 min; se suitability-flagg.
@@ -898,7 +940,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-1.16` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «hr_drift_pct». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -912,7 +955,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `82.8` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** 100 minus typisk HR-drift/decoupling — høyere er bedre.
 - **Tolkning:** Lav score = dårlig aerob stabilitet i perioden.
 - **Coaching:** Aerob kvalitet over flere økter.
@@ -922,7 +966,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ms` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `36.6` (ms)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** HRV, puls og aerob drift over tid.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Recovery-trend og tegn på stress/utmattelse.
@@ -934,7 +979,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ms` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `37.5` (ms)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Snitt RMSSD siste 7 dager.
 - **Tolkning:** Sammenlign med baseline og recovery.hrv_baseline.
 - **Coaching:** Kort trend — ikke overtolking av én dag.
@@ -944,7 +990,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ms` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `34.2` (ms)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** HRV, puls og aerob drift over tid.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Recovery-trend og tegn på stress/utmattelse.
@@ -980,7 +1027,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `12.4` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid under LT1 (Seiler lav sone).
 - **Tolkning:** Mål ~75–85 % for polarisert 80/20.
 - **Coaching:** Flagg for lite rolig volum.
@@ -991,7 +1039,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `51.1` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel tid mellom LT1 og LT2.
 - **Tolkning:** Bør typisk være lav (<15 %) i polarisert modell.
 - **Coaching:** Advar ved «grå sone»-dominans.
@@ -1002,7 +1051,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `36.6` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel tid over LT2.
 - **Tolkning:** Noen få prosent er ofte nok; for mye øker fatigue.
 - **Coaching:** Balanser med zone1_pct.
@@ -1013,8 +1063,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `48.7` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Normalisert fatigue fra Banister (0–100).
 - **Tolkning:** Høyere = mer akutt tretthet.
 - **Coaching:** Par med fitness_score.
@@ -1025,8 +1075,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `42.1` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Normalisert Banister-fitness (0–100).
 - **Tolkning:** Høyere = høyere kronisk fitness i modellen.
 - **Coaching:** Forenklet fitness for narrativ.
@@ -1037,8 +1087,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `label` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `form_balance`
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `polarized_too_little_easy_volume`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Faktornavn med høyest vektet avvik (HRV, søvn, belastning, …).
 - **Tolkning:** Tekstlabel, ikke numerisk score.
 - **Coaching:** Start coaching-svar med «hovedårsak akkurat nå er …»
@@ -1049,8 +1099,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ratio` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `0.227` (ratio)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Normalisert andel (0–1) av hvor mye den valgte driveren dominerer.
 - **Tolkning:** Høyere = mer relevant å adressere først.
 - **Coaching:** Prioriter tiltak etter vekt.
@@ -1061,8 +1111,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `5` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `40.2` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Banister performance (fitness − fatigue) skalert 0–100.
 - **Tolkning:** Høyere = bedre dagsform i modellen.
 - **Coaching:** Dags «form» i coaching-språk.
@@ -1073,8 +1123,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `37.5` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `55.9` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Intern score fra recovery + Banister-form — ikke Garmin.
 - **Tolkning:** 0–100, høyere = bedre dagsform i coaching-modellen.
 - **Coaching:** Kun når du eksplisitt bruker coaching-modellen, ikke Garmin UI.
@@ -1086,7 +1136,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `77.5` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Sammensatt recovery fra HRV, søvn og puls.
 - **Tolkning:** Høyere = bedre recovery-status.
 - **Coaching:** Ikke Garmin readiness — intern.
@@ -1098,7 +1149,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `82.4` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «fatigue_resistance_score». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -1112,8 +1164,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `load` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `` (load)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `72` (load)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** 7-dagers eksponentiell glidende snitt av daglig TSS/EPOC.
 - **Tolkning:** Reagerer raskt på nylige harde økter.
 - **Coaching:** Forklar «hvor sliten er du nå» vs CTL (fitness).
@@ -1124,8 +1176,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `load` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `` (load)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `66.3` (load)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** 42-dagers eksponentiell glidende snitt av daglig TSS/EPOC.
 - **Tolkning:** Høyere = mer kronisk treningsvolum (fitness). Stiger sakte.
 - **Coaching:** Beskriv langsiktig treningsstatus og kapasitet.
@@ -1136,7 +1188,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m_per_s_per_bpm` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.01729` (m_per_s_per_bpm)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Rullerende snitt av speed/HR (m/s per bpm) på rolige økter.
 - **Tolkning:** Høyere = bedre økonomi ved lav intensitet over tid.
 - **Coaching:** Trend for aerob utvikling — sammenlign over uker, ikke én økt.
@@ -1146,7 +1199,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m_per_s_per_bpm` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.01645` (m_per_s_per_bpm)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** CTL/ATL/TSB og aerob effektivitet (EF) fra lokal TSS-modell.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Form, fitness og om athlete er fresh eller sliten.
@@ -1157,7 +1211,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m_per_s_per_bpm` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.01633` (m_per_s_per_bpm)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** CTL/ATL/TSB og aerob effektivitet (EF) fra lokal TSS-modell.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Form, fitness og om athlete er fresh eller sliten.
@@ -1169,8 +1224,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `load` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `` (load)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `-5.7` (load)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Samme som fitness.tsb.
 - **Tolkning:** Se fitness.tsb.
 - **Coaching:** Se fitness.tsb.
@@ -1181,8 +1236,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `load` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `` (load)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `-5.7` (load)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** CTL minus ATL. Positiv = relativt fresh, negativ = akkumulert fatigue.
 - **Tolkning:** Omtrent −10 til +10 er ofte normalt i opplæring; svært negativ = risiko.
 - **Coaching:** Kjerne for taper, overreaching og restitusjonsdager.
@@ -1194,7 +1249,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `OPTIMAL` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «acwr_status». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1205,7 +1261,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `FEEDBACK_2` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «acwr_status_feedback». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1216,7 +1273,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `ACCLIMATIZED` (m)
+- **Per dato:** `2026-04-06`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «altitude_trend». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1227,7 +1285,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «current_altitude». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1238,7 +1297,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «daily_acute_chronic_workload_ratio». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1271,7 +1331,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «fitness_trend». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1282,7 +1343,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `RUNNING`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «fitness_trend_sport». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1293,7 +1355,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «heat_acclimation_percentage». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1359,7 +1422,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «max_met_category». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1370,7 +1434,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2111` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_high». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1381,7 +1446,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1468` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_high_target_max». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1392,7 +1458,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `816` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_high_target_min». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1403,7 +1470,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `110.5` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_low». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1414,7 +1482,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1033` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_low_target_max». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1425,7 +1494,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `38` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_aerobic_low_target_min». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1436,7 +1506,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `186.7` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_anaerobic». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1447,7 +1518,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `652` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_anaerobic_target_max». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1458,7 +1530,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `217` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «monthly_load_anaerobic_target_min». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1469,7 +1542,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «previous_altitude_acclimation». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1480,7 +1554,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «previous_heat_acclimation_percentage». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1491,7 +1566,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `RUNNING`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «sport». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1502,7 +1578,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `GENERIC`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «sub_sport». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1513,7 +1590,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `AEROBIC_LOW_SHORTAGE`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «training_balance_feedback_phrase». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1524,7 +1602,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `PRODUCTIVE_3` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «training_status_feedback_phrase». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -1561,7 +1640,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `31`
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1571,7 +1651,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4`
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1581,7 +1662,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `29`
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1631,7 +1713,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `during_sleep`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1651,7 +1734,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1661,7 +1745,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `BALANCED` (score)
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1723,7 +1808,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `body_battery`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1733,7 +1819,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `body_battery`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1835,7 +1922,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `162` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1855,7 +1943,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `63` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1895,7 +1984,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.668e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1935,7 +2025,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `5` (score)
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -1965,7 +2056,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `714` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2035,7 +2127,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.012e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2077,7 +2170,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `12` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2087,7 +2181,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `726` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2097,7 +2192,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `186` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2107,7 +2203,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.596e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2117,7 +2214,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `21`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2127,7 +2225,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.032e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2137,7 +2236,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `5.628e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2149,7 +2249,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ms` · scope: `stored` · kilde: `hrv`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4` (ms)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «hrv_rmssd». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -2162,7 +2263,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2111` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «load_aerobic_high». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -2173,7 +2275,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `110.5` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «load_aerobic_low». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -2184,7 +2287,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `186.7` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «load_anaerobic». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -2197,7 +2301,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ml/kg/min` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `44` (ml/kg/min)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «vo2_max». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -2219,7 +2324,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ml/kg/min` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `44` (ml/kg/min)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «vo2_max». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -2230,7 +2336,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ml/kg/min` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `44.3` (ml/kg/min)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «vo2_max_precise». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -2241,7 +2348,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3103` (s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** VO2, predikerte løpstider og Garmin performance-felter.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet og målsetting — prediksjoner er modellbaserte.
@@ -2253,7 +2361,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `152` (s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Estimert tid fra CS + W′-modell.
 - **Tolkning:** Sekunder — lavere er raskere.
 - **Coaching:** Målsetting — kun ved god CS-modellkvalitet.
@@ -2263,7 +2372,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `6618` (s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** VO2, predikerte løpstider og Garmin performance-felter.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet og målsetting — prediksjoner er modellbaserte.
@@ -2274,7 +2384,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `snapshot` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.33e+04` (s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** VO2, predikerte løpstider og Garmin performance-felter.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet og målsetting — prediksjoner er modellbaserte.
@@ -2287,7 +2398,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `W` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `201.8` (W)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_power». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -2298,7 +2410,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `W` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `201.8` (W)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «normalized_power». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -2323,8 +2436,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `5` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `77.5` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Form/TSB normalisert til 0–100 (tung vekt i total score).
 - **Tolkning:** Reflekterer CTL−ATL; lav score = høy akutt tretthet.
 - **Coaching:** Koble til fitness.tsb når du forklarer belastning.
@@ -2336,7 +2449,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
 - **Nåværende verdi:** `5` (score)
-- **Per dato:** `2026-05-31`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** HRV-komponent (0–100) basert på nylig RMSSD vs baseline.
 - **Tolkning:** Lav score = autonom stress eller incomplete recovery.
 - **Coaching:** Bruk sammen med recovery.hrv_delta_pct for narrativ.
@@ -2348,7 +2461,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
 - **Nåværende verdi:** `5` (score)
-- **Per dato:** `2026-05-31`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Søvnkomponent (0–100) i Garmin readiness-modellen.
 - **Tolkning:** Lav verdi tyder på utilstrekkelig eller dårlig søvn siste netter.
 - **Coaching:** Forklar hvorfor rolig dag anbefales selv om athlete «føler seg ok».
@@ -2359,8 +2472,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** `5` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `69.2` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Samlet dags-score 0–100 fra TrainingReadinessService (søvn, HRV, form).
 - **Tolkning:** Høyere er bedre. Under ~50: vurder lett økt. Under ~35: hvile.
 - **Coaching:** Primær readiness for «kan jeg trene hardt i dag?»
@@ -2384,7 +2497,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `body_battery`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «body_battery_max». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -2395,7 +2509,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `body_battery`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «body_battery_min». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -2428,7 +2543,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ms` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `36` (ms)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** HRV-baseline, recovery-score og predikert tid til baseline.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Forklar hvorfor hard trening bør utsettes eller tones ned.
@@ -2440,7 +2556,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `11.11` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Prosentvis avvik RMSSD vs 28-dagers baseline.
 - **Tolkning:** Negativ = under normal — ofte tegn på stress/fatigue.
 - **Coaching:** Forklar readiness og hvile anbefaling.
@@ -2451,8 +2568,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `hours` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `26` (hours)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `18` (hours)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Heuristisk estimat (6–120 t) før readiness/TSB normaliseres.
 - **Tolkning:** Høyere = mer hvile anbefales før hard økt.
 - **Coaching:** Konkret «vent X timer» — merk at det er estimat, ikke Garmin.
@@ -2463,7 +2580,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** HRV-baseline, recovery-score og predikert tid til baseline.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Forklar hvorfor hard trening bør utsettes eller tones ned.
@@ -2477,8 +2595,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `2` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `11.3` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Kombinasjon av ACWR, monotoni og overtraining.
 - **Tolkning:** 0–100, høyere = mer risiko.
 - **Coaching:** Advar — ikke medisinsk prognose.
@@ -2489,8 +2607,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `33.3` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `33` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Heuristikk fra belastning, form og HRV-flagg.
 - **Tolkning:** Høyere = større risiko for overreaching.
 - **Coaching:** Foreslå lett uke eller hvile.
@@ -2501,8 +2619,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `33.3` (score)
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `33` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Samme konsept som overtraining_score.
 - **Tolkning:** Se overtraining_score.
 - **Datakilde (ordbok):** heuristic
@@ -2513,7 +2631,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-5.48` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Sammenligning med tidligere økter på samme rute.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Objektiv progresjon uavhengig av vær og dagsform.
@@ -2524,7 +2643,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.41` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Sammenligning med tidligere økter på samme rute.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Objektiv progresjon uavhengig av vær og dagsform.
@@ -2535,7 +2655,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-7.36` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Sammenligning med tidligere økter på samme rute.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Objektiv progresjon uavhengig av vær og dagsform.
@@ -2546,7 +2667,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59.55`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2556,7 +2678,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `10.59`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2566,7 +2689,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59.53`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2576,7 +2700,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `10.54`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2586,7 +2711,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59.55`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2596,7 +2722,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `10.56`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2606,7 +2733,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59.55`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2616,7 +2744,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `10.59`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2626,7 +2755,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3364` (count)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2636,7 +2766,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `route-match-v1`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2646,7 +2777,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3364` (count)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2656,7 +2788,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2666,7 +2799,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `9387` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2676,7 +2810,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (count)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2686,7 +2821,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59.55`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2696,7 +2832,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_fingerprints`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `10.59`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2706,7 +2843,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.218` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2716,7 +2854,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.234e+04` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2726,7 +2865,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.494e+04` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2736,7 +2876,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `route-match-v1`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2746,7 +2887,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2756,7 +2898,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.739e+04` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2766,7 +2909,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2776,7 +2920,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2786,7 +2931,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2796,7 +2942,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activity_route_matches`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.232e+04` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -2809,6 +2956,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Løpsprestasjon, kurver og økonomi fra FIT/effort-data.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet, fart over varighet, og aerob effektivitet.
@@ -2820,7 +2968,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.158` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** CS fra hyperbolsk modell (m/s) på beste speed-efforts siste ~365 d.
 - **Tolkning:** Høyere = bedre aerob/anaerob kapasitet.
 - **Coaching:** Kapasitet og pacing for intervaller.
@@ -2830,7 +2979,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ratio` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.01732` (ratio)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Løpsprestasjon, kurver og økonomi fra FIT/effort-data.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet, fart over varighet, og aerob effektivitet.
@@ -2841,7 +2991,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ratio` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.01219` (ratio)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Løpsprestasjon, kurver og økonomi fra FIT/effort-data.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet, fart over varighet, og aerob effektivitet.
@@ -2852,7 +3003,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `17.6` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Løpsprestasjon, kurver og økonomi fra FIT/effort-data.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet, fart over varighet, og aerob effektivitet.
@@ -2865,6 +3017,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 10 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2887,6 +3040,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 1 minutt i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2909,6 +3063,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 20 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2931,6 +3086,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 30 sekunder i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2953,6 +3109,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 3 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2975,6 +3132,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 40 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -2997,6 +3155,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 5 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3019,6 +3178,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig effekt over 60 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere W = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3040,7 +3200,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.945` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 10 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3062,7 +3223,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `8.115` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 1 minutt i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3084,7 +3246,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.213` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 20 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3106,7 +3269,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `9.262` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 30 sekunder i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3128,7 +3292,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `6.185` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 3 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3150,7 +3315,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.665` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 40 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3172,7 +3338,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `5.517` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 5 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3194,7 +3361,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.192` (m/s)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Beste gjennomsnittlig fart over 60 minutter i snapshot (ofte all-time).
 - **Tolkning:** Høyere m/s = bedre for den varigheten.
 - **Coaching:** Kapasitetspunkt på duration curve.
@@ -3216,7 +3384,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `snapshot` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `200.5` (m)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Skjærepunkt D′ fra CS-modell (meter).
 - **Tolkning:** Større W′ = mer «kick» over CS.
 - **Coaching:** Forklar kort, hard innsats vs lang distanse.
@@ -3227,6 +3396,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 *enhet: `W` · scope: `snapshot` · kilde: `derived`*
 
 - **Nåværende verdi:** *(ingen verdi)*
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Løpsprestasjon, kurver og økonomi fra FIT/effort-data.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Kapasitet, fart over varighet, og aerob effektivitet.
@@ -3239,7 +3409,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `spm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `159.8` (spm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «average_running_cadence». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -3250,7 +3421,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.913` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «stride_length». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -3261,7 +3433,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `cm` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `8.36` (cm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «vertical_oscillation». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -3272,7 +3445,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `9.02` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «vertical_ratio». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -3285,7 +3459,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.012e+04` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «sleep_duration_s». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -3296,7 +3471,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `sleep`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `5` (score)
+- **Per dato:** `2026-04-19`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «sleep_overall_score». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -3318,7 +3494,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `93.1` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Søvnlengde, kvalitet og akkumulert søvngjeld.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Koble dårlig søvn til anbefalt intensitet neste dag.
@@ -3329,7 +3506,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `hours` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.87` (hours)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Søvnlengde, kvalitet og akkumulert søvngjeld.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Koble dårlig søvn til anbefalt intensitet neste dag.
@@ -3340,7 +3518,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `hours` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `4.73` (hours)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Søvnlengde, kvalitet og akkumulert søvngjeld.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Koble dårlig søvn til anbefalt intensitet neste dag.
@@ -3352,7 +3531,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `hours` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1.45` (hours)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Akkumulert timer under 8t søvn per natt.
 - **Tolkning:** Høyere = mer uoppgjort søvn.
 - **Coaching:** Forklar trøtthet uten hard trening.
@@ -3388,7 +3568,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `12` (s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «high_stress_time_s». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -3399,7 +3580,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `stress`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `21` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Daglig helsemetric (søvn, HRV, puls, body battery).
 - **Tolkning:** Kolonne «stress_level». Trend viktigere enn enkeltdag.
 - **Coaching:** Recovery og livsstilsfaktorer.
@@ -3412,7 +3594,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `159.8`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3422,7 +3605,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `142` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3432,7 +3616,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s/km` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `406.5` (s/km)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3442,7 +3627,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3452,7 +3638,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3462,7 +3649,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3482,7 +3670,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3492,7 +3681,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3502,7 +3692,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `118.2` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3512,7 +3703,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `kcal` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `474` (kcal)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3522,7 +3714,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `113.6` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3532,7 +3725,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3542,7 +3736,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `daily_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3552,7 +3747,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.033`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3562,7 +3758,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.233`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3572,7 +3769,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-9`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3582,7 +3780,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `159.8`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3592,7 +3791,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `142` (bpm)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3602,7 +3802,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s/km` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `406.5` (s/km)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3612,7 +3813,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3662,7 +3864,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `244.6` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3672,7 +3875,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1712` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3682,7 +3886,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-90.27` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3692,7 +3897,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `99.43` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3702,7 +3908,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `696` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3712,7 +3919,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `-88.83` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3722,7 +3930,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `6` (count)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3732,7 +3941,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3742,7 +3952,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `118.2` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3752,7 +3963,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `kcal` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `474` (kcal)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3762,7 +3974,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `113.6` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3772,7 +3985,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3782,7 +3996,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3792,7 +4007,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `110.5`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3802,7 +4018,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `monthly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2026` (count)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3812,7 +4029,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.143`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3822,7 +4040,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `159.8`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3832,7 +4051,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `142` (bpm)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3842,7 +4062,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s/km` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `406.5` (s/km)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3852,7 +4073,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3862,7 +4084,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3872,7 +4095,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3892,7 +4116,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.46` (m/s)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3902,7 +4127,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1048` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3912,7 +4138,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `426.1` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3922,7 +4149,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1`
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3932,7 +4160,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `118.2` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3942,7 +4171,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `kcal` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `474` (kcal)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3952,7 +4182,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `113.6` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3962,7 +4193,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7337` (m)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3972,7 +4204,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2983` (%)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3982,7 +4215,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `23` (count)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -3992,7 +4226,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `count` · scope: `stored` · kilde: `weekly_summaries`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2026` (count)
+- **Per dato:** `2026-06-01`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4264,7 +4499,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `118.2` (m)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «total_ascent». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -4277,7 +4513,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4287,7 +4524,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `bpm` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `164` (bpm)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4297,7 +4535,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2.917` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4307,7 +4546,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `m/s` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.292` (m/s)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4317,7 +4557,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `garmin_connect`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4327,7 +4568,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `value` · scope: `stored` · kilde: `lactate_threshold_history`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `activity_sync`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Ingen dedikert ordboktekst — bruk metric_catalog for enhet og scope.
 - **Tolkning:** Ukjent — verifiser mot datakilde før sterke coaching-påstander.
 - **Coaching:** Hent tidsserie og tolke forsiktig.
@@ -4339,7 +4581,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `92.2` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Intensitetsfordeling og treningsklasser.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** 80/20, soner og om hard trening dominerer.
@@ -4350,7 +4593,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7.8` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Intensitetsfordeling og treningsklasser.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** 80/20, soner og om hard trening dominerer.
@@ -4362,7 +4606,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Recovery siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4373,7 +4618,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Lett siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4384,7 +4630,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `18.6` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Aerob siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4395,7 +4642,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `23.2` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Tempo siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4406,7 +4654,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `30.4` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Threshold siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4417,7 +4666,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `27.9` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som VO2 siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4428,7 +4678,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Anaerob siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4439,7 +4690,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel økttid klassifisert som Race siste 28 dager.
 - **Tolkning:** Prosent av total løpetid; summer til ~100 %.
 - **Coaching:** Finfordeling utover 3-soners coaching.zone*.
@@ -4450,7 +4702,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `class` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** 1=recovery … 8=race, basert på puls vs LT1/LT2.
 - **Tolkning:** Hele tall 1–8.
 - **Coaching:** Detaljert intensitet på enkeltøkter.
@@ -4461,7 +4714,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `zone` · scope: `activity` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `2`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** 1=under LT1, 2=mellom LT1–LT2, 3=over LT2 (snittpuls).
 - **Tolkning:** Grov klassifisering per aktivitet.
 - **Coaching:** Rask øktklassifisering — bruk class_* for finfordeling.
@@ -4473,7 +4727,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `3.3` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «aerobic_training_effect». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -4484,7 +4739,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «anaerobic_training_effect». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -4497,7 +4753,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `110.5` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Verdi fra én synkronisert Garmin/FIT-aktivitet.
 - **Tolkning:** Kolonne «epoc». Se aktivitetskontekst (varighet, type, terreng).
 - **Coaching:** Øktanalyse og sammenligning med lignende økter.
@@ -4509,7 +4766,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `activities`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `110.5` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Belastningsscore per økt (≈ EPOC fra Garmin der tilgjengelig).
 - **Tolkning:** 100 ≈ 1 time ved terskel; summeres til CTL/ATL.
 - **Coaching:** Volum og intensitet per uke.
@@ -4520,7 +4778,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ratio` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `1` (ratio)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Akutt/kronisk belastningsforhold (Garmin eller coaching-fallback).
 - **Tolkning:** ~0.8–1.3 ofte trygt; >1.5 øker skaderisiko i litteraturen.
 - **Coaching:** Advar ved brå økning i belastning.
@@ -4531,7 +4790,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `ratio` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `0.58` (ratio)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Snitt belastning / standardavvik siste 7 dager.
 - **Tolkning:** Høy monotoni = lite variasjon dag til dag.
 - **Coaching:** Anbefal variasjon eller hviledag ved høy monotoni + høy strain.
@@ -4542,7 +4802,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `daily` · kilde: `derived`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `204.4` (score)
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Ukes sum TSS multiplisert med monotoni.
 - **Tolkning:** Høy strain = mye volum med lite variasjon.
 - **Coaching:** Kombiner med monotony for overtreningssignal.
@@ -4552,7 +4813,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `42` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «acwr_percent». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -4563,7 +4825,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `607` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «daily_training_load_acute». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -4574,7 +4837,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `score` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `59` (score)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «daily_training_load_chronic». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -4587,7 +4851,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `code` · scope: `stored` · kilde: `garmin_performance_metrics`*
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `7`
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Garmin performance status (VO2, load balance, scores).
 - **Tolkning:** Kolonne «training_status». Offisiell Garmin-modell der merket.
 - **Coaching:** Kapasitet og treningsstatus fra Garmin.
@@ -4600,7 +4865,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `s/km` · scope: `activity` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `406.5` (s/km)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Temperaturjustert pace og estimert prestasjonstap.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Normaliser langsomme økter i varme/kulde.
@@ -4611,7 +4877,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *enhet: `%` · scope: `activity` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `` (%)
+- **Per dato:** `2026-06-02`
 - **Definisjon:** Temperaturjustert pace og estimert prestasjonstap.
 - **Tolkning:** Se category_glossary og metric_catalog.
 - **Coaching:** Normaliser langsomme økter i varme/kulde.
@@ -4622,7 +4889,7 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 ## Ordbok uten katalogoppføring
 
-12 nøkler i ordbok som ikke er i `metric_catalog`. 4 har beregnet verdi i dag.
+12 nøkler i ordbok som ikke er i `metric_catalog`. 6 har beregnet verdi i dag.
 
 ### `activity.decoupling_percent`
 **Aerobic decoupling**
@@ -4651,7 +4918,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** ``
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Hvor nær 80/20-fordeling (lav/høy) brukeren er.
 - **Tolkning:** 100 = ideell polarisert profil siste 28 dager.
 - **Coaching:** Juster volum mot rolig vs hard trening.
@@ -4662,8 +4930,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `easy_run`
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `threshold`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Enum: rest, recovery_run, easy_run, threshold, vo2_intervals, long_run, …
 - **Tolkning:** Samlet anbefaling fra readiness, belastning og treningsfase.
 - **Coaching:** Konkret «hva bør du gjøre i dag».
@@ -4674,8 +4942,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** ``
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `32.1`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Andel av siste 28 dager med minst én løpeøkt (0–100).
 - **Tolkning:** 85+ svært bra, 70–85 bra, under 60 inkonsistent.
 - **Coaching:** Vurder om fremgang stoppes av hull i treningen, ikke bare CTL.
@@ -4686,8 +4954,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** ``
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `0.53`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Endring i CTL per dag over siste 42 dager.
 - **Tolkning:** Positiv = bygger form; negativ = taper eller sykdom.
 - **Coaching:** Retning viktigere enn dagens CTL-nivå.
@@ -4698,8 +4966,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** `58`
-- **Per dato:** `2026-05-31`
+- **Nåværende verdi:** `69.2`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Konkurransespesifikk readiness 0–100 for 5 km.
 - **Tolkning:** Kombinerer Garmin readiness, TSB, HRV og søvn for kort race.
 - **Coaching:** Anbefal start eller utsettelse av 5K/10K.
@@ -4710,7 +4978,8 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 *scope: `daily` · kilde: `derived` · **heuristikk***
 
-- **Nåværende verdi:** *(ingen verdi)*
+- **Nåværende verdi:** `92.2`
+- **Per dato:** `2026-06-03`
 - **Definisjon:** Evnen til å holde prestasjon på langkjøringer (drift, fatigue resistance).
 - **Tolkning:** Høyere = bedre utholdenhet sent i lange økter.
 - **Coaching:** Maraton/HM-planlegging og langtur-kvalitet.
@@ -4764,5 +5033,5 @@ Referansedato: **2026-05-31**. Generert fra MCP-verktøyene (`metric_catalog`, `
 
 ## Statistikk
 
-- Med verdi: **17** / 404
-- Uten verdi: **387**
+- Med verdi: **271** / 404
+- Uten verdi: **133**

@@ -279,6 +279,14 @@ class FitSyncService:
                     logger.info("Ruteanalyse for aktivitet %s: %s", activity_id, route_result)
                 except Exception as exc:
                     logger.warning("Kunne ikke beregne ruteanalyse for aktivitet %s: %s", activity_id, exc)
+                try:
+                    weather_changed = await self.sync_service.sync_activity_weather_for_activity(
+                        str(activity_id),
+                        force_refresh=True,
+                    )
+                    logger.info("Værberikelse for aktivitet %s: %s", activity_id, weather_changed)
+                except Exception as exc:
+                    logger.warning("Kunne ikke berike vær for aktivitet %s: %s", activity_id, exc)
             return True, metrics_result
         except Exception as exc:
             logger.error(f"Feil ved nedlasting av FIT-data for aktivitet {activity_id}: {exc}")

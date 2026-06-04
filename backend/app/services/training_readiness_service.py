@@ -22,6 +22,126 @@ class TrainingReadinessService:
     def __init__(self, db: Optional[Session] = None):
         self.db = db if db is not None else SessionLocal()
         self.tss_service = TrainingStressService(self.db)
+
+    def _percentile(self, values: List[float], percentile: float) -> Optional[float]:
+        cleaned = sorted(float(v) for v in values if v is not None)
+        if not cleaned:
+            return None
+        if len(cleaned) == 1:
+            return cleaned[0]
+        rank = (len(cleaned) - 1) * percentile
+        lower = int(rank)
+        upper = min(lower + 1, len(cleaned) - 1)
+        weight = rank - lower
+        return cleaned[lower] * (1 - weight) + cleaned[upper] * weight
+
+    def _score_against_baseline(
+        self,
+        value: Optional[float],
+        low: Optional[float],
+        mid: Optional[float],
+        high: Optional[float],
+    ) -> Optional[float]:
+        if value is None or low is None or mid is None or high is None:
+            return None
+        if not (low < mid < high):
+            return None
+        if value <= mid:
+            span = mid - low
+            if span <= 0:
+                return None
+            normalized = ((value - low) / span) * 50.0
+        else:
+            span = high - mid
+            if span <= 0:
+                return None
+            normalized = 50.0 + ((value - mid) / span) * 50.0
+        return max(0.0, min(100.0, normalized))
+
+    def _get_sleep_baseline(self, target_date: date) -> Optional[Dict[str, float]]:
+        baseline_end = target_date - timedelta(days=4)
+        baseline_start = baseline_end - timedelta(days=41)
+        sleep_rows = self.db.query(Sleep).filter(
+            and_(
+                Sleep.sleep_date >= baseline_start,
+                Sleep.sleep_date <= baseline_end,
+            )
+        ).all()
+        values = [
+            float(score)
+            for row in sleep_rows
+            for score in [(row.overall_score or row.sleep_score)]
+            if score is not None
+        ]
+        if len(values) < 7:
+            return None
+        p10 = self._percentile(values, 0.10)
+        p50 = self._percentile(values, 0.50)
+        p90 = self._percentile(values, 0.90)
+        if p10 is None or p50 is None or p90 is None:
+            return None
+        return {
+            "method": "personal_sleep_percentiles",
+            "low": round(p10, 1),
+            "mid": round(p50, 1),
+            "high": round(p90, 1),
+            "sample_count": float(len(values)),
+        }
+
+    def _get_hrv_baseline(self, target_date: date) -> Optional[Dict[str, float]]:
+        baseline_row = (
+            self.db.query(HRV)
+            .filter(
+                and_(
+                    HRV.measurement_date <= target_date,
+                    HRV.baseline_balanced_lower.isnot(None),
+                    HRV.baseline_balanced_upper.isnot(None),
+                )
+            )
+            .order_by(HRV.measurement_date.desc())
+            .first()
+        )
+        if baseline_row:
+            low = baseline_row.baseline_low_upper or baseline_row.baseline_balanced_lower
+            high = baseline_row.baseline_balanced_upper
+            mid = (baseline_row.baseline_balanced_lower + baseline_row.baseline_balanced_upper) / 2.0
+            if low is not None and mid is not None and high is not None and low < mid < high:
+                return {
+                    "method": "garmin_hrv_baseline",
+                    "low": round(float(low), 1),
+                    "mid": round(float(mid), 1),
+                    "high": round(float(high), 1),
+                    "sample_count": 1.0,
+                }
+
+        baseline_end = target_date - timedelta(days=4)
+        baseline_start = baseline_end - timedelta(days=41)
+        hrv_rows = self.db.query(HRV).filter(
+            and_(
+                HRV.measurement_date >= baseline_start,
+                HRV.measurement_date <= baseline_end,
+                HRV.rmssd.isnot(None),
+            )
+        ).all()
+        values = [
+            float(row.rmssd)
+            for row in hrv_rows
+            if row.rmssd is not None and row.measurement_type in ["morning", "during_sleep", None]
+        ]
+        if len(values) < 7:
+            return None
+        p10 = self._percentile(values, 0.10)
+        p50 = self._percentile(values, 0.50)
+        p90 = self._percentile(values, 0.90)
+        if p10 is None or p50 is None or p90 is None:
+            return None
+        return {
+            "method": "personal_hrv_percentiles",
+            "low": round(p10, 1),
+            "mid": round(p50, 1),
+            "high": round(p90, 1),
+            "sample_count": float(len(values)),
+        }
     
     def calculate_training_readiness(self, target_date: date = None) -> Dict[str, Any]:
         """
@@ -44,14 +164,18 @@ class TrainingReadinessService:
             
             # 3. Hent aktivitetsdata
             activity_data = self._get_activity_data(start_date, end_date)
+            has_trained_on_date = any(
+                activity.get("date") == target_date.isoformat()
+                for activity in activity_data
+            )
             
             # 4. Hent form-score (Training Stress Balance)
-            form_score_value = self._get_form_score(target_date)
+            form_score_value, form_baseline = self._get_form_score(target_date)
             
             # 5. Beregn komponenter
-            sleep_score = self._calculate_sleep_score(sleep_data)
-            hrv_score = self._calculate_hrv_score(hrv_data)
-            form_score = self._calculate_form_score(form_score_value)
+            sleep_score, sleep_baseline = self._calculate_sleep_score(sleep_data, target_date)
+            hrv_score, hrv_baseline = self._calculate_hrv_score(hrv_data, target_date)
+            form_score = self._calculate_form_score(form_score_value, form_baseline)
             
             # 6. Beregn total score
             total_score = self._calculate_total_score(sleep_score, hrv_score, form_score)
@@ -68,11 +192,16 @@ class TrainingReadinessService:
                     "hrv_score": hrv_score,
                     "form_score": form_score
                 },
+                "has_trained_on_date": has_trained_on_date,
                 "details": {
                     "sleep_data": sleep_data,
                     "hrv_data": hrv_data,
                     "activity_data": activity_data,
-                    "form_value": form_score_value
+                    "form_value": form_score_value,
+                    "has_trained_on_date": has_trained_on_date,
+                    "sleep_baseline": sleep_baseline,
+                    "hrv_baseline": hrv_baseline,
+                    "form_baseline": form_baseline,
                 }
             }
             
@@ -161,7 +290,11 @@ class TrainingReadinessService:
             for activity in activities
         ]
     
-    def _calculate_sleep_score(self, sleep_data: List[Dict[str, Any]]) -> float:
+    def _calculate_sleep_score(
+        self,
+        sleep_data: List[Dict[str, Any]],
+        target_date: date,
+    ) -> Tuple[float, Dict[str, Any]]:
         """
         Beregn søvnscore (0-100) basert på siste 3 netter.
         
@@ -170,9 +303,8 @@ class TrainingReadinessService:
         - 100 → 100
         - Lineær skalering mellom
         """
-        print("=== NY SLEEP BEREGNING KJØRER ===")
         if not sleep_data:
-            return 50.0  # Middels score hvis ingen data
+            return 50.0, {"method": "fallback_no_data"}  # Middels score hvis ingen data
         
         # Fokuser på de siste 3 nettene (mest relevant for dagens readiness)
         recent_sleep = sorted(sleep_data, key=lambda x: x['date'], reverse=True)[:3]
@@ -188,13 +320,35 @@ class TrainingReadinessService:
                 scores.append(normalized)
         
         if scores:
-            avg_score = sum(scores) / len(scores)
-            logger.info(f"Sleep score: Garmin scores={[sleep.get('overall_score') or sleep.get('sleep_score') for sleep in recent_sleep]}, Normalized={avg_score:.1f}")
-            return round(avg_score, 1)
+            recent_avg = sum(scores) / len(scores)
+            baseline = self._get_sleep_baseline(target_date)
+            if baseline:
+                personalized = self._score_against_baseline(
+                    recent_avg,
+                    baseline["low"],
+                    baseline["mid"],
+                    baseline["high"],
+                )
+                if personalized is not None:
+                    logger.info(
+                        "Sleep score: recent_avg=%.1f, baseline=%s, normalized=%.1f",
+                        recent_avg,
+                        baseline,
+                        personalized,
+                    )
+                    return round(personalized, 1), baseline
+
+            normalized = max(0, min(100, (recent_avg - 65) / 35 * 100))
+            logger.info(f"Sleep score: Garmin scores={[sleep.get('overall_score') or sleep.get('sleep_score') for sleep in recent_sleep]}, Normalized={normalized:.1f}")
+            return round(normalized, 1), {"method": "fallback_fixed_range", "low": 65.0, "mid": 82.5, "high": 100.0}
         
-        return 50.0
+        return 50.0, {"method": "fallback_no_scores"}
     
-    def _calculate_hrv_score(self, hrv_data: List[Dict[str, Any]]) -> float:
+    def _calculate_hrv_score(
+        self,
+        hrv_data: List[Dict[str, Any]],
+        target_date: date,
+    ) -> Tuple[float, Dict[str, Any]]:
         """
         Beregn HRV-score (0-100).
         
@@ -204,28 +358,42 @@ class TrainingReadinessService:
         - Lineær skalering mellom
         """
         if not hrv_data:
-            return 50.0  # Middels score hvis ingen data
+            return 50.0, {"method": "fallback_no_data"}  # Middels score hvis ingen data
         
         # Fokuser på morgendata
         morning_hrv = [h for h in hrv_data if h.get('measurement_type') in ['morning', 'during_sleep']]
         
         if not morning_hrv:
-            return 50.0
+            return 50.0, {"method": "fallback_no_morning_data"}
         
         # Beregn gjennomsnittlig RMSSD
         rmssd_values = [h['rmssd'] for h in morning_hrv if h.get('rmssd')]
         
         if not rmssd_values:
-            return 50.0
+            return 50.0, {"method": "fallback_no_rmssd"}
         
         avg_rmssd = sum(rmssd_values) / len(rmssd_values)
+
+        baseline = self._get_hrv_baseline(target_date)
+        if baseline:
+            personalized = self._score_against_baseline(
+                avg_rmssd,
+                baseline["low"],
+                baseline["mid"],
+                baseline["high"],
+            )
+            if personalized is not None:
+                logger.info(
+                    "HRV score: avg_rmssd=%.1f, baseline=%s, normalized=%.1f",
+                    avg_rmssd,
+                    baseline,
+                    personalized,
+                )
+                return round(personalized, 1), baseline
         
-        # Normaliser fra 35-43 til 0-100
-        # Formel: (avg_rmssd - 35) / (43 - 35) * 100
         normalized = max(0, min(100, (avg_rmssd - 35) / 8 * 100))
-        
         logger.info(f"HRV score: Raw RMSSD={avg_rmssd:.1f} ms, Normalized={normalized:.1f}")
-        return round(normalized, 1)
+        return round(normalized, 1), {"method": "fallback_fixed_range", "low": 35.0, "mid": 39.0, "high": 43.0}
     
     def _calculate_activity_score(self, activity_data: List[Dict[str, Any]]) -> float:
         """Beregn aktivitetsscore (0-100)."""
@@ -307,7 +475,7 @@ class TrainingReadinessService:
         else:
             return 30.0  # Trenger mer recovery
     
-    def _get_form_score(self, target_date: date) -> float:
+    def _get_form_score(self, target_date: date) -> Tuple[float, Dict[str, Any]]:
         """
         Hent Training Stress Balance (Form) for en gitt dato.
         Form = CTL - ATL (Chronic Training Load - Acute Training Load)
@@ -323,37 +491,55 @@ class TrainingReadinessService:
             
             if not metrics:
                 logger.warning(f"Ingen metrics data returnert for {target_date}")
-                return 0.0
+                return 0.0, {"method": "fallback_no_metrics"}
             
             # Bruk sammendrag fra siste dag (som tilsvarer end_date = target_date)
             summary = metrics.get('summary', {})
+            daily_data = metrics.get('daily_data', [])
+            history_values = [
+                float(day.get('form', 0))
+                for day in daily_data[:-1]
+                if day.get('form') is not None
+            ]
+            form_baseline: Dict[str, Any] = {"method": "fallback_fixed_range", "low": -40.0, "mid": 0.0, "high": 40.0}
+            if len(history_values) >= 7:
+                p10 = self._percentile(history_values, 0.10)
+                p50 = self._percentile(history_values, 0.50)
+                p90 = self._percentile(history_values, 0.90)
+                if p10 is not None and p50 is not None and p90 is not None and p10 < p50 < p90:
+                    form_baseline = {
+                        "method": "personal_form_percentiles",
+                        "low": round(p10, 1),
+                        "mid": round(p50, 1),
+                        "high": round(p90, 1),
+                        "sample_count": len(history_values),
+                    }
             if summary and summary.get('current_form') is not None:
                 current_ctl = summary.get('current_ctl', 0)
                 current_atl = summary.get('current_atl', 0)
                 current_form = summary.get('current_form', 0)
                 
                 logger.debug(f"Form-score for {target_date}: {current_form} (CTL: {current_ctl}, ATL: {current_atl})")
-                return current_form
+                return current_form, form_baseline
             
             # Fallback: Prøv å finne i daily_data
-            daily_data = metrics.get('daily_data', [])
             target_date_str = target_date.isoformat()
             
             for day in reversed(daily_data):  # Start fra slutten (nyeste først)
                 if day['date'] == target_date_str:
                     form_value = day.get('form', 0)
                     logger.debug(f"Form-score for {target_date}: {form_value} (CTL: {day.get('ctl', 0)}, ATL: {day.get('atl', 0)})")
-                    return form_value
+                    return form_value, form_baseline
             
             # Hvis ingen data for denne dagen, returner 0 (balanced)
             logger.warning(f"Ingen form-data funnet for {target_date}, bruker 0 (balanced)")
-            return 0.0
+            return 0.0, form_baseline
             
         except Exception as e:
             logger.error(f"Feil ved henting av form-score: {e}", exc_info=True)
-            return 0.0
+            return 0.0, {"method": "fallback_error", "low": -40.0, "mid": 0.0, "high": 40.0}
     
-    def _calculate_form_score(self, form_value: float) -> float:
+    def _calculate_form_score(self, form_value: float, baseline: Optional[Dict[str, Any]] = None) -> float:
         """
         Konverter Training Stress Balance (Form/TSB) til readiness score (0-100).
         
@@ -365,8 +551,16 @@ class TrainingReadinessService:
         
         Formel: (form_value + 40) / 80 * 100
         """
-        # Normaliser fra -40 til +40 til 0-100
-        normalized = max(0, min(100, (form_value + 40) / 80 * 100))
+        normalized = None
+        if baseline:
+            normalized = self._score_against_baseline(
+                form_value,
+                baseline.get("low"),
+                baseline.get("mid"),
+                baseline.get("high"),
+            )
+        if normalized is None:
+            normalized = max(0, min(100, (form_value + 40) / 80 * 100))
         
         logger.info(f"Form score: Raw TSB={form_value:.1f}, Normalized={normalized:.1f}")
         return round(normalized, 1)

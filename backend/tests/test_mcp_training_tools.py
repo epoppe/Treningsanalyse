@@ -9,7 +9,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database.models import Base
-from app.database.models.activity import Activity, ActivityType
+from app.database.models.activity import Activity, ActivityType, GarminPerformanceMetric
+from app.database.models.sleep import Sleep
 from app.database.models.lactate_threshold_history import LactateThresholdHistory
 from app.mcp import training_tools
 from app.services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG
@@ -52,6 +53,52 @@ class McpTrainingToolsTests(unittest.TestCase):
                 training_stress_score=55,
                 activity_type_id=self.running_type_id,
             )
+        )
+        self.db.add(
+            GarminPerformanceMetric(
+                date=start,
+                fitness_age=39.0,
+                endurance_score=5100,
+                endurance_classification=4,
+                hill_score=42.0,
+                hill_endurance_score=38.0,
+                hill_strength_score=45.0,
+            )
+        )
+        self.db.add(
+            Sleep(
+                sleep_date=start.date(),
+                total_sleep_time=420 * 60.0,
+                sleep_score=78.0,
+                overall_score=82.0,
+                sleep_efficiency=91.0,
+                sleep_latency=720.0,
+                wake_episodes=3,
+                average_heart_rate=48.0,
+                lowest_heart_rate=42.0,
+                highest_heart_rate=61.0,
+                average_respiration_rate=13.2,
+                average_spo2=96.0,
+                lowest_spo2=93.0,
+                stress_score=27.0,
+                recovery_score=84.0,
+                movement_score=18.0,
+                restless_moments=4,
+                deep_sleep_percent=21.4,
+                light_sleep_percent=52.4,
+                rem_sleep_percent=26.2,
+                awake_percent=7.1,
+                sleep_quality="good",
+            )
+        )
+        self.db.query(Activity).filter_by(activity_id="2301").update(
+            {
+                "temperature": 16.5,
+                "wind_speed": 4.2,
+                "wind_direction": 225.0,
+                "humidity": 63.0,
+                "weather_condition": "partlycloudy_day",
+            }
         )
         self.db.commit()
         records = []
@@ -121,6 +168,49 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("readiness.total_score", keys)
         self.assertIn("running.speed_5m_hist", keys)
         self.assertIn("training.class_8_pct", keys)
+
+    def test_metric_catalog_exposes_metric_availability(self):
+        with patch.object(training_tools, "training_context", self._context):
+            catalog = training_tools.metric_catalog()
+        by_key = {metric["key"]: metric for metric in catalog["metrics"]}
+        self.assertEqual(by_key["activity.training_stress_score"]["availability"], "supported")
+        self.assertEqual(by_key["activity.average_pace"]["availability"], "supported")
+        self.assertEqual(by_key["activity.avg_grade_adjusted_speed"]["availability"], "supported")
+        self.assertEqual(by_key["activity.grade_adjusted_speed_mps"]["availability"], "supported")
+        self.assertEqual(by_key["activity.begin_potential_stamina"]["availability"], "supported")
+        self.assertEqual(by_key["activity.end_potential_stamina"]["availability"], "supported")
+        self.assertEqual(by_key["activity.min_available_stamina"]["availability"], "supported")
+        self.assertEqual(by_key["activity.activity_body_battery_delta"]["availability"], "supported")
+        self.assertEqual(by_key["activity.elapsed_duration"]["availability"], "supported")
+        self.assertEqual(by_key["activity.max_elevation"]["availability"], "supported")
+        self.assertEqual(by_key["activity.min_elevation"]["availability"], "supported")
+        self.assertEqual(by_key["activity.moving_duration"]["availability"], "supported")
+        self.assertEqual(by_key["activity.total_steps"]["availability"], "supported")
+        self.assertEqual(by_key["activity.vo2_max_precise"]["availability"], "supported")
+        self.assertEqual(by_key["performance.fitness_age"]["availability"], "supported")
+        self.assertEqual(by_key["performance.endurance_score"]["availability"], "supported")
+        self.assertEqual(by_key["performance.endurance_classification"]["availability"], "supported")
+        self.assertEqual(by_key["performance.hill_score"]["availability"], "supported")
+        self.assertEqual(by_key["performance.hill_endurance_score"]["availability"], "supported")
+        self.assertEqual(by_key["performance.hill_strength_score"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.sleep_score"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.sleep_efficiency"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.sleep_latency"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.wake_episodes"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.average_heart_rate"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.average_respiration_rate"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.average_spo2"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.lowest_spo2"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.recovery_score"]["availability"], "supported")
+        self.assertEqual(by_key["sleep.stress_score"]["availability"], "supported")
+        self.assertEqual(by_key["activity.temperature"]["availability"], "supported")
+        self.assertEqual(by_key["activity.wind_speed"]["availability"], "supported")
+        self.assertEqual(by_key["activity.wind_direction"]["availability"], "supported")
+        self.assertEqual(by_key["activity.humidity"]["availability"], "supported")
+        self.assertEqual(by_key["activity.weather_condition"]["availability"], "supported")
+        self.assertEqual(by_key["running.speed_5m_hist"]["availability"], "computed")
+        self.assertEqual(by_key["health.resting_heart_rate"]["availability"], "empty_source")
+        self.assertIn("availability_states", catalog)
 
     def test_eight_training_classes_and_recovery_hours(self):
         service = PpapMetricsService(self.db, self.storage)

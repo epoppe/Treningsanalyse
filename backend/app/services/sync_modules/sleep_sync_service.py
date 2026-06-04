@@ -9,6 +9,7 @@ from sqlalchemy.sql import func
 from ...database.models.health_data_missing import HealthDataMissing
 from ...database.models.sleep import Sleep
 from ...database.models.sync_state import SyncState
+from ..sleep_data_mapping import apply_sleep_data_to_row
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,15 @@ class SleepSyncService:
     def __init__(self, sync_service: Any):
         self.sync_service = sync_service
 
-    async def sync_sleep_data(self, start_date: datetime, end_date: datetime):
+    async def sync_sleep_data(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+    ):
         sleep_state = self.sync_service.db.query(SyncState).filter_by(key="sleep").first()
         sleep_start_date = start_date
-        if sleep_state and sleep_state.last_synced_date:
+        if sleep_state and sleep_state.last_synced_date and not force_refresh_recent:
             sleep_start_date = max(
                 sleep_start_date,
                 datetime.combine(sleep_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -44,12 +50,21 @@ class SleepSyncService:
             .all()
         }
         pending_missing_dates: set[date] = set()
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
+        last_synced_candidate = sleep_start_date.date() - timedelta(days=1)
+        sync_state_blocked = False
 
         logger.info(f"Starter søvn-synk: {sleep_start_date.date()} -> {end_date.date()}")
         current_date = sleep_start_date
         saved = 0
         while current_date <= end_date:
-            if current_date.date() in existing_sleep_dates or current_date.date() in sleep_missing_dates:
+            processed_successfully = False
+            is_recent = current_date >= recent_cutoff
+            should_skip = current_date.date() in existing_sleep_dates and not (force_refresh_recent and is_recent)
+            if should_skip or current_date.date() in sleep_missing_dates:
+                processed_successfully = True
+                if not sync_state_blocked:
+                    last_synced_candidate = current_date.date()
                 current_date += timedelta(days=1)
                 continue
             try:
@@ -62,19 +77,9 @@ class SleepSyncService:
                     if not row:
                         row = Sleep(sleep_date=sleep_date, created_at=func.now(), updated_at=func.now())
                         self.sync_service.db.add(row)
-
-                    def to_sec(minutes):
-                        if minutes is None:
-                            return None
-                        return float(minutes) * 60.0
-
-                    row.total_sleep_time = to_sec(data.get("sleep_time")) or to_sec(data.get("total_sleep"))
-                    row.deep_sleep_time = to_sec(data.get("deep_sleep"))
-                    row.light_sleep_time = to_sec(data.get("light_sleep"))
-                    row.rem_sleep_time = to_sec(data.get("rem_sleep"))
-                    row.awake_time = to_sec(data.get("awake_time"))
-                    row.sleep_score = data.get("sleep_score")
+                    apply_sleep_data_to_row(row, data)
                     row.updated_at = func.now()
+                    existing_sleep_dates.add(sleep_date)
                     saved += 1
                 else:
                     try:
@@ -86,23 +91,33 @@ class SleepSyncService:
                         sleep_missing_dates.add(current_date.date())
                     except Exception as add_exc:
                         logger.debug(f"Kunne ikke lagre søvn manglende dato {current_date.date()}: {add_exc}")
+                processed_successfully = True
             except Exception as exc:
                 logger.debug(f"Søvn-dag feilet {current_date.date()}: {exc}")
+                if not sync_state_blocked:
+                    sync_state_blocked = True
+            else:
+                if not sync_state_blocked and processed_successfully:
+                    last_synced_candidate = current_date.date()
             current_date += timedelta(days=1)
 
-        if saved > 0:
-            self.sync_service.db.commit()
+        if last_synced_candidate >= sleep_start_date.date():
             if not sleep_state:
                 sleep_state = SyncState(key="sleep")
                 self.sync_service.db.add(sleep_state)
-            sleep_state.last_synced_date = end_date.date()
-            sleep_state.last_synced_at = datetime.now(timezone.utc)
-            self.sync_service.db.commit()
-            logger.info(f"Søvn-synk lagret {saved} dager")
+            if sleep_state.last_synced_date != last_synced_candidate:
+                sleep_state.last_synced_date = last_synced_candidate
+                sleep_state.last_synced_at = datetime.now(timezone.utc)
 
-        if pending_missing_dates:
+        if saved > 0 or pending_missing_dates or last_synced_candidate >= sleep_start_date.date():
             try:
                 self.sync_service.db.commit()
+                logger.info(
+                    "Søvn-synk ferdig: lagret %s dager, markerte %s manglende, last_synced_date=%s",
+                    saved,
+                    len(pending_missing_dates),
+                    last_synced_candidate if last_synced_candidate >= sleep_start_date.date() else None,
+                )
             except Exception as exc:
                 self.sync_service.db.rollback()
-                logger.warning(f"Kunne ikke committe manglende søvn-datoer: {exc}")
+                logger.warning(f"Kunne ikke committe søvn-synk: {exc}")

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
-import { analysisApi, FactorRelationshipsResponse } from '../../utils/api';
+import { analysisApi, FactorRelationshipMetricMeta, FactorRelationshipsResponse } from '../../utils/api';
 import PlotlyChart from '../../components/PlotlyChart';
 import { FACTOR_RELATIONSHIP_METRICS } from './metricsCatalog';
 
@@ -38,6 +38,22 @@ const Small = styled.div`color:#666; font-size:0.95rem;`;
 const ErrorBox = styled.div`background:#fff3f3; color:#a33; padding:1rem; border-radius:8px; margin-bottom:1rem;`;
 const ChartCard = styled(Card)`min-height:440px;`;
 
+const AVAILABILITY_LABELS: Record<string, string> = {
+  supported: 'Tilgjengelig',
+  computed: 'Beregnet',
+  not_ingested: 'Ikke ingestet',
+  empty_source: 'Tom kilde',
+  unsupported: 'Ikke støttet',
+};
+
+const getMetricLabel = (meta: FactorRelationshipMetricMeta) => {
+  if (!meta.availability || meta.selectable !== false) {
+    return meta.label;
+  }
+  const availabilityText = AVAILABILITY_LABELS[meta.availability] ?? meta.availability;
+  return `${meta.label} (${availabilityText})`;
+};
+
 export default function SammenhengerPage() {
   const [data, setData] = useState<FactorRelationshipsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -67,6 +83,35 @@ export default function SammenhengerPage() {
     return Object.entries(FACTOR_RELATIONSHIP_METRICS);
   }, [data]);
 
+  const selectableMetricOptions = useMemo(
+    () => metricOptions.filter(([, meta]) => meta.selectable !== false),
+    [metricOptions],
+  );
+
+  const metricLookup = useMemo(() => new Map(metricOptions), [metricOptions]);
+
+  useEffect(() => {
+    if (metricOptions.length === 0 || selectableMetricOptions.length === 0) {
+      return;
+    }
+
+    const currentX = metricLookup.get(xMetric);
+    if (currentX?.selectable === false) {
+      const fallback = selectableMetricOptions.find(([key]) => key !== yMetric)?.[0] ?? selectableMetricOptions[0][0];
+      if (fallback && fallback !== xMetric) {
+        setXMetric(fallback);
+      }
+    }
+
+    const currentY = metricLookup.get(yMetric);
+    if (currentY?.selectable === false) {
+      const fallback = selectableMetricOptions.find(([key]) => key !== xMetric)?.[0] ?? selectableMetricOptions[0][0];
+      if (fallback && fallback !== yMetric) {
+        setYMetric(fallback);
+      }
+    }
+  }, [metricLookup, metricOptions, selectableMetricOptions, xMetric, yMetric]);
+
   const scatterData = useMemo(() => {
     if (!data?.points?.length) return [];
     return data.points.map((p) => ({
@@ -91,6 +136,9 @@ export default function SammenhengerPage() {
     return unit ? `${label} (${unit})` : label;
   }, [data]);
 
+  const xMetricMeta = metricLookup.get(xMetric);
+  const yMetricMeta = metricLookup.get(yMetric);
+
   return (
     <Container>
       <Title>Sammenhenger mellom faktorer</Title>
@@ -104,17 +152,27 @@ export default function SammenhengerPage() {
           <Label>X-akse</Label>
           <Select value={xMetric} onChange={(e) => setXMetric(e.target.value)}>
             {metricOptions.map(([key, meta]) => (
-              <option key={key} value={key}>{meta.label}</option>
+              <option key={key} value={key} disabled={meta.selectable === false}>
+                {getMetricLabel(meta)}
+              </option>
             ))}
           </Select>
+          {xMetricMeta?.selectable === false && xMetricMeta.availability_reason && (
+            <Small style={{ marginTop: '0.5rem' }}>{xMetricMeta.availability_reason}</Small>
+          )}
         </Card>
         <Card>
           <Label>Y-akse</Label>
           <Select value={yMetric} onChange={(e) => setYMetric(e.target.value)}>
             {metricOptions.map(([key, meta]) => (
-              <option key={key} value={key}>{meta.label}</option>
+              <option key={key} value={key} disabled={meta.selectable === false}>
+                {getMetricLabel(meta)}
+              </option>
             ))}
           </Select>
+          {yMetricMeta?.selectable === false && yMetricMeta.availability_reason && (
+            <Small style={{ marginTop: '0.5rem' }}>{yMetricMeta.availability_reason}</Small>
+          )}
         </Card>
         <Card>
           <Label>Periode (dager)</Label>

@@ -92,6 +92,7 @@ class Activity(Base):
     temperature = Column(Float, nullable=True)  # celsius
     humidity = Column(Float, nullable=True)  # prosent
     wind_speed = Column(Float, nullable=True)  # m/s
+    wind_direction = Column(Float, nullable=True)  # grader, retningen vinden kommer fra
     
     # Cache for beregnede verdier
     negative_split_percent = Column(Float, nullable=True)

@@ -3,6 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { activitiesApi } from '../utils/api';
+import {
+  getFormValueDescription,
+  getReadinessRecommendation,
+  getReadinessScoreColor,
+  getReadinessStatusText,
+} from './trainingReadinessUtils';
 
 interface TrainingReadinessData {
   date: string;
@@ -75,13 +81,7 @@ const ScoreCircle = styled.div<{ score: number }>`
   font-size: 1.5rem;
   font-weight: bold;
   color: white;
-  background: ${({ score }) => {
-    if (score >= 80) return '#10b981'; // Grønn
-    if (score >= 60) return '#3b82f6'; // Blå
-    if (score >= 40) return '#f59e0b'; // Gul
-    if (score >= 20) return '#ef4444'; // Rød
-    return '#6b7280'; // Grå
-  }};
+  background: ${({ score }) => getReadinessScoreColor(score)};
 `;
 
 const ScoreInfo = styled.div`
@@ -206,30 +206,6 @@ const Recommendation = styled.div`
   font-size: 0.875rem;
 `;
 
-const getStatusText = (status: string): string => {
-  const statusMap: { [key: string]: string } = {
-    optimal: 'Optimal',
-    good: 'God',
-    moderate: 'Moderat',
-    poor: 'Dårlig',
-    very_poor: 'Svært dårlig',
-    unknown: 'Ukjent'
-  };
-  return statusMap[status] || status;
-};
-
-const getRecommendation = (status: string): string => {
-  const recommendations: { [key: string]: string } = {
-    optimal: 'Du er klar for intensiv trening. Gå for det!',
-    good: 'Du kan gjøre moderat til intensiv trening. Lytt til kroppen.',
-    moderate: 'Gjør lett til moderat trening. Fokuser på teknikk og form.',
-    poor: 'Gjør lett trening eller hvile. Prioriter recovery.',
-    very_poor: 'Ta en hviledag. Fokuser på søvn og recovery.',
-    unknown: 'Ikke nok data til å gi anbefaling.'
-  };
-  return recommendations[status] || 'Ingen anbefaling tilgjengelig.';
-};
-
 export default function TrainingReadiness({ date, showDetails = true }: TrainingReadinessProps) {
   const [readinessData, setReadinessData] = useState<TrainingReadinessData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -306,14 +282,14 @@ export default function TrainingReadiness({ date, showDetails = true }: Training
           <ScoreValue>{Math.round(total_score)}/100</ScoreValue>
           <ScoreLabel>
             <StatusBadge status={readiness_status}>
-              {getStatusText(readiness_status)}
+              {getReadinessStatusText(readiness_status)}
             </StatusBadge>
           </ScoreLabel>
         </ScoreInfo>
       </ScoreContainer>
 
       <Recommendation>
-        <strong>Anbefaling:</strong> {getRecommendation(readiness_status)}
+        <strong>Anbefaling:</strong> {getReadinessRecommendation(readiness_status)}
       </Recommendation>
 
       {showDetails && (
@@ -338,11 +314,7 @@ export default function TrainingReadiness({ date, showDetails = true }: Training
               <FormValueInfo>
                 TSB: {readinessData.details.form_value.toFixed(1)}
                 <FormExplanation>
-                  {readinessData.details.form_value < -15 ? '🔴 Høy fatigue' :
-                   readinessData.details.form_value < -5 ? '🟡 Moderat fatigue' :
-                   readinessData.details.form_value < 5 ? '🟢 Balansert' :
-                   readinessData.details.form_value < 15 ? '🟢 Godt restituert' :
-                   '🟢 Meget frisk'}
+                  {getFormValueDescription(readinessData.details.form_value)}
                 </FormExplanation>
               </FormValueInfo>
             )}

@@ -41,7 +41,7 @@ def _format_value(value: Any, unit: Optional[str]) -> str:
     if value is None:
         return "*(ingen verdi)*"
     if isinstance(value, float):
-        text = f"{value:.4g}".rstrip("0").rstrip(".")
+        text = f"{value:.4g}" if value != 0 else "0"
     elif isinstance(value, (dict, list)):
         text = json.dumps(value, ensure_ascii=False)
     else:
@@ -228,6 +228,8 @@ def _metric_row(
         meta_bits.append(f"scope: `{meta['scope']}`")
     if meta.get("source"):
         meta_bits.append(f"kilde: `{meta['source']}`")
+    if meta.get("availability"):
+        meta_bits.append(f"availability: `{meta['availability']}`")
     if meta.get("heuristic"):
         meta_bits.append("**heuristikk**")
     if meta_bits:
@@ -236,6 +238,8 @@ def _metric_row(
     lines.append(f"- **Nåværende verdi:** {_format_value(value, meta.get('unit'))}")
     if as_of:
         lines.append(f"- **Per dato:** `{as_of}`")
+    if meta.get("availability_reason"):
+        lines.append(f"- **Availability:** {meta['availability_reason']}")
     for label, gkey in (
         ("Definisjon", "definition"),
         ("Tolkning", "interpretation"),
@@ -276,6 +280,7 @@ def main() -> None:
         "",
         f"- **Metrikker i katalog:** {catalog['count']}",
         f"- **Kategorier:** {', '.join(f'`{c}`' for c in catalog.get('categories', []))}",
+        f"- **Availability states:** {', '.join(f'`{s}`' for s in catalog.get('availability_states', []))}",
     ]
 
     if athlete.get("error"):

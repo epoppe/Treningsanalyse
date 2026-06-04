@@ -8,6 +8,7 @@ from ..database.session import get_db
 from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySummary
 from ..database.models.sync_state import SyncState
 from ..services.analysis_service import AnalysisService
+from ..services.sleep_data_mapping import apply_sleep_data_to_row
 from ..storage import DataStorage
 from ..dependencies import get_analysis_service, get_db, get_data_storage, get_garmin_client
 from ..services.garmin_client import GarminClient
@@ -203,11 +204,6 @@ async def get_sleep_range_from_db(
 
         # Hent og persister KUN manglende dager (unngå å hente hele intervallet når mesteparten finnes)
         if missing_dates:
-            def to_sec(minutes_val: Optional[float]) -> Optional[float]:
-                if minutes_val is None:
-                    return None
-                return float(minutes_val) * 60.0
-
             saved = 0
             for missing_day in missing_dates:
                 one = await garmin_client.get_sleep_data(datetime.combine(missing_day, datetime.min.time()))
@@ -236,14 +232,7 @@ async def get_sleep_range_from_db(
                     db.add(row)
                     existing_by_date[d_date] = row
 
-                row.total_sleep_time = to_sec(one.get("sleep_time")) or to_sec(one.get("total_sleep"))
-                row.deep_sleep_time = to_sec(one.get("deep_sleep"))
-                row.light_sleep_time = to_sec(one.get("light_sleep"))
-                row.rem_sleep_time = to_sec(one.get("rem_sleep"))
-                row.awake_time = to_sec(one.get("awake_time"))
-                row.sleep_score = one.get("sleep_score")
-                if one.get("overall_score") is not None:
-                    row.overall_score = one.get("overall_score")
+                apply_sleep_data_to_row(row, one)
 
                 from sqlalchemy.sql import func as sa_func
                 row.updated_at = sa_func.now()

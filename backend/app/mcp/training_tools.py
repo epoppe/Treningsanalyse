@@ -29,6 +29,40 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 
 
+NOT_INGESTED_METRICS: Dict[str, str] = {
+    "activity.body_battery_start": "Body Battery ved aktivitetsstart skrives ikke inn i activities ennå.",
+    "activity.intensity_factor": "Intensity Factor beregnes ikke og lagres ikke i activities ennå.",
+    "activity.max_running_cadence": "Maks kadens skrives ikke inn i activities ennå.",
+    "activity.recovery_time": "Recovery time per aktivitet skrives ikke inn i activities ennå.",
+    "activity.training_readiness_score": "Training readiness per aktivitet skrives ikke inn i activities ennå.",
+    "health.body_battery_net_charge": "Kun max/min Body Battery lagres i dagens sync.",
+    "body_battery.body_battery_charged": "Kun max/min Body Battery lagres i dagens sync.",
+    "body_battery.body_battery_charged_start": "Kun max/min Body Battery lagres i dagens sync.",
+    "body_battery.body_battery_drained": "Kun max/min Body Battery lagres i dagens sync.",
+    "body_battery.body_battery_drained_start": "Kun max/min Body Battery lagres i dagens sync.",
+    "body_battery.net_charge": "Kun max/min Body Battery lagres i dagens sync.",
+    "hrv.breathing_rate": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "hrv.heart_rate": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "hrv.measurement_duration": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "hrv.measurement_quality": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "hrv.pnn50": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "hrv.stress_score": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "stress.activity_stress_duration": "Kun stress_level og high_stress_time lagres i dagens sync.",
+    "stress.data_quality": "Kun stress_level og high_stress_time lagres i dagens sync.",
+}
+
+UNSUPPORTED_METRICS: Dict[str, str] = {
+    "running.power_30m": "30-min power er definert i ordboken, men ikke implementert i duration-curve-katalogen.",
+    "running.power_30m_hist": "30-min power er definert i ordboken, men ikke implementert i duration-curve-katalogen.",
+    "running.speed_30m": "30-min speed er definert i ordboken, men ikke implementert i duration-curve-katalogen.",
+    "running.speed_30m_hist": "30-min speed er definert i ordboken, men ikke implementert i duration-curve-katalogen.",
+}
+
+DERIVED_EMPTY_SOURCE_DEPENDENCIES: Dict[str, tuple[Any, str]] = {
+    "cardio.rhr_7d": (RestingHeartRate, "Resting heart rate-tabellen er tom."),
+    "cardio.rhr_30d": (RestingHeartRate, "Resting heart rate-tabellen er tom."),
+}
+
 METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.distance_m": {"model": Activity, "date_field": "start_time", "column": "distance", "category": "activity", "unit": "m"},
     "activity.duration_s": {"model": Activity, "date_field": "start_time", "column": "duration", "category": "activity", "unit": "s"},
@@ -194,6 +228,8 @@ def _infer_metric_unit(column_name: str) -> str:
         return "s"
     if "power" in name:
         return "W"
+    if "direction" in name:
+        return "degrees"
     if "vo2" in name:
         return "ml/kg/min"
     if "altitude" in name or "elevation" in name or "ascent" in name or "descent" in name:
@@ -208,6 +244,55 @@ def _infer_metric_unit(column_name: str) -> str:
 
 
 _augment_metric_catalog()
+
+
+def _model_table_counts(db: Session) -> Dict[Any, int]:
+    models = {definition["model"] for definition in METRIC_CATALOG.values()}
+    models.update(model for model, _reason in DERIVED_EMPTY_SOURCE_DEPENDENCIES.values())
+    return {
+        model: db.query(model).count()
+        for model in models
+    }
+
+
+def _stored_metric_availability(
+    key: str,
+    definition: Dict[str, Any],
+    table_counts: Dict[Any, int],
+) -> Dict[str, str]:
+    if key in UNSUPPORTED_METRICS:
+        return {"availability": "unsupported", "availability_reason": UNSUPPORTED_METRICS[key]}
+    if key in NOT_INGESTED_METRICS:
+        return {"availability": "not_ingested", "availability_reason": NOT_INGESTED_METRICS[key]}
+
+    model = definition["model"]
+    if table_counts.get(model, 0) == 0:
+        return {
+            "availability": "empty_source",
+            "availability_reason": f"Kildetabellen `{model.__tablename__}` er tom i denne databasen.",
+        }
+
+    return {
+        "availability": "supported",
+        "availability_reason": "Forventes å få verdi når kilde- og aktivitetsdata finnes.",
+    }
+
+
+def _derived_metric_availability(
+    key: str,
+    definition: Dict[str, Any],
+    table_counts: Dict[Any, int],
+) -> Dict[str, str]:
+    if key in UNSUPPORTED_METRICS:
+        return {"availability": "unsupported", "availability_reason": UNSUPPORTED_METRICS[key]}
+    if key in DERIVED_EMPTY_SOURCE_DEPENDENCIES:
+        model, reason = DERIVED_EMPTY_SOURCE_DEPENDENCIES[key]
+        if table_counts.get(model, 0) == 0:
+            return {"availability": "empty_source", "availability_reason": reason}
+    return {
+        "availability": "computed",
+        "availability_reason": "Beregnes lokalt fra eksisterende trenings-, helse- eller snapshot-data.",
+    }
 
 
 @contextmanager
@@ -445,6 +530,9 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, A
 
 
 def metric_catalog() -> Dict[str, Any]:
+    with training_context() as (db, _storage):
+        table_counts = _model_table_counts(db)
+
     metrics = []
     for key, definition in sorted(METRIC_CATALOG.items()):
         gloss = get_glossary_entry(key)
@@ -455,6 +543,7 @@ def metric_catalog() -> Dict[str, Any]:
             "source": definition["model"].__tablename__,
             "scope": "stored",
             "summary": gloss.get("definition"),
+            **_stored_metric_availability(key, definition, table_counts),
         })
     for key, definition in sorted(DERIVED_METRIC_CATALOG.items()):
         gloss = get_glossary_entry(key)
@@ -466,6 +555,7 @@ def metric_catalog() -> Dict[str, Any]:
             "source": "derived",
             "heuristic": definition.get("heuristic", False),
             "summary": gloss.get("definition"),
+            **_derived_metric_availability(key, definition, table_counts),
         })
     categories = sorted({m["category"] for m in metrics})
     return {
@@ -473,6 +563,7 @@ def metric_catalog() -> Dict[str, Any]:
         "metrics": metrics,
         "count": len(metrics),
         "categories": categories,
+        "availability_states": ["supported", "computed", "not_ingested", "empty_source", "unsupported"],
         "glossary_hint": "Bruk metric_glossary eller treningsanalyse://metric-glossary.",
         "note": "Use query_metric_timeseries with one of these whitelisted metric keys.",
     }

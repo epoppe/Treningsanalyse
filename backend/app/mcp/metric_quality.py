@@ -35,6 +35,8 @@ def build_metric_quality_report(
             "unit": meta.get("unit"),
             "scope": meta.get("scope"),
             "source": meta.get("source"),
+            "availability": meta.get("availability"),
+            "availability_reason": meta.get("availability_reason"),
             "heuristic": bool(meta.get("heuristic", False)),
             "title": gloss.get("title"),
             "definition": gloss.get("definition"),
@@ -70,7 +72,12 @@ def build_metric_quality_report(
         else:
             points = series.get("points") or []
             if not points:
-                entry["status"] = "no_data"
+                availability = meta.get("availability")
+                if availability in {"not_ingested", "empty_source", "unsupported"}:
+                    entry["status"] = availability
+                    entry["issue"] = meta.get("availability_reason")
+                else:
+                    entry["status"] = "no_data"
             else:
                 last = points[-1]
                 entry["status"] = "ok"
@@ -112,6 +119,9 @@ def build_metric_quality_report(
             "total": len(entries),
             "ok": counts.get("ok", 0),
             "no_data": counts.get("no_data", 0),
+            "not_ingested": counts.get("not_ingested", 0),
+            "empty_source": counts.get("empty_source", 0),
+            "unsupported": counts.get("unsupported", 0),
             "bug": counts.get("bug", 0),
             "unknown": counts.get("unknown", 0),
             "heuristic_with_value": heuristic_ok,
@@ -128,11 +138,14 @@ def format_metric_quality_markdown(report: Dict[str, Any]) -> str:
         "",
         f"- OK: **{report['summary']['ok']}** / {report['summary']['total']}",
         f"- Uten data: **{report['summary']['no_data']}**",
+        f"- Ikke ingestet: **{report['summary']['not_ingested']}**",
+        f"- Tom kilde: **{report['summary']['empty_source']}**",
+        f"- Unsupported: **{report['summary']['unsupported']}**",
         f"- Feil (bug): **{report['summary']['bug']}**",
         f"- Heuristiske med verdi: **{report['summary']['heuristic_with_value']}**",
         "",
-        "| Metrikk | Status | Verdi | Dato | Heuristikk | Merknad |",
-        "|---------|--------|-------|------|------------|---------|",
+        "| Metrikk | Status | Availability | Verdi | Dato | Heuristikk | Merknad |",
+        "|---------|--------|--------------|-------|------|------------|---------|",
     ]
     for entry in report["entries"]:
         heuristic = "ja" if entry.get("heuristic") else "nei"
@@ -142,7 +155,7 @@ def format_metric_quality_markdown(report: Dict[str, Any]) -> str:
         if len(note) > 80:
             note = note[:77] + "…"
         lines.append(
-            f"| `{entry['metric_key']}` | {entry['status']} | {value_text} | "
+            f"| `{entry['metric_key']}` | {entry['status']} | {entry.get('availability') or '—'} | {value_text} | "
             f"{entry.get('latest_date') or '—'} | {heuristic} | {note} |"
         )
     lines.append("")

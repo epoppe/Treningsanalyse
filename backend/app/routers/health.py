@@ -11,6 +11,7 @@ from ..database.models import HRV, Sleep, BodyBattery, Stress
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from ..database.models.health_data_missing import HealthDataMissing
+from ..services.sleep_data_mapping import apply_sleep_data_to_row
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -346,33 +347,21 @@ async def get_sleep_range_endpoint(
                 try:
                     sleep_data = await garmin_client.get_sleep_data(datetime.combine(fetch_date, datetime.min.time()))
                     if sleep_data and (sleep_data.get('sleep_time') or sleep_data.get('total_sleep') or sleep_data.get('overall_score')):
-                        # Konverter minutter til sekunder
-                        def to_sec(minutes_val):
-                            if minutes_val is None:
-                                return None
-                            return float(minutes_val) * 60.0
-                        
                         if fetch_date in missing_dates:
                             # Ny record - lagre alt
                             new_sleep = Sleep(
                                 sleep_date=fetch_date,
-                                total_sleep_time=to_sec(sleep_data.get('sleep_time') or sleep_data.get('total_sleep')),
-                                deep_sleep_time=to_sec(sleep_data.get('deep_sleep')),
-                                light_sleep_time=to_sec(sleep_data.get('light_sleep')),
-                                rem_sleep_time=to_sec(sleep_data.get('rem_sleep')),
-                                awake_time=to_sec(sleep_data.get('awake_time')),
-                                sleep_score=sleep_data.get('sleep_score'),
-                                overall_score=sleep_data.get('overall_score'),
                                 created_at=datetime.now(timezone.utc),
                                 updated_at=datetime.now(timezone.utc)
                             )
+                            apply_sleep_data_to_row(new_sleep, sleep_data)
                             db.add(new_sleep)
                             logger.debug(f"✅ Søvn: Lagret ny data for {fetch_date}")
                         elif fetch_date in dates_without_overall_score:
                             # Eksisterende record - oppdater bare overall_score
                             existing_record = next((s for s in existing_sleep if s.sleep_date == fetch_date), None)
                             if existing_record and sleep_data.get('overall_score') is not None:
-                                existing_record.overall_score = sleep_data.get('overall_score')
+                                apply_sleep_data_to_row(existing_record, sleep_data)
                                 existing_record.updated_at = datetime.now(timezone.utc)
                                 logger.debug(f"✅ Søvn: Oppdatert overall_score for {fetch_date}: {sleep_data.get('overall_score')}")
                         else:

@@ -21,6 +21,7 @@ class FakeGarminClient:
         return {
             "vo2_max": 44.0,
             "vo2_max_precise": 43.8,
+            "fitness_age": 39.0,
             "monthly_load_aerobic_high": 2215.1,
             "monthly_load_anaerobic": 186.7,
             "training_balance_feedback_phrase": "AEROBIC_LOW_SHORTAGE",
@@ -28,7 +29,10 @@ class FakeGarminClient:
             "sport": "RUNNING",
             "daily_training_load_acute": 123.0,
             "endurance_score": 5100,
+            "endurance_classification": 4,
             "hill_score": 42,
+            "hill_endurance_score": 38.0,
+            "hill_strength_score": 45.0,
             "raw_maxmet": {"generic": {"vo2MaxPreciseValue": 43.8}},
         }
 
@@ -37,11 +41,18 @@ class FakeGarminClient:
             "vo2_max_precise": 43.8,
             "avg_grade_adjusted_speed": 3.1,
             "begin_potential_stamina": 95.0,
+            "end_potential_stamina": 61.0,
+            "min_available_stamina": 44.0,
+            "activity_body_battery_delta": -18.0,
             "training_load": 180.0,
             "aerobic_training_effect": 4.2,
             "anaerobic_training_effect": 1.1,
             "training_effect_label": "TEMPO",
             "aerobic_training_effect_message": "AEROBIC_HIGHLY_IMPACTING",
+            "moving_duration": 2800.0,
+            "elapsed_duration": 2900.0,
+            "min_elevation": 10.0,
+            "max_elevation": 95.0,
         }
 
 
@@ -72,10 +83,14 @@ class GarminPerformanceMetricsTests(unittest.IsolatedAsyncioTestCase):
         row = self.db.query(GarminPerformanceMetric).one()
         self.assertEqual(row.vo2_max, 44.0)
         self.assertEqual(row.vo2_max_precise, 43.8)
+        self.assertEqual(row.fitness_age, 39.0)
         self.assertEqual(row.training_balance_feedback_phrase, "AEROBIC_LOW_SHORTAGE")
         self.assertEqual(row.training_status, 7)
         self.assertEqual(row.endurance_score, 5100)
+        self.assertEqual(row.endurance_classification, 4)
         self.assertEqual(row.hill_score, 42)
+        self.assertEqual(row.hill_endurance_score, 38.0)
+        self.assertEqual(row.hill_strength_score, 45.0)
 
     async def test_activity_summary_metrics_are_persisted_during_training_effect_sync(self):
         self.db.add(
@@ -101,10 +116,65 @@ class GarminPerformanceMetricsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(activity.vo2_max_precise, 43.8)
         self.assertEqual(activity.avg_grade_adjusted_speed, 3.1)
         self.assertEqual(activity.begin_potential_stamina, 95.0)
+        self.assertEqual(activity.end_potential_stamina, 61.0)
+        self.assertEqual(activity.min_available_stamina, 44.0)
+        self.assertEqual(activity.activity_body_battery_delta, -18.0)
         self.assertEqual(activity.epoc, 180.0)
         self.assertEqual(activity.total_training_effect, 4.2)
         self.assertEqual(activity.total_anaerobic_training_effect, 1.1)
         self.assertEqual(activity.training_effect_label, "TEMPO")
+        self.assertEqual(activity.moving_duration, 2800.0)
+        self.assertEqual(activity.elapsed_duration, 2900.0)
+        self.assertEqual(activity.min_elevation, 10.0)
+        self.assertEqual(activity.max_elevation, 95.0)
+
+    def test_apply_activity_summary_metrics_persists_duration_and_elevation(self):
+        activity = Activity(
+            activity_id="111",
+            activity_name="Test",
+            start_time=datetime(2026, 5, 27, 6, 30, tzinfo=timezone.utc),
+            duration=3600.0,
+        )
+        self.db.add(activity)
+        self.db.commit()
+
+        changed = self.service._apply_activity_summary_metrics(
+            activity,
+            {
+                "moving_duration": 3500.0,
+                "elapsed_duration": 3665.0,
+                "min_elevation": 42.5,
+                "max_elevation": 128.0,
+            },
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(activity.moving_duration, 3500.0)
+        self.assertEqual(activity.elapsed_duration, 3665.0)
+        self.assertEqual(activity.min_elevation, 42.5)
+        self.assertEqual(activity.max_elevation, 128.0)
+
+    def test_apply_activity_summary_metrics_normalizes_stride_and_ground_contact(self):
+        activity = Activity(
+            activity_id="112",
+            activity_name="Test",
+            start_time=datetime(2026, 5, 27, 6, 30, tzinfo=timezone.utc),
+            duration=3600.0,
+        )
+        self.db.add(activity)
+        self.db.commit()
+
+        changed = self.service._apply_activity_summary_metrics(
+            activity,
+            {
+                "stride_length": 120.0,
+                "ground_contact_time": 0.25,
+            },
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(activity.stride_length, 1.2)
+        self.assertEqual(activity.ground_contact_time, 250.0)
 
     @patch("app.services.training_stress_service.TrainingStressService")
     async def test_training_effect_sync_triggers_tss_refresh_when_epoc_differs(

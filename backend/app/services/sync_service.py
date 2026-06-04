@@ -1,25 +1,33 @@
+from collections import Counter
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Any, Dict, List, Tuple, Optional
 import asyncio
 import logging
+import pandas as pd
 from sqlalchemy.orm import Session
 
 from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage
-from ..database.models.activity import Activity, ActivityType, GarminPerformanceMetric
+from ..config import settings
+from ..database.models.activity import Activity, ActivityType, GarminPerformanceMetric, ActivityRouteFingerprint
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from .sync_modules.fit_sync_service import FitSyncService
 from .sync_modules.hrv_sync_service import HRVSyncService
+from .sync_modules.resting_heart_rate_sync_service import RestingHeartRateSyncService
 from .sync_modules.sleep_sync_service import SleepSyncService
 from .sync_modules.stress_sync_service import StressSyncService
 from .sync_modules.metrics_service import SyncMetricsService
+from .met_weather_service import MetWeatherService
+from .frost_weather_service import FrostWeatherService
 from .activity_data_validation import (
     normalize_ground_contact_time_ms,
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
+from .activity_field_extraction import extract_activity_list_fields
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +73,12 @@ class SyncService:
         self.analysis_service = AnalysisService(storage)
         self.fit_sync = FitSyncService(self)
         self.hrv_sync = HRVSyncService(self)
+        self.rhr_sync = RestingHeartRateSyncService(self)
         self.sleep_sync = SleepSyncService(self)
         self.stress_sync = StressSyncService(self)
         self.metrics_service = SyncMetricsService(self)
+        self.weather_service = MetWeatherService(settings.MET_API_USER_AGENT)
+        self.frost_weather_service = FrostWeatherService(settings.FROST_CLIENT_ID)
 
     def _record_lactate_threshold_history(
         self,
@@ -182,12 +193,19 @@ class SyncService:
                 skipped_count += 1
                 continue
 
+            list_fields = extract_activity_list_fields(act_data)
+
             new_activity = Activity(
                 activity_id=activity_id,
                 activity_name=act_data.get('activityName'),
                 start_time=start_time,
                 distance=act_data.get('distance'),
                 duration=act_data.get('duration'),
+                moving_duration=list_fields["moving_duration"],
+                elapsed_duration=list_fields["elapsed_duration"],
+                total_steps=list_fields["total_steps"],
+                min_elevation=list_fields["min_elevation"],
+                max_elevation=list_fields["max_elevation"],
                 calories=act_data.get('calories'),
                 vo2_max=act_data.get('vO2MaxValue'),
                 vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
@@ -343,6 +361,24 @@ class SyncService:
             logger.error(f"Feil under Training Effect synkronisering: {e}")
             te_result = {"status": "Feil", "message": str(e)}
 
+        weather_result = {"status": "Ikke kjørt", "message": "Ikke kjørt"}
+        try:
+            logger.info(
+                "Starter automatisk værsynkronisering for perioden %s til %s...",
+                start_date.date(),
+                end_date.date(),
+            )
+            weather_result = await self.sync_activity_weather(
+                start_date,
+                end_date,
+                force_refresh_recent=force_refresh_recent,
+                ignore_sync_state=ignore_sync_state,
+            )
+            logger.info("Værsynkronisering fullført: %s", weather_result)
+        except Exception as e:
+            logger.error(f"Feil under værsynkronisering: {e}")
+            weather_result = {"status": "Feil", "message": str(e)}
+
         # TSS beregnes ofte før EPOC finnes — oppdater når Training Effect er synket
         post_te_metrics = {"status": "Ikke kjørt"}
         if te_result.get("status") != "Feil":
@@ -371,7 +407,8 @@ class SyncService:
                     "Oppdaterte sammendrag for berørt periode: "
                     f"dag={summary_counts.get('daily_count', 0)}, "
                     f"uke={summary_counts.get('weekly_count', 0)}, "
-                    f"måned={summary_counts.get('monthly_count', 0)}"
+                    f"måned={summary_counts.get('monthly_count', 0)}, "
+                    f"år={summary_counts.get('yearly_count', 0)}"
                 )
                 
                 summary_result = {
@@ -380,7 +417,8 @@ class SyncService:
                         f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()} "
                         f"(dag={summary_counts.get('daily_count', 0)}, "
                         f"uke={summary_counts.get('weekly_count', 0)}, "
-                        f"måned={summary_counts.get('monthly_count', 0)})"
+                        f"måned={summary_counts.get('monthly_count', 0)}, "
+                        f"år={summary_counts.get('yearly_count', 0)})"
                     )
                 }
                 logger.info("Sammendragstabeller oppdatert automatisk")
@@ -394,15 +432,17 @@ class SyncService:
             "fit_data_result": fit_result,
             "hrv_result": hrv_result,
             "te_result": te_result,
+            "weather_result": weather_result,
             "post_te_metrics": post_te_metrics,
             "summary_result": summary_result,
-            "status": "Fullført med FIT-data, HRV, Training Effect og sammendrag",
+            "status": "Fullført med FIT-data, HRV, Training Effect, vær og sammendrag",
             "summary": {
                 "activities_synced": sync_result.get("total_fetched", 0),
                 "fit_data_downloaded": fit_result.get("success_count", 0),
                 "fit_data_attempted": fit_result.get("total_count", 0),
                 "hrv_synced": hrv_result.get("status") == "Fullført",
                 "te_synced": te_result.get("status") == "Fullført",
+                "weather_synced": weather_result.get("status") == "Fullført",
                 "summaries_updated": summary_result.get("status") == "Fullført",
                 "metrics_calculated": {
                     "from_sync": sync_result.get("metrics_calculated", {}),
@@ -412,6 +452,7 @@ class SyncService:
                 "fit_status": fit_result.get("status", "Ukjent"),
                 "hrv_status": hrv_result.get("status", "Ukjent"),
                 "te_status": te_result.get("status", "Ukjent"),
+                "weather_status": weather_result.get("status", "Ukjent"),
                 "summary_status": summary_result.get("status", "Ukjent"),
                 "post_te_metrics": post_te_metrics,
             }
@@ -615,12 +656,19 @@ class SyncService:
                     except Exception as e:
                         logger.debug(f"Kunne ikke hente elevation gain fra activity-service for {activity_id}: {e}")
 
+                list_fields = extract_activity_list_fields(act_data)
+
                 new_activity = Activity(
                     activity_id=activity_id,
                     activity_name=act_data.get('activityName'),
                     start_time=start_time,
                     distance=act_data.get('distance'),
                     duration=act_data.get('duration'),
+                    moving_duration=list_fields["moving_duration"],
+                    elapsed_duration=list_fields["elapsed_duration"],
+                    total_steps=list_fields["total_steps"],
+                    min_elevation=list_fields["min_elevation"],
+                    max_elevation=list_fields["max_elevation"],
                     calories=act_data.get('calories'),
                     vo2_max=act_data.get('vO2MaxValue'),
                     vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
@@ -758,6 +806,11 @@ class SyncService:
 
         await self.hrv_sync.sync_hrv_data(hrv_start_date, end_date, force_refresh_recent)
 
+        try:
+            await self.rhr_sync.sync_resting_heart_rate_data(start_date, end_date, force_refresh_recent)
+        except Exception as e:
+            logger.warning(f"Hvilepuls synk feilet: {e}")
+
         # Body Battery inkrementell synk via database
         try:
             from .body_battery_service import BodyBatteryService
@@ -786,7 +839,7 @@ class SyncService:
             logger.warning(f"Body Battery synk feilet, fortsetter: {e}")
 
         try:
-            await self.sleep_sync.sync_sleep_data(hrv_start_date, end_date)
+            await self.sleep_sync.sync_sleep_data(hrv_start_date, end_date, force_refresh_recent)
         except Exception as e:
             logger.warning(f"Søvn synk feilet: {e}")
 
@@ -806,6 +859,331 @@ class SyncService:
     async def download_fit_data_for_period(self, start_date: datetime, end_date: datetime):
         """Laster ned FIT-data for aktiviteter i en spesifikk periode."""
         return await self.fit_sync.download_fit_data_for_period(start_date, end_date)
+
+    def _activity_weather_altitude(self, activity: Activity) -> Optional[float]:
+        values = [
+            float(value)
+            for value in (activity.min_elevation, activity.max_elevation)
+            if value is not None
+        ]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def _activity_route_fingerprint(self, activity_id: str) -> Optional[ActivityRouteFingerprint]:
+        return (
+            self.db.query(ActivityRouteFingerprint)
+            .filter_by(activity_id=str(activity_id))
+            .first()
+        )
+
+    def _get_activity_details_frame(self, activity_id: str) -> Optional[pd.DataFrame]:
+        try:
+            try:
+                details = self.storage.get_activity_details(int(activity_id))
+            except (TypeError, ValueError):
+                details = self.storage.get_activity_details(activity_id)  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.debug("Kunne ikke hente aktivitetsdetaljer for værsampling %s: %s", activity_id, exc)
+            return None
+
+        if details is None or details.empty:
+            return None
+        return details.copy()
+
+    def _build_weather_sample_points(
+        self,
+        activity: Activity,
+        *,
+        interval_minutes: int = 15,
+    ) -> List[Dict[str, Any]]:
+        details = self._get_activity_details_frame(str(activity.activity_id))
+        if details is not None and {"timestamp", "latitude", "longitude"}.issubset(details.columns):
+            valid = details.dropna(subset=["timestamp", "latitude", "longitude"]).copy()
+            if not valid.empty:
+                valid["timestamp"] = pd.to_datetime(valid["timestamp"], errors="coerce", utc=True)
+                valid = valid.dropna(subset=["timestamp"]).sort_values("timestamp")
+                if not valid.empty:
+                    detail_points = [
+                        {
+                            "target_time": row.timestamp.to_pydatetime().astimezone(timezone.utc),
+                            "latitude": float(row.latitude),
+                            "longitude": float(row.longitude),
+                        }
+                        for row in valid.itertuples(index=False)
+                    ]
+                    start_time = detail_points[0]["target_time"]
+                    end_time = detail_points[-1]["target_time"]
+                    sample_targets: List[datetime] = []
+                    current_time = start_time
+                    interval = timedelta(minutes=interval_minutes)
+                    while current_time <= end_time:
+                        sample_targets.append(current_time)
+                        current_time += interval
+                    if sample_targets and sample_targets[-1] != end_time:
+                        sample_targets.append(end_time)
+                    elif not sample_targets:
+                        sample_targets = [start_time]
+
+                    selected: List[Dict[str, Any]] = []
+                    used_keys = set()
+                    for target_time in sample_targets:
+                        nearest = min(
+                            detail_points,
+                            key=lambda point: abs((point["target_time"] - target_time).total_seconds()),
+                        )
+                        sample = {
+                            "target_time": target_time,
+                            "latitude": nearest["latitude"],
+                            "longitude": nearest["longitude"],
+                        }
+                        key = (
+                            sample["target_time"].isoformat(),
+                            round(sample["latitude"], 5),
+                            round(sample["longitude"], 5),
+                        )
+                        if key in used_keys:
+                            continue
+                        used_keys.add(key)
+                        selected.append(sample)
+                    if selected:
+                        return selected
+
+        activity_time = activity.start_time
+        if activity_time is None:
+            return []
+        if activity_time.tzinfo is None:
+            activity_time = activity_time.replace(tzinfo=timezone.utc)
+
+        route = self._activity_route_fingerprint(str(activity.activity_id))
+        if route is None:
+            return []
+
+        latitude = route.start_latitude or route.centroid_latitude
+        longitude = route.start_longitude or route.centroid_longitude
+        if latitude is None or longitude is None:
+            return []
+
+        return [
+            {
+                "target_time": activity_time,
+                "latitude": float(latitude),
+                "longitude": float(longitude),
+            }
+        ]
+
+    async def _get_weather_for_sample_point(
+        self,
+        *,
+        target_time: datetime,
+        latitude: float,
+        longitude: float,
+        altitude: Optional[float],
+    ) -> Optional[Dict[str, Any]]:
+        weather = None
+        forecast_floor = datetime.now(timezone.utc) - timedelta(days=10)
+        if target_time >= forecast_floor:
+            weather = await self.weather_service.get_weather_snapshot(
+                target_time=target_time,
+                latitude=latitude,
+                longitude=longitude,
+                altitude=altitude,
+            )
+        if weather is None and self.frost_weather_service.enabled:
+            weather = await self.frost_weather_service.get_weather_snapshot(
+                target_time=target_time,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        return weather
+
+    def _aggregate_weather_snapshots(self, snapshots: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not snapshots:
+            return None
+
+        result: Dict[str, Any] = {}
+        for field in ("temperature", "wind_speed", "humidity"):
+            values = [
+                float(snapshot[field])
+                for snapshot in snapshots
+                if snapshot.get(field) is not None
+            ]
+            if values:
+                result[field] = sum(values) / len(values)
+
+        directions = [
+            float(snapshot["wind_direction"])
+            for snapshot in snapshots
+            if snapshot.get("wind_direction") is not None
+        ]
+        if directions:
+            if len(directions) == 1:
+                result["wind_direction"] = directions[0]
+            else:
+                sin_sum = sum(math.sin(math.radians(direction)) for direction in directions)
+                cos_sum = sum(math.cos(math.radians(direction)) for direction in directions)
+                angle = math.degrees(math.atan2(sin_sum / len(directions), cos_sum / len(directions)))
+                if angle < 0:
+                    angle += 360.0
+                result["wind_direction"] = angle
+
+        conditions = [snapshot.get("weather_condition") for snapshot in snapshots if snapshot.get("weather_condition")]
+        if conditions:
+            result["weather_condition"] = Counter(conditions).most_common(1)[0][0]
+
+        return result if result else None
+
+    async def sync_activity_weather_for_activity(
+        self,
+        activity_id: str,
+        *,
+        force_refresh: bool = False,
+    ) -> bool:
+        activity = self.db.query(Activity).filter_by(activity_id=str(activity_id)).first()
+        if activity is None:
+            return False
+
+        has_weather = any(
+            value is not None
+            for value in (
+                activity.temperature,
+                activity.wind_speed,
+                activity.wind_direction,
+                activity.weather_condition,
+            )
+        )
+        if has_weather and not force_refresh:
+            return False
+
+        activity_time = activity.start_time
+        if activity_time is None:
+            return False
+        if activity_time.tzinfo is None:
+            activity_time = activity_time.replace(tzinfo=timezone.utc)
+
+        sample_points = self._build_weather_sample_points(activity)
+        if not sample_points:
+            return False
+
+        snapshots: List[Dict[str, Any]] = []
+        altitude = self._activity_weather_altitude(activity)
+        for sample in sample_points:
+            weather = await self._get_weather_for_sample_point(
+                target_time=sample["target_time"],
+                latitude=float(sample["latitude"]),
+                longitude=float(sample["longitude"]),
+                altitude=altitude,
+            )
+            if weather:
+                snapshots.append(weather)
+
+        weather = self._aggregate_weather_snapshots(snapshots)
+        if not weather:
+            return False
+
+        changed = False
+        for source_key, attr in (
+            ("temperature", "temperature"),
+            ("wind_speed", "wind_speed"),
+            ("wind_direction", "wind_direction"),
+            ("humidity", "humidity"),
+            ("weather_condition", "weather_condition"),
+        ):
+            value = weather.get(source_key)
+            if value is not None and getattr(activity, attr, None) != value:
+                setattr(activity, attr, value)
+                changed = True
+        if changed:
+            self.db.commit()
+        return changed
+
+    async def sync_activity_weather(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+        ignore_sync_state: bool = False,
+    ) -> dict:
+        effective_start = start_date
+        if not ignore_sync_state:
+            try:
+                state = self.db.query(SyncState).filter_by(key="activity_weather").first()
+                if state and state.last_synced_date and not force_refresh_recent:
+                    effective_start = max(
+                        effective_start,
+                        datetime.combine(state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc)
+                        + timedelta(days=1),
+                    )
+            except Exception as exc:
+                logger.debug("Kunne ikke lese SyncState for activity_weather: %s", exc)
+
+        if effective_start > end_date:
+            return {"status": "Fullført", "updated_count": 0, "skipped_count": 0, "failed_count": 0}
+
+        activities = (
+            self.db.query(Activity)
+            .filter(Activity.start_time >= effective_start, Activity.start_time <= end_date)
+            .order_by(Activity.start_time.asc())
+            .all()
+        )
+
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
+
+        for activity in activities:
+            activity_time = activity.start_time
+            if activity_time is None:
+                skipped_count += 1
+                continue
+            if activity_time.tzinfo is None:
+                activity_time = activity_time.replace(tzinfo=timezone.utc)
+            is_recent = activity_time >= recent_cutoff
+            has_weather = any(
+                value is not None
+                for value in (
+                    activity.temperature,
+                    activity.wind_speed,
+                    activity.wind_direction,
+                    activity.weather_condition,
+                )
+            )
+            if has_weather and not (force_refresh_recent and is_recent):
+                skipped_count += 1
+                continue
+
+            try:
+                changed = await self.sync_activity_weather_for_activity(
+                    str(activity.activity_id),
+                    force_refresh=force_refresh_recent and is_recent,
+                )
+                if changed:
+                    updated_count += 1
+                else:
+                    skipped_count += 1
+            except Exception as exc:
+                logger.warning("Kunne ikke synkronisere vær for aktivitet %s: %s", activity.activity_id, exc)
+                failed_count += 1
+
+        try:
+            state = self.db.query(SyncState).filter_by(key="activity_weather").first()
+            if not state:
+                state = SyncState(key="activity_weather")
+                self.db.add(state)
+            state.last_synced_date = end_date.date()
+            state.last_synced_at = datetime.now(timezone.utc)
+            self.db.commit()
+        except Exception as exc:
+            logger.warning("Kunne ikke oppdatere SyncState for activity_weather: %s", exc)
+
+        return {
+            "status": "Fullført",
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "period": {"start": str(effective_start.date()), "end": str(end_date.date())},
+        }
 
     def _apply_activity_summary_metrics(self, activity: Activity, metrics: Dict[str, Any]) -> bool:
         """Lagrer utvidede Garmin activity-service-felter på aktiviteten."""
@@ -833,6 +1211,10 @@ class SyncService:
             "anaerobic_training_effect_message": "anaerobic_training_effect_message",
             "elevation_gain": "total_ascent",
             "elevation_loss": "total_descent",
+            "moving_duration": "moving_duration",
+            "elapsed_duration": "elapsed_duration",
+            "min_elevation": "min_elevation",
+            "max_elevation": "max_elevation",
         }
         changed = False
         for source_key, attr in field_map.items():

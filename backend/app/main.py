@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
-from .routers import activities, analysis, analytics, garmin_data, health, sync, training_readiness, training_stress, power, cache, bulk, factor_relationships, route_analysis
+from .routers import activities, analysis, analytics, garmin_data, health, readiness_v1, sync, training_readiness, training_stress, power, cache, bulk, factor_relationships, route_analysis
 from .database.models.activity import Base
 from .database.session import engine as db_engine, SessionLocal
 from .database.models import activity as activity_model
@@ -88,6 +88,14 @@ async def lifespan(app: FastAPI):
             logger.warning("Database-migrasjon for Garmin performance metrics fullførte ikke – sjekk backend-logg.")
     except Exception as exc:
         logger.warning("Kunne ikke kjøre database-migrasjon for Garmin performance metrics: %s", exc)
+    try:
+        from migrate_add_activity_weather import migrate_add_activity_weather
+        if migrate_add_activity_weather():
+            logger.info("Database-migrasjon for activity weather verifisert.")
+        else:
+            logger.warning("Database-migrasjon for activity weather fullførte ikke – sjekk backend-logg.")
+    except Exception as exc:
+        logger.warning("Kunne ikke kjøre database-migrasjon for activity weather: %s", exc)
     
     yield
     logger.info("Stopper applikasjonen...")

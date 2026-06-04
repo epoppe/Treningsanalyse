@@ -1,8 +1,7 @@
+import type { FactorRelationshipMetricMeta } from '../../utils/api';
+
 /** Speiler backend METRICS i factor_relationships.py (for dropdown før første API-svar). */
-export const FACTOR_RELATIONSHIP_METRICS: Record<
-  string,
-  { label: string; unit: string; source: string }
-> = {
+export const FACTOR_RELATIONSHIP_METRICS: Record<string, FactorRelationshipMetricMeta> = {
   distance: { source: 'activity', label: 'Distanse', unit: 'km' },
   duration: { source: 'activity', label: 'Varighet', unit: 'min' },
   average_hr: { source: 'activity', label: 'Snittpuls', unit: 'bpm' },

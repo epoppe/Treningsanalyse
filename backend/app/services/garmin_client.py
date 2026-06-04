@@ -2,7 +2,7 @@ import asyncio
 import logging
 import traceback
 import uuid
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +11,7 @@ from garth.exc import GarthException, GarthHTTPError
 from pydantic import BaseModel
 
 from app.config import settings
+from app.services.activity_field_extraction import extract_activity_summary_fields
 
 # Sett opp logging tidlig så den er tilgjengelig
 logging.basicConfig(level=logging.INFO)
@@ -63,25 +64,16 @@ def _merge_garmin_daily_and_sleep_detail(
     detail: Optional[Dict[str, Any]],
     date_str: str,
 ) -> Optional[Dict[str, Any]]:
-    """Kombinerer DailySleep (typisk overall_score) med SleepData (søvnstadier)."""
+    """Kombinerer DailySleep og SleepData med preferanse for detaljverdier."""
     if not daily and not detail:
         return None
-    keys = (
-        "sleep_time",
-        "sleep_goal",
-        "sleep_score",
-        "overall_score",
-        "deep_sleep",
-        "light_sleep",
-        "rem_sleep",
-        "awake_time",
-        "total_sleep",
-    )
     merged: Dict[str, Any] = {"date": date_str}
-    for k in keys:
-        d_val = daily.get(k) if daily else None
-        s_val = detail.get(k) if detail else None
-        merged[k] = s_val if s_val is not None else d_val
+    for key in set((daily or {}).keys()) | set((detail or {}).keys()):
+        if key == "date":
+            continue
+        detail_value = detail.get(key) if detail else None
+        daily_value = daily.get(key) if daily else None
+        merged[key] = detail_value if detail_value is not None else daily_value
     if merged.get("total_sleep") is None:
         deep = merged.get("deep_sleep")
         light = merged.get("light_sleep")
@@ -91,6 +83,177 @@ def _merge_garmin_daily_and_sleep_detail(
     if any(v is not None for k, v in merged.items() if k != "date"):
         return merged
     return None
+
+
+def _garmin_to_serializable(value: Any, depth: int = 3) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if depth <= 0:
+        return str(value)
+    if isinstance(value, dict):
+        return {str(k): _garmin_to_serializable(v, depth - 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_garmin_to_serializable(v, depth - 1) for v in value]
+    if hasattr(value, "to_dict"):
+        try:
+            return _garmin_to_serializable(value.to_dict(), depth - 1)
+        except Exception:
+            pass
+    if hasattr(value, "dict"):
+        try:
+            return _garmin_to_serializable(value.dict(), depth - 1)
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        try:
+            return {
+                str(k): _garmin_to_serializable(v, depth - 1)
+                for k, v in vars(value).items()
+                if not str(k).startswith("_")
+            }
+        except Exception:
+            pass
+    return str(value)
+
+
+def _garmin_first_value(data: Dict[str, Any], candidates: List[str]) -> Any:
+    for key in candidates:
+        if key in data and data[key] is not None:
+            return data[key]
+    return None
+
+
+def _garmin_first_float(data: Dict[str, Any], candidates: List[str]) -> Optional[float]:
+    value = _garmin_first_value(data, candidates)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _garmin_first_int(data: Dict[str, Any], candidates: List[str]) -> Optional[int]:
+    value = _garmin_first_value(data, candidates)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _garmin_first_datetime(data: Dict[str, Any], candidates: List[str]) -> Optional[str]:
+    value = _garmin_first_value(data, candidates)
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, date):
+        parsed = datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
+    elif isinstance(value, (int, float)):
+        numeric = float(value)
+        if numeric > 1_000_000_000_000:
+            numeric /= 1000.0
+        try:
+            parsed = datetime.fromtimestamp(numeric, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+    else:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.isoformat()
+
+
+def _garmin_sleep_quality(overall_score: Optional[float], sleep_score: Optional[float]) -> Optional[str]:
+    score = overall_score if overall_score is not None else sleep_score
+    if score is None:
+        return None
+    if score >= 85:
+        return "excellent"
+    if score >= 70:
+        return "good"
+    if score >= 55:
+        return "fair"
+    return "poor"
+
+
+def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
+    overall_score = _garmin_first_float(data, ["overall_score", "overallScore"])
+    sleep_score = _garmin_first_float(data, ["sleep_score", "sleepScore", "score"])
+    sleep_latency = _garmin_first_float(
+        data,
+        [
+            "sleepLatencyInSeconds",
+            "sleepLatencySeconds",
+            "timeToFallAsleepSeconds",
+            "sleep_latency",
+            "sleepLatency",
+            "timeToFallAsleep",
+        ],
+    )
+    return {
+        "bedtime": _garmin_first_datetime(
+            data,
+            [
+                "bedtime",
+                "bedTime",
+                "sleepStartTimestampGMT",
+                "sleepStartTimeGMT",
+                "sleepStartTimestampLocal",
+                "sleepStartTimeLocal",
+            ],
+        ),
+        "wake_time": _garmin_first_datetime(
+            data,
+            [
+                "wake_time",
+                "wakeTime",
+                "sleepEndTimestampGMT",
+                "sleepEndTimeGMT",
+                "sleepEndTimestampLocal",
+                "sleepEndTimeLocal",
+            ],
+        ),
+        "sleep_efficiency": _garmin_first_float(data, ["sleep_efficiency", "sleepEfficiency", "efficiency"]),
+        "sleep_latency": sleep_latency,
+        "wake_episodes": _garmin_first_int(data, ["wake_episodes", "wakeEpisodes", "numberOfWakeEvents"]),
+        "average_heart_rate": _garmin_first_float(data, ["average_heart_rate", "averageHeartRate", "avgHeartRate"]),
+        "lowest_heart_rate": _garmin_first_float(data, ["lowest_heart_rate", "lowestHeartRate", "minHeartRate"]),
+        "highest_heart_rate": _garmin_first_float(data, ["highest_heart_rate", "highestHeartRate", "maxHeartRate"]),
+        "heart_rate_variability": _garmin_first_float(data, ["heart_rate_variability", "heartRateVariability", "averageHrv"]),
+        "average_spo2": _garmin_first_float(data, ["average_spo2", "averageSpo2", "avgSpo2"]),
+        "lowest_spo2": _garmin_first_float(data, ["lowest_spo2", "lowestSpo2", "minSpo2"]),
+        "average_respiration_rate": _garmin_first_float(
+            data,
+            ["average_respiration_rate", "averageRespirationRate", "averageRespiration", "avgRespirationRate"],
+        ),
+        "stress_score": _garmin_first_float(data, ["stress_score", "stressScore"]),
+        "recovery_score": _garmin_first_float(data, ["recovery_score", "recoveryScore"]),
+        "movement_score": _garmin_first_float(data, ["movement_score", "movementScore"]),
+        "restless_moments": _garmin_first_int(data, ["restless_moments", "restlessMoments", "restlessMomentCount"]),
+        "deep_sleep_percent": _garmin_first_float(data, ["deep_sleep_percent", "deepSleepPercent", "deepSleepPercentage"]),
+        "light_sleep_percent": _garmin_first_float(data, ["light_sleep_percent", "lightSleepPercent", "lightSleepPercentage"]),
+        "rem_sleep_percent": _garmin_first_float(data, ["rem_sleep_percent", "remSleepPercent", "remSleepPercentage"]),
+        "awake_percent": _garmin_first_float(data, ["awake_percent", "awakePercent", "awakePercentage"]),
+        "sleep_quality": _garmin_first_value(data, ["sleep_quality", "sleepQuality"]) or _garmin_sleep_quality(overall_score, sleep_score),
+        "device_name": _garmin_first_value(data, ["device_name", "deviceName"]),
+        "detailed_sleep_data": _garmin_to_serializable(data),
+    }
 
 
 class GarminClient:
@@ -466,6 +629,56 @@ class GarminClient:
             logger.error(traceback.format_exc())
             return None
 
+    async def get_resting_heart_rate_data(
+        self, target_date: date | datetime | str
+    ) -> Optional[Dict[str, Any]]:
+        """Henter hvilepuls fra Garmin dailyHeartRate-endepunktet."""
+        if not self.is_authenticated():
+            logger.error("Ikke autentisert. Kan ikke hente hvilepuls.")
+            return None
+
+        if isinstance(target_date, datetime):
+            date_str = target_date.strftime("%Y-%m-%d")
+        elif isinstance(target_date, date):
+            date_str = target_date.strftime("%Y-%m-%d")
+        else:
+            date_str = str(target_date)
+
+        try:
+            logger.info(f"Henter hvilepuls for {date_str}")
+            data = await asyncio.to_thread(
+                garth.connectapi,
+                f"/wellness-service/wellness/dailyHeartRate/{garth.client.username}",
+                params={"date": date_str},
+            )
+            if not isinstance(data, dict):
+                logger.info(f"Uventet hvilepuls-respons for {date_str}: {type(data).__name__}")
+                return None
+
+            resting = data.get("restingHeartRate")
+            if resting is None:
+                logger.info(f"Ingen hvilepulsverdi tilgjengelig for {date_str}")
+                return None
+
+            return {
+                "date": date_str,
+                "resting_heart_rate": resting,
+                "min_heart_rate": data.get("minHeartRate"),
+                "max_heart_rate": data.get("maxHeartRate"),
+                "last_seven_days_avg_resting_heart_rate": data.get("lastSevenDaysAvgRestingHeartRate"),
+                "measurement_method": "automatic",
+            }
+        except GarthHTTPError as e:
+            if "404" in str(e) or "not found" in str(e).lower():
+                logger.info(f"Ingen hvilepulsdata funnet for {date_str}")
+                return None
+            logger.error(f"HTTP-feil ved henting av hvilepuls for {date_str}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Feil ved henting av hvilepuls for {date_str}: {e}")
+            logger.error(traceback.format_exc())
+            return None
+
     async def get_activity_epoc_data(self, activity_id: str) -> Optional[Dict[str, Any]]:
         """Henter EPOC (Exercise Post Oxygen Consumption) data for en aktivitet."""
         if not self.is_authenticated():
@@ -572,6 +785,8 @@ class GarminClient:
         if not isinstance(summary, dict):
             return None
 
+        summary_fields = extract_activity_summary_fields(summary)
+
         return {
             "vo2_max": summary.get("vO2MaxValue"),
             "vo2_max_precise": summary.get("vO2MaxPreciseValue"),
@@ -596,6 +811,7 @@ class GarminClient:
             "anaerobic_training_effect_message": summary.get("anaerobicTrainingEffectMessage"),
             "elevation_gain": summary.get("elevationGain") or summary.get("totalElevationGain"),
             "elevation_loss": summary.get("elevationLoss") or summary.get("totalElevationLoss"),
+            **summary_fields,
         }
 
     async def get_activity_summary_metrics(self, activity_id: str) -> Optional[Dict[str, Any]]:
@@ -1117,6 +1333,7 @@ class GarminClient:
                             "awake_time": awake,
                             "total_sleep": sleep_time if sleep_time is not None else ((deep or 0) + (light or 0) + (rem or 0))
                         }
+                        result.update(_extract_sleep_detail_metrics(payload))
                         if any(v is not None for k, v in result.items() if k != 'date'):
                             logger.info(
                                 "DailySleep for %s: lagrer score/tider (henter SleepData for stadier)",
@@ -1234,6 +1451,7 @@ class GarminClient:
                             "awake_time": awake,
                             "total_sleep": total if total is not None else ((deep or 0) + (light or 0) + (rem or 0))
                         }
+                        result.update(_extract_sleep_detail_metrics(sd_dict))
                         if any(v is not None for k, v in result.items() if k != 'date'):
                             logger.info(f"Hentet søvndata via garth.SleepData for {date_str}")
                             result_from_sleep = result
@@ -1274,6 +1492,7 @@ class GarminClient:
                         "awake_time": awake_time,
                         "total_sleep": (deep_sleep or 0) + (light_sleep or 0) + (rem_sleep or 0)
                     }
+                    result.update(_extract_sleep_detail_metrics(metrics))
                     logger.info(f"Hentet søvndata (usersummary) for {date_str}")
                     return result
             except Exception as e:
@@ -1319,6 +1538,7 @@ class GarminClient:
                             "awake_time": awake,
                             "total_sleep": total if total is not None else ((deep or 0) + (light or 0) + (rem or 0))
                         }
+                        result.update(_extract_sleep_detail_metrics(summary))
                         if any(v is not None for k, v in result.items() if k != 'date'):
                             logger.info(f"Hentet søvndata (wellness dailySleepData) for {date_str}")
                             return result

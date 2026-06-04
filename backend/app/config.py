@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # MET Weather API
+    MET_API_USER_AGENT: str = os.getenv(
+        "MET_API_USER_AGENT",
+        "Treningsanalyse/1.0 (tim-agent)",
+    )
+    FROST_CLIENT_ID: str = os.getenv("FROST_CLIENT_ID", "")
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Følgende print-setninger er nyttige for debugging, men kan fjernes/reduseres i prod.

@@ -91,18 +91,27 @@ class HRVSyncService:
             .all()
         }
         pending_missing_dates: set[date] = set()
+        last_synced_candidate = hrv_start_date.date() - timedelta(days=1)
+        sync_state_blocked = False
 
         current_date = hrv_start_date
         while current_date <= end_date:
+            processed_successfully = False
             date_str = current_date.strftime("%Y-%m-%d")
             is_recent = current_date >= recent_cutoff
             should_skip = current_date.date() in existing_dates and not (force_refresh_recent and is_recent)
             if should_skip:
                 logger.info(f"Hopper over HRV-data for {date_str} (finnes allerede).")
+                processed_successfully = True
+                if not sync_state_blocked:
+                    last_synced_candidate = current_date.date()
                 current_date += timedelta(days=1)
                 continue
             if current_date.date() in hrv_missing_dates:
                 logger.info(f"Hopper over HRV-data for {date_str} (ingen data sist gang).")
+                processed_successfully = True
+                if not sync_state_blocked:
+                    last_synced_candidate = current_date.date()
                 current_date += timedelta(days=1)
                 continue
             elif current_date.date() in existing_dates and force_refresh_recent and is_recent:
@@ -113,6 +122,14 @@ class HRVSyncService:
                     normalized_hrv = self.normalize_hrv_data(hrv_data, date_str)
                     if normalized_hrv:
                         all_hrv_data.append(normalized_hrv)
+                        existing_dates.add(current_date.date())
+                    else:
+                        if current_date.date() not in hrv_missing_dates and current_date.date() not in pending_missing_dates:
+                            self.sync_service.db.add(
+                                HealthDataMissing(data_type="hrv", missing_date=current_date.date())
+                            )
+                            pending_missing_dates.add(current_date.date())
+                        hrv_missing_dates.add(current_date.date())
                 else:
                     try:
                         if current_date.date() not in hrv_missing_dates and current_date.date() not in pending_missing_dates:
@@ -123,32 +140,42 @@ class HRVSyncService:
                         hrv_missing_dates.add(current_date.date())
                     except Exception as add_exc:
                         logger.debug(f"Kunne ikke lagre HRV manglende dato {date_str}: {add_exc}")
+                processed_successfully = True
                 await asyncio.sleep(1)
             except Exception as exc:
                 logger.error(f"Feil under henting av HRV-data for {date_str}: {exc}")
+                if not sync_state_blocked:
+                    sync_state_blocked = True
+            else:
+                if not sync_state_blocked and processed_successfully:
+                    last_synced_candidate = current_date.date()
             current_date += timedelta(days=1)
 
         if all_hrv_data:
             logger.info(f"Fant {len(all_hrv_data)} nye dager med HRV-data. Lagrer...")
             self.sync_service.storage.save_hrv_data(all_hrv_data)
-            try:
-                last_date = max(datetime.strptime(d["date"], "%Y-%m-%d").date() for d in all_hrv_data)
-                if "hrv_state" not in locals():
-                    hrv_state = self.sync_service.db.query(SyncState).filter_by(key="hrv").first()
-                if not hrv_state:
-                    hrv_state = SyncState(key="hrv")
-                    self.sync_service.db.add(hrv_state)
-                hrv_state.last_synced_date = last_date
-                hrv_state.last_synced_at = datetime.now(timezone.utc)
-                self.sync_service.db.commit()
-            except Exception as exc:
-                logger.warning(f"Kunne ikke oppdatere HRV sync state: {exc}")
         else:
             logger.info("Ingen nye HRV-data å lagre.")
 
-        if pending_missing_dates:
+        if last_synced_candidate >= hrv_start_date.date():
+            if "hrv_state" not in locals():
+                hrv_state = self.sync_service.db.query(SyncState).filter_by(key="hrv").first()
+            if not hrv_state:
+                hrv_state = SyncState(key="hrv")
+                self.sync_service.db.add(hrv_state)
+            if hrv_state.last_synced_date != last_synced_candidate:
+                hrv_state.last_synced_date = last_synced_candidate
+                hrv_state.last_synced_at = datetime.now(timezone.utc)
+
+        if all_hrv_data or pending_missing_dates or last_synced_candidate >= hrv_start_date.date():
             try:
                 self.sync_service.db.commit()
+                logger.info(
+                    "HRV-synk ferdig: lagret %s dager, markerte %s manglende, last_synced_date=%s",
+                    len(all_hrv_data),
+                    len(pending_missing_dates),
+                    last_synced_candidate if last_synced_candidate >= hrv_start_date.date() else None,
+                )
             except Exception as exc:
                 self.sync_service.db.rollback()
-                logger.warning(f"Kunne ikke committe manglende HRV-datoer: {exc}")
+                logger.warning(f"Kunne ikke committe HRV-synk: {exc}")

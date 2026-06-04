@@ -10,6 +10,7 @@ from sqlalchemy import func, extract, and_
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity, ActivityType
 from app.database.models.summaries import DailySummary, WeeklySummary, MonthlySummary, YearlySummary, PersonalRecord
+import calendar
 import json
 
 class SummaryService:
@@ -47,8 +48,15 @@ class SummaryService:
             else:
                 month += 1
         return months
+
+    def _period_years(self, start_date: date, end_date: date) -> list[int]:
+        return list(range(start_date.year, end_date.year + 1))
+
+    def _commit_if_requested(self, commit: bool) -> None:
+        if commit:
+            self.db.commit()
     
-    def calculate_daily_summary(self, target_date: date) -> DailySummary:
+    def calculate_daily_summary(self, target_date: date, commit: bool = True) -> DailySummary:
         """Beregn daglig sammendrag for en spesifikk dato."""
         
         # Hent alle aktiviteter for dagen
@@ -167,16 +175,14 @@ class SummaryService:
             )
             self.db.add(summary)
         
-        self.db.commit()
+        self._commit_if_requested(commit)
         return summary
     
-    def calculate_weekly_summary(self, year: int, week_number: int) -> WeeklySummary:
+    def calculate_weekly_summary(self, year: int, week_number: int, commit: bool = True) -> WeeklySummary:
         """Beregn ukentlig sammendrag."""
-        
-        # Beregn ukedatoer
-        jan_1 = date(year, 1, 1)
-        week_start = jan_1 + timedelta(weeks=week_number-1)
-        week_start = week_start - timedelta(days=week_start.weekday())  # Mandag
+
+        # Bruk ekte ISO-uker slik at uke 1/52/53 rundt årsskifter blir riktig.
+        week_start = date.fromisocalendar(year, week_number, 1)
         week_end = week_start + timedelta(days=6)  # Søndag
         
         # Hent aktiviteter for uken
@@ -315,10 +321,10 @@ class SummaryService:
             )
             self.db.add(summary)
         
-        self.db.commit()
+        self._commit_if_requested(commit)
         return summary
     
-    def calculate_monthly_summary(self, year: int, month: int) -> MonthlySummary:
+    def calculate_monthly_summary(self, year: int, month: int, commit: bool = True) -> MonthlySummary:
         """Beregn månedlig sammendrag."""
         
         # Hent aktiviteter for måneden (med eager loading av activity_type)
@@ -506,7 +512,160 @@ class SummaryService:
             )
             self.db.add(summary)
         
-        self.db.commit()
+        self._commit_if_requested(commit)
+        return summary
+
+    def calculate_yearly_summary(self, year: int, commit: bool = True) -> Optional[YearlySummary]:
+        """Beregn årlig sammendrag fra aktiviteter (samme mønster som månedlig)."""
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(extract("year", Activity.start_time) == year)
+            .all()
+        )
+
+        if not activities:
+            return None
+
+        unique_activities: dict[str, Activity] = {}
+        for activity in activities:
+            if activity.activity_id not in unique_activities:
+                unique_activities[activity.activity_id] = activity
+        activities = list(unique_activities.values())
+
+        total_distance = sum(a.distance or 0 for a in activities)
+        total_duration = sum(a.duration or 0 for a in activities)
+        total_calories = sum(a.calories or 0 for a in activities)
+        total_ascent = sum(a.total_ascent or 0 for a in activities)
+        total_descent = sum(a.total_descent or 0 for a in activities)
+
+        heart_rates = [a.average_heart_rate for a in activities if a.average_heart_rate]
+        speeds = [a.average_speed for a in activities if a.average_speed]
+        paces = []
+        for activity in activities:
+            if activity.average_pace:
+                paces.append(activity.average_pace)
+            elif activity.average_speed and activity.average_speed > 0:
+                paces.append(1000 / activity.average_speed)
+        cadences = [a.average_running_cadence for a in activities if a.average_running_cadence]
+
+        avg_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else None
+        avg_speed = sum(speeds) / len(speeds) if speeds else None
+        avg_pace = sum(paces) / len(paces) if paces else None
+        avg_cadence = sum(cadences) / len(cadences) if cadences else None
+
+        days_in_year = 366 if calendar.isleap(year) else 365
+        activities_per_day = len(activities) / days_in_year
+        distance_per_day = total_distance / days_in_year
+        duration_per_day = total_duration / days_in_year
+
+        weeks_in_year = days_in_year / 7
+        activities_per_week = len(activities) / weeks_in_year
+        distance_per_week = total_distance / weeks_in_year
+        duration_per_week = total_duration / weeks_in_year
+
+        months_in_year = 12
+        activities_per_month = len(activities) / months_in_year
+        distance_per_month = total_distance / months_in_year
+        duration_per_month = total_duration / months_in_year
+
+        activity_types = {}
+        for activity in activities:
+            type_name = None
+            if hasattr(activity, "activity_type") and activity.activity_type:
+                type_name = activity.activity_type.type_key or activity.activity_type.type_name
+            elif hasattr(activity, "activity_type_name") and activity.activity_type_name:
+                type_name = activity.activity_type_name
+            if not type_name or type_name == "None" or type_name == "":
+                type_name = "Ukjent"
+            if type_name not in activity_types:
+                activity_types[type_name] = {"count": 0, "distance": 0, "duration": 0, "calories": 0}
+            activity_types[type_name]["count"] += 1
+            activity_types[type_name]["distance"] += activity.distance or 0
+            activity_types[type_name]["duration"] += activity.duration or 0
+            activity_types[type_name]["calories"] += activity.calories or 0
+
+        monthly_rows = (
+            self.db.query(MonthlySummary)
+            .filter(MonthlySummary.year == year)
+            .order_by(MonthlySummary.month.asc())
+            .all()
+        )
+        monthly_breakdown = [
+            {
+                "month": row.month,
+                "total_activities": row.total_activities,
+                "total_distance": row.total_distance,
+                "total_duration": row.total_duration,
+                "total_calories": row.total_calories,
+            }
+            for row in monthly_rows
+        ]
+
+        prev_summary = self.db.query(YearlySummary).filter(YearlySummary.year == year - 1).first()
+        distance_trend = None
+        duration_trend = None
+        activities_trend = None
+        if prev_summary:
+            if prev_summary.total_distance > 0:
+                distance_trend = ((total_distance - prev_summary.total_distance) / prev_summary.total_distance) * 100
+            if prev_summary.total_duration > 0:
+                duration_trend = ((total_duration - prev_summary.total_duration) / prev_summary.total_duration) * 100
+            if prev_summary.total_activities > 0:
+                activities_trend = ((len(activities) - prev_summary.total_activities) / prev_summary.total_activities) * 100
+
+        best_distance = max(a.distance or 0 for a in activities)
+        best_duration = max(a.duration or 0 for a in activities)
+        best_speed = max(a.average_speed or 0 for a in activities)
+        pace_values = [a.average_pace for a in activities if a.average_pace]
+        best_pace = min(pace_values) if pace_values else None
+
+        existing_summary = self.db.query(YearlySummary).filter(YearlySummary.year == year).first()
+        summary_fields = {
+            "total_activities": len(activities),
+            "total_distance": total_distance,
+            "total_duration": total_duration,
+            "total_calories": total_calories,
+            "total_ascent": total_ascent,
+            "total_descent": total_descent,
+            "avg_heart_rate": avg_heart_rate,
+            "avg_speed": avg_speed,
+            "avg_pace": avg_pace,
+            "avg_cadence": avg_cadence,
+            "activities_per_day": activities_per_day,
+            "distance_per_day": distance_per_day,
+            "duration_per_day": duration_per_day,
+            "activities_per_week": activities_per_week,
+            "distance_per_week": distance_per_week,
+            "duration_per_week": duration_per_week,
+            "activities_per_month": activities_per_month,
+            "distance_per_month": distance_per_month,
+            "duration_per_month": duration_per_month,
+            "activity_types_breakdown": json.dumps(activity_types),
+            "monthly_breakdown": monthly_breakdown or None,
+            "best_distance": best_distance,
+            "best_duration": best_duration,
+            "best_speed": best_speed,
+            "best_pace": best_pace if best_pace != float("inf") else None,
+            "distance_trend": distance_trend,
+            "duration_trend": duration_trend,
+            "activities_trend": activities_trend,
+            "updated_at": datetime.now(),
+        }
+
+        if existing_summary:
+            for field, value in summary_fields.items():
+                setattr(existing_summary, field, value)
+            summary = existing_summary
+        else:
+            summary = YearlySummary(
+                year=year,
+                created_at=datetime.now(),
+                **summary_fields,
+            )
+            self.db.add(summary)
+
+        self._commit_if_requested(commit)
         return summary
     
     def update_personal_records(self, activity: Activity):
@@ -568,31 +727,39 @@ class SummaryService:
         self.db.commit()
     
     def bulk_update_summaries(self, start_date: date, end_date: date) -> Dict[str, int]:
-        """Bulk-oppdater sammendrag for en periode med kun berørte dager, uker og måneder."""
+        """Bulk-oppdater sammendrag for en periode med kun berørte dager, uker, måneder og år."""
         daily_count = 0
         weekly_count = 0
         monthly_count = 0
+        yearly_count = 0
 
         for current_date in self._iter_dates(start_date, end_date):
-            if self.calculate_daily_summary(current_date):
+            if self.calculate_daily_summary(current_date, commit=False):
                 daily_count += 1
 
         for year, week_num in self._period_weeks(start_date, end_date):
-            if self.calculate_weekly_summary(year, week_num):
+            if self.calculate_weekly_summary(year, week_num, commit=False):
                 weekly_count += 1
 
         for year, month in self._period_months(start_date, end_date):
-            if self.calculate_monthly_summary(year, month):
+            if self.calculate_monthly_summary(year, month, commit=False):
                 monthly_count += 1
+
+        for year in self._period_years(start_date, end_date):
+            if self.calculate_yearly_summary(year, commit=False):
+                yearly_count += 1
+
+        self.db.commit()
 
         print(
             f"Sammendrag oppdatert for perioden {start_date} til {end_date} "
-            f"(dag={daily_count}, uke={weekly_count}, måned={monthly_count})"
+            f"(dag={daily_count}, uke={weekly_count}, måned={monthly_count}, år={yearly_count})"
         )
         return {
             "daily_count": daily_count,
             "weekly_count": weekly_count,
             "monthly_count": monthly_count,
+            "yearly_count": yearly_count,
         }
     
     def calculate_daily_summaries(self) -> int:

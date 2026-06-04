@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from time import monotonic
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Set, Tuple
 import math
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func as sa_func
 from sqlalchemy.orm import Session, joinedload, load_only
 
 from ..database.session import get_db
@@ -36,6 +38,82 @@ METRICS: Dict[str, Dict[str, str]] = {
     "hrv": {"source": "health", "label": "HRV", "unit": "ms"},
     "body_battery": {"source": "health", "label": "Body Battery", "unit": "score"},
     "stress_avg": {"source": "health", "label": "Stress", "unit": "score"},
+}
+
+FACTOR_METRIC_AVAILABILITY: Dict[str, Dict[str, Any]] = {
+    "distance": {
+        "candidates": [{"model": Activity, "column": Activity.distance}],
+    },
+    "duration": {
+        "candidates": [{"model": Activity, "column": Activity.duration}],
+    },
+    "average_hr": {
+        "candidates": [{"model": Activity, "column": Activity.average_heart_rate}],
+    },
+    "average_power": {
+        "candidates": [{"model": Activity, "column": Activity.average_power}],
+    },
+    "training_stress_score": {
+        "candidates": [{"model": Activity, "column": Activity.training_stress_score}],
+    },
+    "epoc": {
+        "candidates": [{"model": Activity, "column": Activity.epoc}],
+    },
+    "total_training_effect": {
+        "candidates": [{"model": Activity, "column": Activity.total_training_effect}],
+    },
+    "total_anaerobic_training_effect": {
+        "candidates": [{"model": Activity, "column": Activity.total_anaerobic_training_effect}],
+    },
+    "negative_split_percent": {
+        "candidates": [{"model": Activity, "column": Activity.negative_split_percent}],
+    },
+    "decoupling_percent": {
+        "candidates": [{"model": Activity, "column": Activity.decoupling_percent}],
+    },
+    "training_readiness_score": {
+        "candidates": [{"model": Activity, "column": Activity.training_readiness_score}],
+        "empty_status": "not_ingested",
+        "empty_reason": "Training readiness per aktivitet skrives ikke inn i activities ennå.",
+    },
+    "body_battery_start": {
+        "candidates": [{"model": Activity, "column": Activity.body_battery_start}],
+        "empty_status": "not_ingested",
+        "empty_reason": "Body Battery ved aktivitetsstart skrives ikke inn i activities ennå.",
+    },
+    "sleep_score": {
+        "candidates": [
+            {"model": Sleep, "column": Sleep.sleep_score},
+            {"model": Sleep, "column": Sleep.overall_score},
+            {"model": Sleep, "column": Sleep.recovery_score},
+        ],
+    },
+    "sleep_time": {
+        "candidates": [{"model": Sleep, "column": Sleep.total_sleep_time}],
+    },
+    "hrv": {
+        "candidates": [
+            {"model": HRV, "column": HRV.rmssd},
+            {"model": Sleep, "column": Sleep.heart_rate_variability},
+        ],
+    },
+    "body_battery": {
+        "candidates": [
+            {"model": BodyBattery, "column": BodyBattery.max_body_battery},
+            {"model": BodyBattery, "column": BodyBattery.body_battery_charged},
+            {"model": BodyBattery, "column": BodyBattery.body_battery_charged_start},
+            {"model": BodyBattery, "column": BodyBattery.min_body_battery},
+        ],
+    },
+    "stress_avg": {
+        "candidates": [{"model": Stress, "column": Stress.stress_level}],
+    },
+}
+
+METRIC_AVAILABILITY_CACHE_TTL_SECONDS = 60
+_metric_availability_cache: Dict[str, Any] = {
+    "expires_at": 0.0,
+    "value": None,
 }
 
 # Ekstra Activity-kolonner per aktivitetsmetrikk (unngår full aktivitetsrad + JSON).
@@ -138,6 +216,102 @@ def _avg(values: List[Optional[float]]) -> Optional[float]:
     return float(sum(cleaned) / len(cleaned))
 
 
+def _row_count(db: Session, model: Any, cache: Dict[Any, int]) -> int:
+    cached = cache.get(model)
+    if cached is not None:
+        return cached
+    count = db.query(sa_func.count()).select_from(model).scalar() or 0
+    cache[model] = int(count)
+    return cache[model]
+
+
+def _non_null_count(
+    db: Session,
+    model: Any,
+    column: Any,
+    cache: Dict[Tuple[str, str], int],
+) -> int:
+    key = (model.__tablename__, column.key)
+    cached = cache.get(key)
+    if cached is not None:
+        return cached
+    count = db.query(sa_func.count()).select_from(model).filter(column.isnot(None)).scalar() or 0
+    cache[key] = int(count)
+    return cache[key]
+
+
+def _metric_availability(
+    db: Session,
+    metric_key: str,
+    row_count_cache: Dict[Any, int],
+    non_null_cache: Dict[Tuple[str, str], int],
+) -> Dict[str, Any]:
+    spec = FACTOR_METRIC_AVAILABILITY[metric_key]
+    label = METRICS[metric_key]["label"]
+    candidate_counts: List[int] = []
+    has_source_rows = False
+
+    for candidate in spec["candidates"]:
+        model = candidate["model"]
+        column = candidate["column"]
+        has_source_rows = _row_count(db, model, row_count_cache) > 0 or has_source_rows
+        candidate_counts.append(_non_null_count(db, model, column, non_null_cache))
+
+    total_value_count = sum(candidate_counts)
+    if total_value_count > 0:
+        return {
+            "availability": "supported",
+            "availability_reason": f"Fant {total_value_count} lagrede verdier for {label.lower()} i databasen.",
+            "value_count": total_value_count,
+            "selectable": True,
+        }
+
+    empty_status = spec.get("empty_status", "empty_source")
+    if has_source_rows and empty_status == "not_ingested":
+        return {
+            "availability": "not_ingested",
+            "availability_reason": spec["empty_reason"],
+            "value_count": 0,
+            "selectable": False,
+        }
+
+    if has_source_rows:
+        return {
+            "availability": "empty_source",
+            "availability_reason": f"Kildedata finnes, men {label.lower()} har ingen lagrede verdier ennå.",
+            "value_count": 0,
+            "selectable": False,
+        }
+
+    return {
+        "availability": "empty_source",
+        "availability_reason": f"Ingen kildedata tilgjengelig ennå for {label.lower()}.",
+        "value_count": 0,
+        "selectable": False,
+    }
+
+
+def _build_available_metrics(db: Session) -> Dict[str, Dict[str, Any]]:
+    now = monotonic()
+    cached = _metric_availability_cache.get("value")
+    expires_at = float(_metric_availability_cache.get("expires_at", 0.0) or 0.0)
+    if cached is not None and now < expires_at:
+        return cached
+
+    row_count_cache: Dict[Any, int] = {}
+    non_null_cache: Dict[Tuple[str, str], int] = {}
+    metrics = {
+        key: {
+            **meta,
+            **_metric_availability(db, key, row_count_cache, non_null_cache),
+        }
+        for key, meta in METRICS.items()
+    }
+    _metric_availability_cache["value"] = metrics
+    _metric_availability_cache["expires_at"] = now + METRIC_AVAILABILITY_CACHE_TTL_SECONDS
+    return metrics
+
+
 @router.get("/factor-relationships")
 def get_factor_relationships(
     x_metric: str = Query("sleep_score"),
@@ -155,6 +329,8 @@ def get_factor_relationships(
                 "allowed_metrics": list(METRICS.keys()),
             },
         )
+
+    available_metrics = _build_available_metrics(db)
 
     start_dt = datetime.now() - timedelta(days=days)
     lookback_day = start_dt.date() - timedelta(days=1)
@@ -381,6 +557,6 @@ def get_factor_relationships(
             "avg_x": round(avg_x, 3) if avg_x is not None else None,
             "avg_y": round(avg_y, 3) if avg_y is not None else None,
         },
-        "available_metrics": METRICS,
+        "available_metrics": available_metrics,
         "points": points,
     }

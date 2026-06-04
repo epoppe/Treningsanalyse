@@ -83,8 +83,6 @@ export interface HrvByActivityResponse {
 export const activitiesApi = {
   // Hent alle aktiviteter
   getActivities: async (forceRefresh: boolean = false, limit: number = 100) => {
-    console.log('[API] Sender GET request til /activities...');
-    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const params = new URLSearchParams();
       if (forceRefresh) params.append('force_refresh', 'true');
@@ -92,25 +90,16 @@ export const activitiesApi = {
       
       const queryString = params.toString();
       const url = `/activities${queryString ? '?' + queryString : ''}`;
-      
-      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
-      
+
       const response = await apiClient.get<Activity[]>(url);
-      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return response.data;
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities:', error);
-      console.error('[API] Error response:', error.response?.data);
-      console.error('[API] Error status:', error.response?.status);
-      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
 
   // Hent aktiviteter med høyere limit for å vise flere
   getMoreActivities: async (forceRefresh: boolean = false, limit: number = 500, offset: number = 0) => {
-    console.log('[API] Sender GET request til /activities med høyere limit og offset...');
-    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const params = new URLSearchParams();
       if (forceRefresh) params.append('force_refresh', 'true');
@@ -119,24 +108,16 @@ export const activitiesApi = {
       
       const queryString = params.toString();
       const url = `/activities${queryString ? '?' + queryString : ''}`;
-      
-      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
-      
+
       const response = await apiClient.get<Activity[]>(url);
-      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return response.data;
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities med limit/offset:', error);
-      console.error('[API] Error response:', error.response?.data);
-      console.error('[API] Error status:', error.response?.status);
-      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
 
   // Hent kun nye aktiviteter siden en gitt dato
   getNewActivities: async (since: string, forceRefresh: boolean = false) => {
-    console.log('[API] Sender GET request til /activities/new for å hente nye aktiviteter siden', since);
     try {
       const params = new URLSearchParams();
       params.append('since', since);
@@ -144,54 +125,37 @@ export const activitiesApi = {
       
       const queryString = params.toString();
       const url = `/activities/new?${queryString}`;
-      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
-      
+
       const response = await apiClient.get<Activity[]>(url);
-      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'nye aktiviteter');
       return response.data;
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities/new:', error);
-      console.error('[API] Error response:', error.response?.data);
-      console.error('[API] Error status:', error.response?.status);
-      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
   
   // New function to get HRV data for multiple activities
   getHrvForMultipleActivities: async (activityIds: string[]) => {
-    console.log('[API] Henter HRV-data for', activityIds.length, 'aktiviteter');
     try {
       const activityIdsParam = activityIds.join(',');
       const response = await apiClient.get(`/analysis/hrv/by-activities?activity_ids=${activityIdsParam}`);
-      console.log('[API] HRV-data hentet for', response.data.activities_with_hrv, 'av', response.data.total_activities, 'aktiviteter');
       return response.data;
     } catch (error: any) {
-      console.error('[API] Feil ved henting av HRV-data for flere aktiviteter:', error);
       throw error;
     }
   },
 
   // Hent totalt antall aktiviteter
   getActivityCount: async () => {
-    console.log('[API] Sender GET request til /activities/count...');
-    console.log('[API] Base URL:', apiClient.defaults.baseURL);
     try {
       const response = await apiClient.get<{count: number}>('/activities/count');
-      console.log('[API] Mottok activity count:', response.data.count);
       return response.data.count;
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities/count:', error);
-      console.error('[API] Error response:', error.response?.data);
-      console.error('[API] Error status:', error.response?.status);
-      console.error('[API] Error message:', error.message);
       throw error;
     }
   },
 
   // Hent aktiviteter for en datoperiode
   getActivitiesByDateRange: async (startDate: string, endDate: string, forceRefresh: boolean = false) => {
-    console.log('[API] Sender GET request til /activities/date-range...');
     try {
       const params = new URLSearchParams();
       params.append('start_date', startDate);
@@ -200,14 +164,10 @@ export const activitiesApi = {
       
       const queryString = params.toString();
       const url = `/activities/date-range?${queryString}`;
-      
-      console.log('[API] Full URL:', `${apiClient.defaults.baseURL}${url}`);
-      
+
       const response = await apiClient.get<Activity[]>(url);
-      console.log('[API] Mottok response:', response.status, response.data?.length || 0, 'aktiviteter');
       return { activities: response.data };
     } catch (error: any) {
-      console.error('[API] Feil ved GET /activities/date-range:', error);
       throw error;
     }
   },
@@ -313,7 +273,7 @@ export interface FactorRelationshipsResponse {
   x_meta: { label: string; unit: string };
   y_meta: { label: string; unit: string };
   summary: { avg_x: number | null; avg_y: number | null };
-  available_metrics: Record<string, { label: string; unit: string; source: string }>;
+  available_metrics: Record<string, FactorRelationshipMetricMeta>;
   points: Array<{
     activity_id: string;
     activity_name?: string;
@@ -324,6 +284,16 @@ export interface FactorRelationshipsResponse {
     distance_km?: number;
     duration_min?: number;
   }>;
+}
+
+export interface FactorRelationshipMetricMeta {
+  label: string;
+  unit: string;
+  source: string;
+  availability?: 'supported' | 'computed' | 'not_ingested' | 'empty_source' | 'unsupported';
+  availability_reason?: string;
+  selectable?: boolean;
+  value_count?: number;
 }
 
 export interface EfficiencyTrendItem {
