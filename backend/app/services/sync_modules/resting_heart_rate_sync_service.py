@@ -56,6 +56,14 @@ class RestingHeartRateSyncService:
         last_synced_candidate = rhr_start_date.date() - timedelta(days=1)
         sync_state_blocked = False
 
+        if rhr_start_date.date() > end_date.date():
+            logger.info(
+                "Hvilepuls-synk hoppes over: start %s er etter slutt %s (sync state er à jour)",
+                rhr_start_date.date(),
+                end_date.date(),
+            )
+            return
+
         logger.info(f"Starter hvilepuls-synk: {rhr_start_date.date()} -> {end_date.date()}")
         current_date = rhr_start_date
         saved = 0

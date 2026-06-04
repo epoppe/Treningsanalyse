@@ -14,6 +14,7 @@ from .stress import Stress
 from .health_data_missing import HealthDataMissing
 from .summaries import DailySummary, WeeklySummary, MonthlySummary, YearlySummary, PersonalRecord
 from .sync_state import SyncState
+from .sync_job import SyncJob
 from .lactate_threshold_history import LactateThresholdHistory
 
 __all__ = [
@@ -39,5 +40,6 @@ __all__ = [
     'YearlySummary',
     'PersonalRecord',
     'SyncState',
+    'SyncJob',
     'LactateThresholdHistory'
 ]

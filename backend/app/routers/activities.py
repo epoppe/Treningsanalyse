@@ -158,9 +158,13 @@ def get_activities_by_date_range(
 
 @router.get("/activities", response_model=List[ActivityResponse])
 def get_activities(
-    limit: int = 100, 
-    offset: int = 0, 
+    limit: int = 100,
+    offset: int = 0,
     since: Optional[str] = Query(None, description="Hent aktiviteter etter denne datoen (YYYY-MM-DD)"),
+    activity_ids: Optional[str] = Query(
+        None,
+        description="Kommaseparerte activity_id — returnerer kun disse (ignorerer limit/offset)",
+    ),
     force_refresh: Optional[str] = Query(None, description="Force refresh of power calculations"),
     db: Session = Depends(get_db)
 ):
@@ -169,16 +173,23 @@ def get_activities(
     Optimized with caching to reduce power calculations.
     """
     try:
-        logger.info(f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset}, since: {since})...")
-        
+        id_list: List[str] = []
+        if activity_ids:
+            id_list = [aid.strip() for aid in activity_ids.split(",") if aid.strip()]
+        logger.info(
+            f"Henter aktiviteter fra databasen (limit: {limit}, offset: {offset}, since: {since}, ids: {len(id_list)})..."
+        )
+
         # Bygg query med optimized loading
         from sqlalchemy.orm import selectinload
         query = db.query(Activity).options(
             selectinload(Activity.activity_type),  # Bedre enn joinedload for one-to-many
         )
-        
+
+        if id_list:
+            query = query.filter(Activity.activity_id.in_(id_list))
         # Legg til since filter hvis gitt
-        if since:
+        elif since:
             try:
                 since_date = datetime.strptime(since, "%Y-%m-%d")
                 query = query.filter(Activity.start_time >= since_date)
@@ -186,10 +197,10 @@ def get_activities(
             except ValueError:
                 logger.warning(f"Ugyldig since dato format: {since}")
         
-        # Hent aktiviteter sortert etter starttid (nyeste først)
-        # Hvis limit er veldig stort (>1000), bruk None for å unngå SQLite-feil
         query = query.order_by(Activity.start_time.desc())
-        if limit > 1000:
+        if id_list:
+            activities = query.all()
+        elif limit > 1000:
             logger.info(f"Limit {limit} er større enn 1000, henter alle aktiviteter uten limit")
             activities = query.offset(offset).all()
         else:

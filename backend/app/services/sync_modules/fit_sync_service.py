@@ -284,7 +284,13 @@ class FitSyncService:
                         str(activity_id),
                         force_refresh=True,
                     )
-                    logger.info("Værberikelse for aktivitet %s: %s", activity_id, weather_changed)
+                    logger.info(
+                        "Værberikelse for aktivitet %s: %s (temp=%s, vind=%s)",
+                        activity_id,
+                        weather_changed,
+                        activity.temperature,
+                        activity.wind_speed,
+                    )
                 except Exception as exc:
                     logger.warning("Kunne ikke berike vær for aktivitet %s: %s", activity_id, exc)
             return True, metrics_result

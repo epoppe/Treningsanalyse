@@ -27,7 +27,7 @@ from .activity_data_validation import (
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
-from .activity_field_extraction import extract_activity_list_fields
+from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields, extract_garmin_weather_fields
 
 logger = logging.getLogger(__name__)
 
@@ -657,6 +657,11 @@ class SyncService:
                         logger.debug(f"Kunne ikke hente elevation gain fra activity-service for {activity_id}: {e}")
 
                 list_fields = extract_activity_list_fields(act_data)
+                weather_fields = extract_garmin_weather_fields(act_data)
+                if isinstance(details_json, dict):
+                    for key in ("minTemperature", "maxTemperature"):
+                        if act_data.get(key) is not None:
+                            details_json[key] = act_data.get(key)
 
                 new_activity = Activity(
                     activity_id=activity_id,
@@ -691,6 +696,8 @@ class SyncService:
                     lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
                     total_ascent=elevation_gain,  # Elevation gain i meter
                     total_descent=elevation_loss,  # Elevation loss i meter
+                    temperature=weather_fields.get("temperature"),
+                    weather_condition=weather_fields.get("weather_condition"),
                     detailed_metrics=details_json
                 )
                 self.db.add(new_activity)
@@ -766,6 +773,7 @@ class SyncService:
             logger.info(f"  - HRV tilgjengelig: {successful_hrv}/{len(metrics_results)}")
             
             summary["total_fetched"] = added_count
+            summary["activity_ids"] = inserted_activity_ids
             summary["metrics_calculated"] = {
                 "tss": successful_tss,
                 "power": successful_power,
@@ -879,6 +887,7 @@ class SyncService:
 
     def _get_activity_details_frame(self, activity_id: str) -> Optional[pd.DataFrame]:
         try:
+            self.storage.reload_activity_details()
             try:
                 details = self.storage.get_activity_details(int(activity_id))
             except (TypeError, ValueError):
@@ -956,21 +965,19 @@ class SyncService:
             activity_time = activity_time.replace(tzinfo=timezone.utc)
 
         route = self._activity_route_fingerprint(str(activity.activity_id))
-        if route is None:
-            return []
+        if route is not None:
+            latitude = route.start_latitude or route.centroid_latitude
+            longitude = route.start_longitude or route.centroid_longitude
+            if latitude is not None and longitude is not None:
+                return [
+                    {
+                        "target_time": activity_time,
+                        "latitude": float(latitude),
+                        "longitude": float(longitude),
+                    }
+                ]
 
-        latitude = route.start_latitude or route.centroid_latitude
-        longitude = route.start_longitude or route.centroid_longitude
-        if latitude is None or longitude is None:
-            return []
-
-        return [
-            {
-                "target_time": activity_time,
-                "latitude": float(latitude),
-                "longitude": float(longitude),
-            }
-        ]
+        return []
 
     async def _get_weather_for_sample_point(
         self,
@@ -981,19 +988,18 @@ class SyncService:
         altitude: Optional[float],
     ) -> Optional[Dict[str, Any]]:
         weather = None
-        forecast_floor = datetime.now(timezone.utc) - timedelta(days=10)
-        if target_time >= forecast_floor:
+        if self.frost_weather_service.enabled:
+            weather = await self.frost_weather_service.get_weather_snapshot(
+                target_time=target_time,
+                latitude=latitude,
+                longitude=longitude,
+            )
+        if weather is None:
             weather = await self.weather_service.get_weather_snapshot(
                 target_time=target_time,
                 latitude=latitude,
                 longitude=longitude,
                 altitude=altitude,
-            )
-        if weather is None and self.frost_weather_service.enabled:
-            weather = await self.frost_weather_service.get_weather_snapshot(
-                target_time=target_time,
-                latitude=latitude,
-                longitude=longitude,
             )
         return weather
 
@@ -1033,6 +1039,21 @@ class SyncService:
 
         return result if result else None
 
+    def _apply_garmin_list_weather_if_missing(self, activity: Activity) -> bool:
+        """Behold Garmin-liste temperatur hvis API-berikelse ikke gir mer."""
+        if activity.temperature is not None:
+            return False
+        metrics = activity.detailed_metrics if isinstance(activity.detailed_metrics, dict) else {}
+        for key in ("minTemperature", "maxTemperature"):
+            if metrics.get(key) is not None:
+                fields = extract_garmin_weather_fields(metrics)
+                if fields.get("temperature") is not None:
+                    activity.temperature = fields["temperature"]
+                    if not activity.weather_condition:
+                        activity.weather_condition = fields.get("weather_condition")
+                    return True
+        return False
+
     async def sync_activity_weather_for_activity(
         self,
         activity_id: str,
@@ -1043,27 +1064,29 @@ class SyncService:
         if activity is None:
             return False
 
-        has_weather = any(
+        has_api_weather = any(
             value is not None
             for value in (
-                activity.temperature,
                 activity.wind_speed,
                 activity.wind_direction,
-                activity.weather_condition,
+                activity.humidity,
             )
         )
-        if has_weather and not force_refresh:
+        has_garmin_temp = activity.temperature is not None
+        if (has_api_weather or has_garmin_temp) and not force_refresh:
             return False
 
         activity_time = activity.start_time
         if activity_time is None:
+            logger.debug("Vær hoppet over %s: mangler start_time", activity_id)
             return False
         if activity_time.tzinfo is None:
             activity_time = activity_time.replace(tzinfo=timezone.utc)
 
         sample_points = self._build_weather_sample_points(activity)
         if not sample_points:
-            return False
+            logger.debug("Vær hoppet over %s: ingen GPS-punkter for sampling", activity_id)
+            return self._apply_garmin_list_weather_if_missing(activity)
 
         snapshots: List[Dict[str, Any]] = []
         altitude = self._activity_weather_altitude(activity)
@@ -1078,23 +1101,31 @@ class SyncService:
                 snapshots.append(weather)
 
         weather = self._aggregate_weather_snapshots(snapshots)
-        if not weather:
-            return False
-
         changed = False
-        for source_key, attr in (
-            ("temperature", "temperature"),
-            ("wind_speed", "wind_speed"),
-            ("wind_direction", "wind_direction"),
-            ("humidity", "humidity"),
-            ("weather_condition", "weather_condition"),
-        ):
-            value = weather.get(source_key)
-            if value is not None and getattr(activity, attr, None) != value:
-                setattr(activity, attr, value)
-                changed = True
+        if weather:
+            for source_key, attr in (
+                ("temperature", "temperature"),
+                ("wind_speed", "wind_speed"),
+                ("wind_direction", "wind_direction"),
+                ("humidity", "humidity"),
+                ("weather_condition", "weather_condition"),
+            ):
+                value = weather.get(source_key)
+                if value is not None and getattr(activity, attr, None) != value:
+                    setattr(activity, attr, value)
+                    changed = True
+        elif not has_garmin_temp:
+            changed = self._apply_garmin_list_weather_if_missing(activity)
+
         if changed:
             self.db.commit()
+        elif not weather and not has_garmin_temp:
+            if not self.frost_weather_service.enabled:
+                logger.debug(
+                    "Vær-API ga ingen data for %s (sett FROST_CLIENT_ID for historisk vær; "
+                    "MET locationforecast dekker kun fremtidige tidspunkter)",
+                    activity_id,
+                )
         return changed
 
     async def sync_activity_weather(

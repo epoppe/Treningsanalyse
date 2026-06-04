@@ -12,6 +12,8 @@ import ActivityViewControls from '../components/ActivityViewControls';
 import RunningEconomyTable from '../components/RunningEconomyTable';
 import SkeletonLoader from '../components/SkeletonLoader';
 import { useSyncListener } from '../hooks/useSyncListener';
+import { refreshActivitiesAfterSync } from '../utils/syncRefresh';
+import type { SyncJobStatusResponse } from '../types/syncJob';
 
 const MainContainer = styled.div`
   max-width: 1200px;
@@ -113,25 +115,18 @@ export default function Home() {
   const [loadingTimeout, setLoadingTimeout] = useState(false);
 
   // Callback for å oppdatere data når synkronisering er fullført
-  const handleSyncComplete = useCallback(() => {
+  const handleSyncComplete = useCallback((status?: SyncJobStatusResponse) => {
     console.log('[Home] Synkronisering fullført, oppdaterer aktiviteter...');
-    // Rydd opp eventuell tidligere refresh-timeout for å unngå overlappende kall
     if (syncRefreshTimeout.current) {
       clearTimeout(syncRefreshTimeout.current);
+      syncRefreshTimeout.current = null;
     }
-
-    // Kjør en full oppfriskning av aktivitetslisten med force refresh
-    // Hent først de første 100 for rask visning (inkluderer flere nye aktiviteter)
+    if (status) {
+      refreshActivitiesAfterSync(dispatch, status);
+      return;
+    }
     dispatch(fetchActivities({ forceRefresh: true, limit: 100 }));
     dispatch(fetchActivityCount());
-    
-    // Vent litt lenger (1500ms) for å sikre at første batch er ferdig før vi henter resten
-    syncRefreshTimeout.current = setTimeout(() => {
-      console.log('[Home] Henter resten av aktivitetene etter synkronisering...');
-      // Hent alle resterende aktiviteter (opp til 5000)
-      dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 100 }));
-      syncRefreshTimeout.current = null;
-    }, 1500);
   }, [dispatch]);
 
   // Lytter etter synkroniseringshendelser

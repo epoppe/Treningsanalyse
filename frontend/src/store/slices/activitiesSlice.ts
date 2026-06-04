@@ -129,6 +129,23 @@ export const fetchAllActivities = createAsyncThunk<Activity[], { forceRefresh?: 
   }
 );
 
+export const mergeSyncedActivities = createAsyncThunk<
+  Activity[],
+  { activityIds: string[]; forceRefresh?: boolean },
+  { rejectValue: string }
+>(
+  'activities/mergeSyncedActivities',
+  async ({ activityIds, forceRefresh = true }, { rejectWithValue }) => {
+    try {
+      if (!activityIds.length) return [];
+      return await activitiesApi.getActivitiesByIds(activityIds, forceRefresh);
+    } catch (error) {
+      const errorInfo = errorHandler(error);
+      return rejectWithValue(errorInfo.error);
+    }
+  }
+);
+
 export const fetchNewActivities = createAsyncThunk<Activity[], { since: string; forceRefresh?: boolean }, { rejectValue: string }>(
   'activities/fetchNewActivities',
   async ({ since, forceRefresh = false }, { rejectWithValue }) => {
@@ -181,6 +198,23 @@ const activitiesSlice = createSlice({
       .addCase(fetchActivities.rejected, (state, action) => {
         state.status = 'failed';
         state.error = action.payload as string || 'Kunne ikke hente aktiviteter';
+      })
+      // mergeSyncedActivities
+      .addCase(mergeSyncedActivities.fulfilled, (state, action: PayloadAction<Activity[]>) => {
+        state.status = 'succeeded';
+        const byId = new Map(state.items.map(item => [item.activityId, item]));
+        for (const activity of action.payload) {
+          byId.set(activity.activityId, activity);
+        }
+        const combined = Array.from(byId.values());
+        combined.sort((a, b) => new Date(b.startTimeLocal).getTime() - new Date(a.startTimeLocal).getTime());
+        state.items = combined;
+        state.loadedCount = combined.length;
+        state.lastSync = new Date().toISOString();
+      })
+      .addCase(mergeSyncedActivities.rejected, (state, action) => {
+        state.status = 'failed';
+        state.error = action.payload as string || 'Kunne ikke oppdatere synkede aktiviteter';
       })
       // fetchMoreActivities
       .addCase(fetchMoreActivities.pending, (state) => {

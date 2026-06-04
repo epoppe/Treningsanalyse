@@ -54,6 +54,27 @@ Frontend forventes normalt på:
 Backend forventes normalt på:
 - `http://localhost:8000`
 
+### Redis (valgfritt, anbefalt)
+Raskere cache for TSS, power og sammendrag. Uten Redis logger backend en advarsel og bruker minne-cache.
+
+```bash
+docker run -d --name treningsanalyse-redis -p 6379:6379 redis:7-alpine
+```
+
+I `backend/.env`:
+```
+REDIS_ENABLED=true
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+Sett `REDIS_ENABLED=false` hvis du ikke vil bruke Redis.
+
+### Vær på aktiviteter
+- **Garmin (standard):** temperatur fra `minTemperature` / `maxTemperature` i activitylist lagres ved synk.
+- **Frost (anbefalt for vind + historikk):** sett `FROST_CLIENT_ID` i `backend/.env` (gratis API-nøkkel fra frost.met.no).
+- **MET locationforecast:** brukes kun når økttidspunktet ligger i forecast-vinduet (typisk fremtid), ikke for gamle økter.
+
 ## Viktige praktiske notater
 
 - Ikke slett eller flytt debug-/migreringsskript uten en egen kontrollert oppryddingsrunde.

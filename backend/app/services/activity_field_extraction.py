@@ -69,6 +69,28 @@ def normalize_garmin_moving_duration(
     return value
 
 
+def extract_garmin_weather_fields(act_data: Dict[str, Any]) -> Dict[str, Optional[float | str]]:
+    """
+    Temperatur fra Garmin activitylist (min/max under økta).
+    Vind hentes normalt ikke her — bruk MET/Frost i sync_service når konfigurert.
+    """
+    min_t = _coerce_float(act_data.get("minTemperature"))
+    max_t = _coerce_float(act_data.get("maxTemperature"))
+    temperature = None
+    if min_t is not None and max_t is not None:
+        temperature = (min_t + max_t) / 2.0
+    elif min_t is not None:
+        temperature = min_t
+    elif max_t is not None:
+        temperature = max_t
+
+    weather_condition = "garmin_list" if temperature is not None else None
+    return {
+        "temperature": temperature,
+        "weather_condition": weather_condition,
+    }
+
+
 def extract_activity_list_fields(act_data: Dict[str, Any]) -> Dict[str, Optional[float | int]]:
     """Henter felter som allerede finnes i Garmin activitylist JSON."""
     duration = _coerce_float(act_data.get("duration"))

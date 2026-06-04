@@ -116,6 +116,10 @@ class MetWeatherService:
         if best is None or best_time is None or best_distance is None:
             return None
 
+        # Locationforecast inneholder kun fremtidige tidspunkter — ikke bruk for historiske økter.
+        if target_time > best_time + timedelta(hours=1):
+            return None
+
         # Unngå å bruke forecast-punkt som er for langt unna aktivitetstiden.
         if best_distance > timedelta(hours=6).total_seconds():
             return None

@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { useAppSelector } from '../store/hooks';
+import type { SyncJobStatusResponse } from '../types/syncJob';
 
-export const useSyncListener = (onSyncComplete: () => void) => {
+export const useSyncListener = (onSyncComplete: (status?: SyncJobStatusResponse) => void) => {
   const { items: activities, status } = useAppSelector((state) => state.activities);
   const previousActivityCount = useRef<number>(0);
   const previousStatus = useRef<string>('idle');
@@ -35,9 +36,9 @@ export const useSyncListener = (onSyncComplete: () => void) => {
 
   // Lytter etter custom syncCompleted event
   useEffect(() => {
-    const handleSyncCompleted = (event: CustomEvent) => {
+    const handleSyncCompleted = (event: CustomEvent<{ status?: SyncJobStatusResponse }>) => {
       console.log('[useSyncListener] Mottok syncCompleted event:', event.detail);
-      onSyncComplete();
+      onSyncComplete(event.detail?.status);
     };
 
     window.addEventListener('syncCompleted', handleSyncCompleted as EventListener);

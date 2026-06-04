@@ -7,10 +7,10 @@ import { nb } from 'date-fns/locale';
 import { api } from '../../utils/api';
 import CacheCalculationPanel from '../../components/CacheCalculationPanel';
 import { useAppDispatch } from '@/store/hooks';
-import { fetchActivities, fetchMoreActivities, fetchActivityCount } from '@/store/slices/activitiesSlice';
 import { jobTypeLabel, syncStatusLabel } from '@/utils/syncJobLabels';
 import type { SyncJobStatusResponse } from '@/types/syncJob';
 import { messageFromApiError } from '@/utils/httpErrorMessage';
+import { refreshActivitiesAfterSync } from '@/utils/syncRefresh';
 
 /** Fjerner jobbkort fra listen etter terminaltilstand (lesbar tid for feilmeldinger). */
 const REMOVE_JOB_AFTER_MS = {
@@ -96,7 +96,35 @@ const indeterminateMove = keyframes`
   }
 `;
 
-/** Ubestemt fremdrift (ingen falsk prosent) */
+const DeterminateProgress = styled.div`
+  width: 100%;
+  height: 8px;
+  background-color: #ecf0f1;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+
+  &::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: ${(p: { $percent: number }) => `${Math.min(100, Math.max(0, p.$percent))}%`};
+    background: linear-gradient(90deg, #3498db, #2980b9);
+    transition: width 0.4s ease;
+  }
+`;
+
+const ValidationBox = styled.div`
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  background: #eef9f0;
+  border: 1px solid #b8dfc4;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #1e5631;
+`;
+
+/** Ubestemt fremdrift når prosent ikke er tilgjengelig */
 const IndeterminateProgress = styled.div`
   width: 100%;
   height: 8px;
@@ -241,10 +269,14 @@ export default function SynkroniseringPage() {
     }
   };
 
-  const pollJobStatus = async (jobId: string) => {
+  const pollJobStatus = (jobId: string) => {
+    let consecutiveErrors = 0;
+    const MAX_POLL_ERRORS = 15;
+
     const poll = async () => {
       try {
         const status = await api.getSyncStatus(jobId);
+        consecutiveErrors = 0;
         setActiveJobs(prev => ({
           ...prev,
           [jobId]: {
@@ -254,30 +286,49 @@ export default function SynkroniseringPage() {
           },
         }));
 
-        if (status.status === 'processing' || status.status === 'queued') {
-          setTimeout(poll, 2000); // Poll hver 2. sekund
-        } else if (status.status === 'completed') {
+        const stillActive =
+          status.is_active === true
+          || status.status === 'processing'
+          || status.status === 'queued';
+
+        if (stillActive) {
+          setTimeout(poll, 2000);
+          return;
+        }
+
+        if (status.status === 'completed') {
           console.log('[Synkronisering] Synkronisering fullført, triggerer oppdatering av aktiviteter...');
           window.dispatchEvent(new CustomEvent('syncCompleted', {
             detail: { jobId, status },
           }));
 
-          dispatch(fetchActivities({ forceRefresh: true, limit: 100 }));
-          dispatch(fetchActivityCount());
-          setTimeout(() => {
-            console.log('[Synkronisering] Henter resten av aktivitetene...');
-            dispatch(fetchMoreActivities({ forceRefresh: true, limit: 5000, offset: 100 }));
-          }, 1500);
+          refreshActivitiesAfterSync(dispatch, status);
           scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.completed);
         } else if (status.status === 'failed') {
           scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.failed);
         } else if (status.status === 'not_found') {
           scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.not_found);
         } else {
-          console.warn('[Synkronisering] Uventet jobbstatus, stopper polling:', status.status);
+          console.warn('[Synkronisering] Uventet jobbstatus, fortsetter polling:', status.status);
+          setTimeout(poll, 3000);
         }
       } catch (error) {
+        consecutiveErrors += 1;
         console.error('Feil ved polling av jobb-status:', error);
+        if (consecutiveErrors < MAX_POLL_ERRORS) {
+          setTimeout(poll, 3000);
+          return;
+        }
+        setActiveJobs(prev => ({
+          ...prev,
+          [jobId]: {
+            ...prev[jobId],
+            job_id: jobId,
+            status: 'failed',
+            error: 'Kunne ikke hente jobbstatus fra server. Sjekk at backend kjører.',
+          },
+        }));
+        scheduleRemoveJobFromList(jobId, REMOVE_JOB_AFTER_MS.failed);
       }
     };
     poll();
@@ -332,9 +383,12 @@ export default function SynkroniseringPage() {
           <ErrorBanner role="alert">{syncActionError}</ErrorBanner>
         )}
         <p style={{ marginBottom: '1rem', color: '#566573', maxWidth: '52rem' }}>
-          Velg datointervall under for handlinger som gjelder en periode. «Aktiviteter for periode» henter kun treningsøkter
-          og FIT fra Garmin for intervallet — raskere enn full synk. «Full synkronisering» oppdaterer også helse, TE, HRV,
-          Body Battery og kjører beregninger for perioden.
+          <strong>Synk nye (fra siste økt)</strong> — anbefalt daglig (~1–3 min): én pipeline med aktiviteter, FIT, helse,
+          TE, vær, Garmin performance metrics, HRV til database og beregninger. Ingen duplikat helsesynk.
+          <br />
+          <strong>Aktiviteter for periode</strong> — kun økter + FIT for valgt intervall (raskere).
+          <br />
+          <strong>Full synkronisering</strong> — bred historikk (timer); aktivitet fra 2008, helse fra 2020 internt.
         </p>
         <QuickActions>
           <QuickActionButton 
@@ -424,8 +478,22 @@ export default function SynkroniseringPage() {
                   <strong>Feil:</strong> {job.error}
                 </div>
               )}
-              {(job.status === 'processing' || job.status === 'queued') && (
+              {job.progress && (job.status === 'processing' || job.status === 'queued') && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#566573' }}>
+                  Steg {job.progress.phase}/{job.progress.total_phases}
+                  {job.progress.sub_label ? ` · ${job.progress.sub_label}` : ''}
+                  {' · '}{job.progress.percent}%
+                </div>
+              )}
+              {job.progress && (job.status === 'processing' || job.status === 'queued') ? (
+                <DeterminateProgress $percent={job.progress.percent} aria-label="Synk-fremdrift" />
+              ) : (job.status === 'processing' || job.status === 'queued') ? (
                 <IndeterminateProgress aria-label="Jobb kjører" />
+              ) : null}
+              {job.status === 'completed' && job.result?.validation && (
+                <ValidationBox>
+                  <strong>Kvalitetssjekk:</strong> {job.result.validation.summary_text}
+                </ValidationBox>
               )}
               {job.start_time && (
                 <div style={{ marginTop: '0.5rem', fontSize: '0.9rem', color: '#7f8c8d' }}>

@@ -399,17 +399,16 @@ class GarminClient:
         
         date_obj = date.date()
         date_str = date.strftime("%Y-%m-%d")
-        logger.info(f"Henter HRV-data (alternativ metode) for {date_str}")
-        
-        # Debugging: List alle garth-attributter og metoder
+        logger.debug(f"Henter HRV-data (alternativ metode) for {date_str}")
+
         garth_attrs = [attr for attr in dir(garth) if 'HRV' in attr or 'hrv' in attr]
-        logger.info(f"Garth HRV-relaterte attributter: {garth_attrs}")
-        logger.info(f"Garth HRV klasser tilgjengelig: DailyHRV={DailyHRV is not None}, HRVData={HRVData is not None}")
-        
+        logger.debug(f"Garth HRV-relaterte attributter: {garth_attrs}")
+        logger.debug(f"Garth HRV klasser tilgjengelig: DailyHRV={DailyHRV is not None}, HRVData={HRVData is not None}")
+
         if DailyHRV:
-            logger.info(f"DailyHRV metoder: {[m for m in dir(DailyHRV) if not m.startswith('_')]}")
+            logger.debug(f"DailyHRV metoder: {[m for m in dir(DailyHRV) if not m.startswith('_')]}")
         if HRVData:
-            logger.info(f"HRVData metoder: {[m for m in dir(HRVData) if not m.startswith('_')]}")
+            logger.debug(f"HRVData metoder: {[m for m in dir(HRVData) if not m.startswith('_')]}")
         
         # Prøv flere garth-metoder i prioritert rekkefølge
         methods_to_try = []
@@ -428,11 +427,11 @@ class GarminClient:
         
         for method_name, method_func in methods_to_try:
             try:
-                logger.info(f"Prøver {method_name} for {date_str}")
+                logger.debug(f"Prøver {method_name} for {date_str}")
                 hrv_data = await asyncio.to_thread(method_func)
-                
+
                 if hrv_data:
-                    logger.info(f"HRV-data funnet med {method_name} for {date_str}: {hrv_data}")
+                    logger.debug(f"HRV-data funnet med {method_name} for {date_str}")
                     
                     # Håndter ulike returformater
                     if isinstance(hrv_data, list) and len(hrv_data) > 0:
@@ -467,7 +466,7 @@ class GarminClient:
                                 if baseline_low_upper is None:
                                     baseline_low_upper = getattr(hrv_item.baseline, 'low_upper', None)
                             
-                            logger.info(f"HRV baseline-verdier for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
+                            logger.debug(f"HRV baseline-verdier for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
                             
                             hrv_dict = {
                                 "hrv_summary": {
@@ -505,7 +504,7 @@ class GarminClient:
                             if baseline_low_upper is None:
                                 baseline_low_upper = getattr(hrv_summary, 'baseline_low_upper', None)
                             
-                            logger.info(f"HRV baseline-verdier (hrv_summary) for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
+                            logger.debug(f"HRV baseline-verdier (hrv_summary) for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
                         
                         hrv_dict = {
                             "hrv_summary": {

@@ -34,9 +34,42 @@ export interface SyncSummaryResultPayload {
   message?: string;
 }
 
+export interface SyncValidationActivityRow {
+  activity_id: string;
+  name?: string | null;
+  date?: string | null;
+  has_fit: boolean;
+  has_fatigue: boolean;
+  has_decoupling: boolean;
+  has_hrv: boolean;
+}
+
+export interface SyncValidationReport {
+  total_activities: number;
+  with_fit: number;
+  with_fatigue: number;
+  with_decoupling: number;
+  with_hrv: number;
+  summary_text: string;
+  activities?: SyncValidationActivityRow[];
+}
+
+export interface SyncJobProgress {
+  phase: number;
+  total_phases: number;
+  percent: number;
+  label: string;
+  sub_current?: number;
+  sub_total?: number;
+  sub_label?: string;
+}
+
 export interface SyncJobResultPayload {
   summary?: SyncSummaryPayload;
   summary_result?: SyncSummaryResultPayload;
+  validation?: SyncValidationReport;
+  synced_activity_ids?: string[];
+  period?: { start?: string; end?: string };
 }
 
 export interface SyncJobStatusResponse {
@@ -44,6 +77,7 @@ export interface SyncJobStatusResponse {
   status: SyncJobLifecycleStatus | string;
   job_type?: string;
   message?: string;
+  progress?: SyncJobProgress | null;
   error?: string;
   created_at?: string;
   start_time?: string | null;

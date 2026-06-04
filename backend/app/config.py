@@ -49,11 +49,19 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
+    # Redis (valgfritt — raskere cache for TSS/power/sammendrag)
+    REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "true").lower() in ("1", "true", "yes")
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD") or None
+
     # MET Weather API
     MET_API_USER_AGENT: str = os.getenv(
         "MET_API_USER_AGENT",
         "Treningsanalyse/1.0 (tim-agent)",
     )
+    # Frost API (historisk vær) — https://frost.met.no
     FROST_CLIENT_ID: str = os.getenv("FROST_CLIENT_ID", "")
 
     def __init__(self, **kwargs):

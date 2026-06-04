@@ -98,6 +98,15 @@ export const activitiesApi = {
     }
   },
 
+  getActivitiesByIds: async (activityIds: string[], forceRefresh: boolean = false) => {
+    if (!activityIds.length) return [];
+    const params = new URLSearchParams();
+    params.append('activity_ids', activityIds.join(','));
+    if (forceRefresh) params.append('force_refresh', 'true');
+    const response = await apiClient.get<Activity[]>(`/activities?${params.toString()}`);
+    return response.data;
+  },
+
   // Hent aktiviteter med høyere limit for å vise flere
   getMoreActivities: async (forceRefresh: boolean = false, limit: number = 500, offset: number = 0) => {
     try {

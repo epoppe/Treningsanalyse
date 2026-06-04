@@ -14,13 +14,18 @@ class RedisCache:
     """Redis-basert cache med JSON serialisering og TTL"""
     
     def __init__(
-        self, 
-        host: str = 'localhost', 
-        port: int = 6379, 
+        self,
+        host: str = 'localhost',
+        port: int = 6379,
         db: int = 0,
         password: Optional[str] = None,
-        decode_responses: bool = True
+        decode_responses: bool = True,
+        connect: bool = True,
     ):
+        if not connect:
+            self.client = None
+            self.enabled = False
+            return
         """
         Initialiserer Redis-tilkobling
         
@@ -306,10 +311,10 @@ class RedisCache:
 _redis_cache: Optional[RedisCache] = None
 
 def get_redis_cache(
-    host: str = 'localhost',
-    port: int = 6379,
-    db: int = 0,
-    password: Optional[str] = None
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    db: Optional[int] = None,
+    password: Optional[str] = None,
 ) -> RedisCache:
     """
     Get eller opprett global Redis cache instance
@@ -323,9 +328,20 @@ def get_redis_cache(
     Returns:
         RedisCache instance
     """
+    from ..config import settings
+
     global _redis_cache
     if _redis_cache is None:
-        _redis_cache = RedisCache(host, port, db, password)
+        if not settings.REDIS_ENABLED:
+            _redis_cache = RedisCache(connect=False)
+            logger.info("Redis deaktivert via REDIS_ENABLED=false")
+            return _redis_cache
+        _redis_cache = RedisCache(
+            host or settings.REDIS_HOST,
+            port if port is not None else settings.REDIS_PORT,
+            db if db is not None else settings.REDIS_DB,
+            password if password is not None else settings.REDIS_PASSWORD,
+        )
     return _redis_cache
 
 
