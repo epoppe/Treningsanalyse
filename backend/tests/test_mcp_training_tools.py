@@ -9,10 +9,13 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database.models import Base
+from app.database.models.body_battery import BodyBattery
 from app.database.models.activity import Activity, ActivityType, GarminPerformanceMetric
-from app.database.models.sleep import Sleep
+from app.database.models.sleep import HRV, RestingHeartRate, Sleep
+from app.database.models.stress import Stress
 from app.database.models.lactate_threshold_history import LactateThresholdHistory
 from app.mcp import training_tools
+from app.services.hrv_fetch import LOCAL_DB_HRV_REASON, NO_HRV_ACTIVITY_DAY_REASON
 from app.services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG
 from app.services.ppap_metrics_service import PpapMetricsService
 from app.storage import DataStorage
@@ -91,6 +94,54 @@ class McpTrainingToolsTests(unittest.TestCase):
                 sleep_quality="good",
             )
         )
+        self.db.add(
+            HRV(
+                measurement_date=start.date(),
+                measurement_time=start,
+                rmssd=34.0,
+                measurement_type="during_sleep",
+                status="balanced",
+            )
+        )
+        self.db.add(
+            HRV(
+                measurement_date=(start - timedelta(days=1)).date(),
+                measurement_time=start - timedelta(days=1),
+                rmssd=40.0,
+                measurement_type="during_sleep",
+            )
+        )
+        self.db.add(
+            HRV(
+                measurement_date=(start - timedelta(days=2)).date(),
+                measurement_time=start - timedelta(days=2),
+                rmssd=38.0,
+                measurement_type="during_sleep",
+            )
+        )
+        self.db.add(
+            RestingHeartRate(
+                measurement_date=start.date(),
+                measurement_time=start,
+                resting_heart_rate=47.0,
+            )
+        )
+        self.db.add(
+            BodyBattery(
+                date=start.date(),
+                max_body_battery=88.0,
+                min_body_battery=41.0,
+                net_charge=12.0,
+            )
+        )
+        self.db.add(
+            Stress(
+                stress_date=start.date(),
+                stress_level=32.0,
+                high_stress_time=5400.0,
+                rest_time=28800.0,
+            )
+        )
         self.db.query(Activity).filter_by(activity_id="2301").update(
             {
                 "temperature": 16.5,
@@ -98,6 +149,8 @@ class McpTrainingToolsTests(unittest.TestCase):
                 "wind_direction": 225.0,
                 "humidity": 63.0,
                 "weather_condition": "partlycloudy_day",
+                "body_battery_start": 72.0,
+                "activity_body_battery_delta": -18.0,
             }
         )
         self.db.commit()
@@ -135,6 +188,97 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(deep_dive["activity"]["activity_id"], "2301")
         self.assertEqual(len(deep_dive["kilometer_splits"]), 5)
         self.assertEqual(deep_dive["kilometer_splits"][0]["source"], "details")
+        self.assertEqual(deep_dive["recovery_context"]["hrv"]["rmssd"], 34.0)
+        self.assertEqual(deep_dive["recovery_context"]["hrv"]["source"], "local_db")
+        self.assertEqual(deep_dive["recovery_context"]["hrv"]["availability"], "supported")
+        self.assertIn("reason", deep_dive["recovery_context"]["hrv"])
+        self.assertEqual(deep_dive["recovery_context"]["sleep"]["overall_score"], 82.0)
+        self.assertEqual(deep_dive["recovery_context"]["sleep"]["source"], "local_db")
+        self.assertEqual(deep_dive["recovery_context"]["resting_heart_rate"]["value"], 47.0)
+        self.assertEqual(deep_dive["recovery_context"]["resting_heart_rate"]["availability"], "supported")
+        self.assertEqual(deep_dive["recovery_context"]["garmin_performance"]["source"], "local_db")
+        body_battery = deep_dive["recovery_context"]["body_battery"]
+        self.assertEqual(body_battery["start"]["value"], 72.0)
+        self.assertEqual(body_battery["start"]["availability"], "estimated")
+        self.assertEqual(body_battery["start"]["source"], "activity_db")
+        self.assertEqual(body_battery["delta"]["value"], -18.0)
+        self.assertEqual(body_battery["delta"]["availability"], "supported")
+        self.assertEqual(body_battery["delta"]["source"], "garmin_activity_summary")
+        self.assertEqual(body_battery["end_derived"]["value"], 54.0)
+        self.assertEqual(body_battery["daily_max"], 88.0)
+        self.assertEqual(body_battery["daily_source"], "local_db")
+        self.assertEqual(body_battery["daily_availability"], "supported")
+        recovery = deep_dive["activity"]["recovery"]
+        self.assertEqual(recovery["body_battery_start"]["value"], 72.0)
+        self.assertEqual(recovery["activity_body_battery_delta"]["value"], -18.0)
+
+    def test_mcp_hrv_recovery_context_uses_shared_contract(self):
+        with patch.object(training_tools, "training_context", self._context):
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        hrv = deep_dive["recovery_context"]["hrv"]
+        self.assertEqual(hrv["source"], "local_db")
+        self.assertEqual(hrv["live_status"], "not_attempted")
+        self.assertEqual(hrv["availability"], "supported")
+        self.assertEqual(hrv["reason"], LOCAL_DB_HRV_REASON)
+
+    def test_mcp_hrv_recovery_context_missing_uses_shared_contract(self):
+        self.db.query(HRV).delete()
+        self.db.commit()
+
+        with patch.object(training_tools, "training_context", self._context):
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        hrv = deep_dive["recovery_context"]["hrv"]
+        self.assertIsNone(hrv["rmssd"])
+        self.assertEqual(hrv["source"], "none")
+        self.assertEqual(hrv["live_status"], "not_attempted")
+        self.assertEqual(hrv["availability"], "missing")
+        self.assertEqual(hrv["reason"], NO_HRV_ACTIVITY_DAY_REASON)
+
+    def test_activity_recovery_fields_expose_availability_and_sources(self):
+        with patch.object(training_tools, "training_context", self._context):
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        recovery_context = deep_dive["recovery_context"]
+        for section in ("hrv", "sleep", "resting_heart_rate", "stress"):
+            self.assertIn("source", recovery_context[section])
+            self.assertIn("availability", recovery_context[section])
+            self.assertIn("reason", recovery_context[section])
+        self.assertIn("daily_reason", recovery_context["body_battery"])
+        self.assertIn("reason", recovery_context["garmin_performance"])
+
+        readiness = recovery_context["training_readiness"]
+        self.assertIn(readiness["availability"], {"stored", "computed", "missing"})
+        self.assertIn(readiness["source"], {"activity_db", "training_readiness_service", "none"})
+        if readiness["availability"] == "computed":
+            self.assertIn("components", readiness)
+
+    def test_body_battery_start_unavailable_sentinel_is_explicit(self):
+        self.db.query(Activity).filter_by(activity_id="2301").update({"body_battery_start": -1.0})
+        self.db.commit()
+
+        with patch.object(training_tools, "training_context", self._context):
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        start = deep_dive["recovery_context"]["body_battery"]["start"]
+        self.assertIsNone(start["value"])
+        self.assertEqual(start["availability"], "unavailable")
+        self.assertEqual(start["source"], "none")
+        self.assertIsNone(deep_dive["recovery_context"]["body_battery"]["end_derived"])
+
+    def test_stored_training_readiness_is_preferred_over_computed(self):
+        self.db.query(Activity).filter_by(activity_id="2301").update({"training_readiness_score": 81.0})
+        self.db.commit()
+
+        with patch.object(training_tools, "training_context", self._context):
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        readiness = deep_dive["recovery_context"]["training_readiness"]
+        self.assertEqual(readiness["value"], 81.0)
+        self.assertEqual(readiness["availability"], "stored")
+        self.assertEqual(readiness["source"], "activity_db")
+        self.assertNotIn("components", readiness)
 
     def test_readiness_tool_returns_recommendation_and_flags(self):
         with patch.object(training_tools, "training_context", self._context):
@@ -143,6 +287,42 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn(readiness["recommendation"], {"normal_training", "easy_or_moderate", "easy_or_rest"})
         self.assertIn("banister", readiness)
         self.assertIn("hrv_guidance", readiness)
+        self.assertIn("recovery_context", readiness)
+        self.assertIn("readiness_composites", readiness)
+        self.assertIn("metric_links", readiness)
+        self.assertEqual(readiness["recovery_context"]["hrv"]["rmssd"], 34.0)
+        self.assertIn("stress", readiness["recovery_context"])
+
+    def test_metric_alias_hrv_rmssd_resolves_in_timeseries(self):
+        with patch.object(training_tools, "training_context", self._context):
+            canonical = training_tools.query_metric_timeseries(
+                "health.hrv_rmssd",
+                start_date="2026-05-01",
+                end_date="2026-05-31",
+            )
+            alias = training_tools.query_metric_timeseries(
+                "hrv.rmssd",
+                start_date="2026-05-01",
+                end_date="2026-05-31",
+            )
+
+        self.assertEqual(canonical["status"], "ok")
+        self.assertEqual(alias["status"], "ok")
+        self.assertEqual(alias["requested_metric_key"], "hrv.rmssd")
+        self.assertEqual(alias["canonical_key"], "health.hrv_rmssd")
+        self.assertEqual(alias["points"], canonical["points"])
+
+    def test_metric_glossary_resolves_alias_key(self):
+        g = training_tools.metric_glossary(metric_key="hrv.rmssd")
+        self.assertEqual(g["status"], "ok")
+        self.assertEqual(g["entry"]["canonical_key"], "health.hrv_rmssd")
+        self.assertEqual(g["entry"]["requested_metric_key"], "hrv.rmssd")
+
+    def test_metric_glossary_list_includes_semantic_links(self):
+        g = training_tools.metric_glossary()
+        self.assertEqual(g["status"], "ok")
+        self.assertIn("semantic_links", g)
+        self.assertIn("metric_aliases", g)
 
     def test_metric_catalog_and_timeseries_query_expose_whitelisted_metrics(self):
         with patch.object(training_tools, "training_context", self._context):
@@ -181,6 +361,8 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(by_key["activity.end_potential_stamina"]["availability"], "supported")
         self.assertEqual(by_key["activity.min_available_stamina"]["availability"], "supported")
         self.assertEqual(by_key["activity.activity_body_battery_delta"]["availability"], "supported")
+        self.assertEqual(by_key["activity.body_battery_start"]["availability"], "supported")
+        self.assertEqual(by_key["activity.training_readiness_score"]["availability"], "supported")
         self.assertEqual(by_key["activity.elapsed_duration"]["availability"], "supported")
         self.assertEqual(by_key["activity.max_elevation"]["availability"], "supported")
         self.assertEqual(by_key["activity.min_elevation"]["availability"], "supported")
@@ -209,7 +391,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(by_key["activity.humidity"]["availability"], "supported")
         self.assertEqual(by_key["activity.weather_condition"]["availability"], "supported")
         self.assertEqual(by_key["running.speed_5m_hist"]["availability"], "computed")
-        self.assertEqual(by_key["health.resting_heart_rate"]["availability"], "empty_source")
+        self.assertEqual(by_key["health.resting_heart_rate"]["availability"], "supported")
         self.assertIn("availability_states", catalog)
 
     def test_eight_training_classes_and_recovery_hours(self):
@@ -235,6 +417,59 @@ class McpTrainingToolsTests(unittest.TestCase):
         g = training_tools.metric_glossary(metric_key="readiness.total_score")
         self.assertEqual(g["status"], "ok")
         self.assertIn("TrainingReadinessService", g["entry"]["definition"])
+
+    def test_athlete_profile_hrv_uses_shared_contract(self):
+        with patch.object(training_tools, "training_context", self._context):
+            profile = training_tools.athlete_profile()
+
+        hrv = profile["latest_hrv"]
+        self.assertEqual(hrv["source"], "local_db")
+        self.assertEqual(hrv["availability"], "supported")
+        self.assertEqual(hrv["rmssd"], 34.0)
+        self.assertIn("recovery_tools", profile)
+
+    def test_daily_recovery_context_matches_activity_recovery_sections(self):
+        with patch.object(training_tools, "training_context", self._context):
+            daily = training_tools.daily_recovery_context("2026-05-28")
+            deep_dive = training_tools.activity_deep_dive("2301")
+
+        self.assertEqual(daily["status"], "ok")
+        self.assertEqual(daily["date"], "2026-05-28")
+        self.assertEqual(daily["hrv"]["rmssd"], deep_dive["recovery_context"]["hrv"]["rmssd"])
+        self.assertEqual(daily["stress"]["stress_level"], 32.0)
+        self.assertEqual(daily["stress"]["availability"], "supported")
+        self.assertIn("metric_links", daily)
+        self.assertNotIn("start", daily["body_battery"])
+
+    def test_readiness_snapshot_links_composites_and_recovery(self):
+        with patch.object(training_tools, "training_context", self._context):
+            snapshot = training_tools.readiness_snapshot("2026-05-28")
+
+        self.assertEqual(snapshot["status"], "ok")
+        self.assertIn("composites", snapshot)
+        self.assertIn("fitness_ctl", snapshot["composites"])
+        self.assertEqual(snapshot["recovery_context"]["date"], "2026-05-28")
+        self.assertIn("readiness.total_score", snapshot["metric_links"].values())
+
+    def test_metric_catalog_exposes_semantic_links_and_recovery_tools(self):
+        with patch.object(training_tools, "training_context", self._context):
+            catalog = training_tools.metric_catalog()
+
+        self.assertIn("semantic_links", catalog)
+        self.assertIn("metric_aliases", catalog)
+        self.assertIn("recovery_tools", catalog)
+        self.assertGreater(catalog["stored_metric_count"], 0)
+        self.assertGreater(catalog["derived_metric_count"], 0)
+        topics = {link["topic"] for link in catalog["semantic_links"]}
+        self.assertIn("Readiness", topics)
+        by_key = {metric["key"]: metric for metric in catalog["metrics"]}
+        self.assertEqual(by_key["health.hrv_rmssd"]["aliases"], ["hrv.rmssd"])
+        self.assertEqual(by_key["hrv.rmssd"]["canonical_key"], "health.hrv_rmssd")
+
+    def test_metric_glossary_search_finds_stored_catalog_key(self):
+        result = training_tools.metric_glossary(search="body_battery_delta")
+        keys = {entry["metric_key"] for entry in result["entries"]}
+        self.assertIn("activity.body_battery_delta", keys)
 
 
 if __name__ == "__main__":

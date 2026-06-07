@@ -344,7 +344,7 @@ class FitSyncService:
             metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
 
             for i, activity_id in enumerate(activity_ids):
-                logger.info(f"Prosesserer aktivitet {activity_id} ({i + 1}/{total_count})")
+                logger.debug("Prosesserer aktivitet %s (%s/%s)", activity_id, i + 1, total_count)
                 ok, metrics_result = await self.download_and_store_fit_file(activity_id)
                 if ok:
                     success_count += 1
@@ -354,8 +354,10 @@ class FitSyncService:
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
             logger.info(message)
             logger.info(
-                f"📊 Metrics beregnet: Negative split={metrics_calculated['negative_split']}, "
-                f"Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}"
+                "FIT-metrics beregnet: negative_split=%s, decoupling=%s, hrv=%s",
+                metrics_calculated["negative_split"],
+                metrics_calculated["decoupling"],
+                metrics_calculated["hrv_available"],
             )
             return {
                 "status": "Fullført",
@@ -406,9 +408,12 @@ class FitSyncService:
             total_count = len(missing_fit_activities)
             metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
             for i, activity in enumerate(missing_fit_activities):
-                logger.info(
-                    f"Prosesserer aktivitet {activity.activity_id} ({i + 1}/{total_count}) - "
-                    f"{activity.start_time.strftime('%Y-%m-%d')} - {activity.activity_name}"
+                logger.debug(
+                    "Prosesserer aktivitet %s (%s/%s) %s",
+                    activity.activity_id,
+                    i + 1,
+                    total_count,
+                    activity.start_time.strftime("%Y-%m-%d"),
                 )
                 ok, metrics_result = await self.download_and_store_fit_file(activity.activity_id)
                 if ok:
@@ -422,8 +427,10 @@ class FitSyncService:
             )
             logger.info(message)
             logger.info(
-                f"📊 Metrics beregnet: Negative split={metrics_calculated['negative_split']}, "
-                f"Decoupling={metrics_calculated['decoupling']}, HRV={metrics_calculated['hrv_available']}"
+                "FIT-metrics beregnet: negative_split=%s, decoupling=%s, hrv=%s",
+                metrics_calculated["negative_split"],
+                metrics_calculated["decoupling"],
+                metrics_calculated["hrv_available"],
             )
             return {
                 "status": "Fullført",

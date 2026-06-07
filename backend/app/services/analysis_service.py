@@ -13,6 +13,53 @@ from .body_battery_service import BodyBatteryService
 
 logger = logging.getLogger(__name__)
 
+_MIN_DERIVED_SPEED_SAMPLES = 20
+
+
+def enrich_fit_speed_from_distance(details_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Fyll manglende FIT-speed fra distance/timestamp når speed-kolonnen er tom.
+    Vanlig på tredemølle der distance finnes men enhanced_speed mangler i parquet.
+    """
+    if details_df is None or details_df.empty:
+        return details_df
+
+    df = details_df.copy()
+    if "speed" not in df.columns:
+        df["speed"] = np.nan
+
+    speed = pd.to_numeric(df["speed"], errors="coerce")
+    if int((speed > 0).sum()) >= _MIN_DERIVED_SPEED_SAMPLES:
+        return df
+
+    if "distance" not in df.columns or "timestamp" not in df.columns:
+        return df
+
+    work = df.sort_values("timestamp").copy()
+    dist = pd.to_numeric(work["distance"], errors="coerce")
+    ts = pd.to_datetime(work["timestamp"], errors="coerce")
+    if int(dist.notna().sum()) < _MIN_DERIVED_SPEED_SAMPLES:
+        return df
+
+    dt = ts.diff().dt.total_seconds()
+    derived = dist.diff() / dt
+    valid = (
+        derived.notna()
+        & (dt > 0)
+        & (dt <= 30)
+        & (derived > 0)
+        & (derived < 12)
+    )
+    current_speed = pd.to_numeric(work["speed"], errors="coerce")
+    missing = current_speed.isna() | (current_speed <= 0)
+    fill = missing & valid
+    if not fill.any():
+        return df
+
+    work.loc[fill, "speed"] = derived[fill]
+    return work.sort_index()
+
+
 class AnalysisService:
     def __init__(self, storage: DataStorage):
         self.storage = storage
@@ -88,7 +135,7 @@ class AnalysisService:
         # 1) Primærkilde: parquet-lager
         details_df = self.storage.get_activity_details(activity_id)
         if details_df is not None and not details_df.empty:
-            return details_df
+            return enrich_fit_speed_from_distance(details_df)
 
         # 2) Fallback: detailed_metrics JSON lagret på aktivitet
         details = activity.detailed_metrics if activity else None
@@ -131,7 +178,7 @@ class AnalysisService:
         if not parsed_records:
             return None
 
-        return pd.DataFrame(parsed_records)
+        return enrich_fit_speed_from_distance(pd.DataFrame(parsed_records))
 
     def calculate_negative_split(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
         """
@@ -168,8 +215,10 @@ class AnalysisService:
                 raise HTTPException(status_code=404, detail="Missing required data columns for negative split calculation")
             
             # Filtrer ut rader med gyldig speed og timestamp data
-            valid_data = details_df.dropna(subset=['speed', 'timestamp'])
-            valid_data = valid_data[(valid_data['speed'] > 0)]
+            valid_data = details_df.copy()
+            valid_data["speed"] = self._normalize_speed_mps(valid_data["speed"])
+            valid_data = valid_data.dropna(subset=["speed", "timestamp"])
+            valid_data = valid_data[valid_data["speed"] > 0]
             
             if len(valid_data) < 20:
                 logger.warning(f"Ikke nok datapunkter for negative split beregning: {len(valid_data)}")
@@ -722,10 +771,22 @@ class AnalysisService:
             
             # Hvis allerede beregnet, returner cached verdi
             if activity.body_battery_start is not None:
+                if activity.body_battery_start < 0:
+                    return {
+                        "activity_id": activity_id,
+                        "body_battery_start": None,
+                        "availability": "unavailable",
+                        "source": "activity_db",
+                        "calculation_method": "cached_unavailable",
+                        "reason": "Markert som utilgjengelig i activities (f.eks. -1 fra precompute).",
+                    }
                 return {
                     "activity_id": activity_id,
                     "body_battery_start": round(activity.body_battery_start, 1),
-                    "calculation_method": "cached"
+                    "availability": "estimated",
+                    "source": "activity_db",
+                    "calculation_method": "cached",
+                    "reason": "Lagret estimat; Garmin leverer ikke Body Battery ved aktivitetsstart direkte.",
                 }
             
             # Hent dato for aktiviteten
@@ -955,16 +1016,28 @@ class AnalysisService:
                 "anaerobic_effect": activity.total_anaerobic_training_effect if hasattr(activity, 'total_anaerobic_training_effect') else None
             }
             
-            logger.info(f"Beregnet Body Battery for aktivitet {activity_id}: {body_battery:.1f} "
-                       f"(base: {base_body_battery:.1f}, søvn: +{sleep_factor:.1f}, HRV: {hrv_factor:+.1f}, "
-                       f"belastning: {training_load_factor:+.1f}, stress: {stress_factor:+.1f}, "
-                       f"tid: {time_factor:+.1f}, var: {variation_factor:+.1f}) "
-                       f"FIT-data: {fit_data_used}")
+            logger.debug(
+                "Beregnet Body Battery for aktivitet %s: %.1f (base: %.1f, søvn: +%.1f, HRV: %+.1f, "
+                "belastning: %+.1f, stress: %+.1f, tid: %+.1f, var: %+.1f) FIT-data: %s",
+                activity_id,
+                body_battery,
+                base_body_battery,
+                sleep_factor,
+                hrv_factor,
+                training_load_factor,
+                stress_factor,
+                time_factor,
+                variation_factor,
+                fit_data_used,
+            )
             
             return {
                 "activity_id": activity_id,
                 "body_battery_start": round(body_battery, 1),
+                "availability": "estimated",
+                "source": "analysis_service_heuristic",
                 "calculation_method": "fit_data_enhanced",
+                "reason": "Heuristisk estimat fra søvn, HRV, belastning og tid på dagen.",
                 "factors": {
                     "base": round(base_body_battery, 1),
                     "sleep": round(sleep_factor, 1),

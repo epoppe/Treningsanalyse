@@ -13,6 +13,11 @@ from ..activity_data_validation import validate_and_repair_activity
 logger = logging.getLogger(__name__)
 
 
+def _is_derived_running_activity(activity: Activity) -> bool:
+    """Løp og tredemølle kan få negative split, decoupling og løpsøkonomi."""
+    return is_running_activity(activity, include_treadmill=True)
+
+
 def tss_needs_refresh(activity: Activity) -> bool:
     """True når TSS bør beregnes på nytt (mangler eller avviker fra EPOC)."""
     if activity.training_stress_score is None:
@@ -126,6 +131,7 @@ class SyncMetricsService:
             "data_validated": False,
             "validation_fixes": [],
             "errors": [],
+            "skip_reasons": [],
         }
         try:
             activity_id_int = int(activity_id)
@@ -148,7 +154,7 @@ class SyncMetricsService:
                 if self._calculate_tss(activity, activity_id):
                     results["tss_calculated"] = True
 
-            if is_running_activity(activity):
+            if _is_derived_running_activity(activity):
                 if activity.average_power is None:
                     try:
                         from ..power_service import PowerService
@@ -157,14 +163,16 @@ class SyncMetricsService:
                         power_data = power_service.calculate_activity_power(activity_id_int, self.sync_service.db)
                         if power_data:
                             results["power_calculated"] = True
-                            logger.info(
-                                f"✅ Beregnet power for aktivitet {activity_id}: {power_data.get('average_power_watts')}W"
+                            logger.debug(
+                                "Beregnet power for aktivitet %s: %sW",
+                                activity_id,
+                                power_data.get("average_power_watts"),
                             )
                     except Exception as exc:
                         logger.warning(f"Feil ved beregning av power for aktivitet {activity_id}: {exc}")
                         results["errors"].append(f"Power feil: {str(exc)}")
 
-            if is_running_activity(activity):
+            if _is_derived_running_activity(activity):
                 if activity.running_economy is None:
                     try:
                         if (
@@ -177,27 +185,35 @@ class SyncMetricsService:
                             running_economy = (speed_kmh / activity.average_heart_rate) * 100
                             activity.running_economy = round(running_economy, 2)
                             results["running_economy_calculated"] = True
-                            logger.info(f"✅ Beregnet løpsøkonomi for aktivitet {activity_id}: {running_economy}")
+                            logger.debug(
+                                "Beregnet løpsøkonomi for aktivitet %s: %s",
+                                activity_id,
+                                running_economy,
+                            )
                     except Exception as exc:
                         logger.warning(f"Feil ved beregning av løpsøkonomi for aktivitet {activity_id}: {exc}")
                         results["errors"].append(f"Running economy feil: {str(exc)}")
 
-            if is_running_activity(activity) and activity.negative_split_percent is None:
+            if _is_derived_running_activity(activity) and activity.negative_split_percent is None:
                 try:
                     negative_split_result = self.sync_service.analysis_service.calculate_negative_split(
                         activity_id_int, self.sync_service.db
                     )
                     if negative_split_result and "negative_split_percent" in negative_split_result:
                         results["negative_split_calculated"] = True
-                        logger.info(
-                            "✅ Beregnet negative split for aktivitet %s: %s%%",
+                        logger.debug(
+                            "Beregnet negative split for aktivitet %s: %s%%",
                             activity_id,
                             negative_split_result.get("negative_split_percent"),
                         )
                 except Exception as exc:
+                    from fastapi import HTTPException
+
+                    if isinstance(exc, HTTPException):
+                        results["skip_reasons"].append(f"negative_split:{exc.detail}")
                     logger.debug(f"Kunne ikke beregne negative split for aktivitet {activity_id}: {exc}")
 
-            if is_running_activity(activity) and (
+            if _is_derived_running_activity(activity) and (
                 activity.decoupling_percent is None
                 or activity.avg_efficiency_factor is None
                 or activity.decoupling_suitability_flag is None
@@ -209,16 +225,20 @@ class SyncMetricsService:
                     if efficiency_result and "decoupling_percent" in efficiency_result:
                         results["decoupling_calculated"] = True
                         results["efficiency_calculated"] = True
-                        logger.info(
-                            "✅ Beregnet EF/decoupling for aktivitet %s: EF=%s decoupling=%s%%",
+                        logger.debug(
+                            "Beregnet EF/decoupling for aktivitet %s: EF=%s decoupling=%s%%",
                             activity_id,
                             efficiency_result.get("avg_efficiency_factor"),
                             efficiency_result.get("decoupling_percent"),
                         )
                 except Exception as exc:
+                    from fastapi import HTTPException
+
+                    if isinstance(exc, HTTPException):
+                        results["skip_reasons"].append(f"decoupling:{exc.detail}")
                     logger.debug(f"Kunne ikke beregne EF/decoupling for aktivitet {activity_id}: {exc}")
 
-            if is_running_activity(activity):
+            if _is_derived_running_activity(activity):
                 try:
                     from ..performance_metrics_service import PerformanceMetricsService
 
@@ -229,8 +249,8 @@ class SyncMetricsService:
                     fatigue = performance_service.calculate_fatigue_resistance_for_activity(activity)
                     if fatigue:
                         results["fatigue_resistance_calculated"] = True
-                        logger.info(
-                            "✅ Beregnet fatigue resistance for aktivitet %s: %s",
+                        logger.debug(
+                            "Beregnet fatigue resistance for aktivitet %s: %s",
                             activity_id,
                             fatigue.get("fatigue_resistance_score"),
                         )
@@ -250,7 +270,6 @@ class SyncMetricsService:
                     )
                     if hrv_data and hrv_data.get("last_night_avg"):
                         results["hrv_calculated"] = True
-                        logger.debug(f"HRV-data tilgjengelig for aktivitet {activity_id}: {hrv_data.get('last_night_avg')}ms")
             except Exception as exc:
                 logger.debug(f"HRV-sjekk for aktivitet {activity_id}: {exc}")
 

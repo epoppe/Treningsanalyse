@@ -170,6 +170,21 @@ METRIC_GLOSSARY: Dict[str, Dict[str, Any]] = {
     "caveats": "Ikke forveksle med readiness_score (coaching-heuristikk).",
     "source": "computed_garmin_model",
   },
+  "activity.body_battery_delta": {
+    "title": "Body Battery endring (aktivitet)",
+    "definition": "Endring i Body Battery gjennom aktiviteten (summaryDTO.differenceBodyBattery).",
+    "interpretation": "Negativ = tap; positiv = netto lading under økta (sjeldent ved hard trening).",
+    "coaching_use": "Koble belastning til recovery-kostnad samme dag.",
+    "caveats": "Samme kolonne som activity.activity_body_battery_delta.",
+    "source": "garmin_sync",
+  },
+  "health.hrv_rmssd": {
+    "title": "HRV RMSSD (natt)",
+    "definition": "Root mean square of successive differences — nattlig HRV fra Garmin/sync.",
+    "interpretation": "Sammenlign mot egen baseline; enkeltdag er støy.",
+    "coaching_use": "Recovery-trend; bruk recovery_context.hrv eller cardio.hrv_7d for kontekst.",
+    "source": "garmin_sync",
+  },
   "readiness.sleep_component": {
     "title": "Readiness — søvn",
     "definition": "Søvnkomponent (0–100) i Garmin readiness-modellen.",
@@ -361,13 +376,20 @@ METRIC_GLOSSARY: Dict[str, Dict[str, Any]] = {
     "coaching_use": "Kun på steady-state økter >45 min; se suitability-flagg.",
     "source": "computed_fit",
   },
-  "activity.training_stress_score": {
-    "title": "Training Stress Score (TSS)",
-    "definition": "Belastningsscore per økt (≈ EPOC fra Garmin der tilgjengelig).",
-    "interpretation": "100 ≈ 1 time ved terskel; summeres til CTL/ATL.",
-    "coaching_use": "Volum og intensitet per uke.",
-    "source": "garmin_or_estimated",
-  },
+    "activity.training_stress_score": {
+        "title": "Training Stress Score (TSS)",
+        "definition": "Belastningsscore per økt (≈ EPOC fra Garmin der tilgjengelig).",
+        "interpretation": "100 ≈ 1 time ved terskel; summeres til CTL/ATL.",
+        "coaching_use": "Volum og intensitet per uke.",
+        "source": "garmin_or_estimated",
+    },
+    "health.hrv_rmssd": {
+        "title": "HRV RMSSD (natt)",
+        "definition": "Rå RMSSD fra siste natt-måling (ms) — kanonisk lagret HRV-nøkkel.",
+        "interpretation": "Sammenlign med recovery.hrv_baseline og recovery.hrv_delta_pct for trend.",
+        "coaching_use": "Daglig recovery; bruk cardio.hrv_7d for kort glidende snitt.",
+        "source": "garmin_sync",
+    },
 }
 
 # Fyll inn training.class_N_pct og duration curve-varianter programmatisk
@@ -511,6 +533,12 @@ STORED_PREFIX_GLOSSARY: Dict[str, Dict[str, str]] = {
         "coaching_use": "Recovery og livsstilsfaktorer.",
         "source": "garmin_sync",
     },
+    "hrv.": {
+        "definition": "Alias-prefix for HRV-rader i database — bruk helst health.hrv_rmssd som kanonisk nøkkel.",
+        "interpretation": "Samme kilde som health.*; se metric_aliases i metric_catalog.",
+        "coaching_use": "Recovery-trend; foretrekk health.hrv_rmssd i timeseries.",
+        "source": "garmin_sync",
+    },
     "performance.": {
         "definition": "Garmin performance status (VO2, load balance, scores).",
         "interpretation": "Offisiell Garmin-modell der merket.",
@@ -588,9 +616,13 @@ def build_metric_glossary(
         return {"status": "ok", "entry": entry}
 
     entries: List[Dict[str, Any]] = []
-    all_keys = sorted(set(DERIVED_METRIC_CATALOG) | set(METRIC_GLOSSARY))
+    key_sources = set(DERIVED_METRIC_CATALOG) | set(METRIC_GLOSSARY)
+    if search:
+        key_sources |= set(METRIC_CATALOG)
+    all_keys = sorted(key_sources)
     for key in all_keys:
-        cat = DERIVED_METRIC_CATALOG.get(key, {}).get("category", "")
+        definition = DERIVED_METRIC_CATALOG.get(key) or METRIC_CATALOG.get(key) or {}
+        cat = definition.get("category", "")
         if category and cat != category:
             continue
         entry = get_glossary_entry(key)
@@ -598,12 +630,11 @@ def build_metric_glossary(
             blob = " ".join(str(v) for v in entry.values()).lower()
             if search.lower() not in blob and search.lower() not in key.lower():
                 continue
-        definition = DERIVED_METRIC_CATALOG.get(key, {})
         entries.append(
             {
                 **entry,
                 "unit": definition.get("unit"),
-                "scope": definition.get("scope"),
+                "scope": definition.get("scope", "stored" if key in METRIC_CATALOG else definition.get("scope")),
                 "heuristic": definition.get("heuristic", False),
                 "category": definition.get("category"),
             }

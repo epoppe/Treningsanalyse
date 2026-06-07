@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     )
     # Frost API (historisk vær) — https://frost.met.no
     FROST_CLIENT_ID: str = os.getenv("FROST_CLIENT_ID", "")
+    FROST_CLIENT_SECRET: str = os.getenv("FROST_CLIENT_SECRET", "")
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

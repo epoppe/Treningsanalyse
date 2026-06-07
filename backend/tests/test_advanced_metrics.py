@@ -10,7 +10,7 @@ from app.database.models import Base
 from app.database.models.activity import Activity, ActivityType
 from app.routers.activities import get_activity_efficiency_metrics
 from app.routers.analytics import list_decoupling_trends, list_efficiency_trends
-from app.services.analysis_service import AnalysisService
+from app.services.analysis_service import AnalysisService, enrich_fit_speed_from_distance
 from app.services.cache_calculation_service import CacheCalculationService
 from app.storage import DataStorage
 
@@ -224,6 +224,46 @@ class AdvancedMetricsTests(unittest.TestCase):
         self.assertIn("avgEfficiencyFactor", efficiency["activities"][0])
         self.assertIn("decouplingPercent", decoupling["activities"][0])
         self.assertIn("decouplingSuitabilityFlag", decoupling["activities"][0])
+
+    def test_distance_derived_speed_enables_negative_split(self):
+        treadmill_type = ActivityType(type_key="treadmill_running", type_name="Treadmill")
+        self.db.add(treadmill_type)
+        self.db.commit()
+        start = datetime(2024, 4, 26, 14, 17, 36, tzinfo=timezone.utc)
+        self.db.add(
+            Activity(
+                activity_id="9002",
+                activity_name="Treadmill distance only",
+                start_time=start,
+                distance=8000,
+                duration=2400,
+                average_speed=2.2,
+                average_heart_rate=152,
+                activity_type_id=treadmill_type.id,
+            )
+        )
+        self.db.commit()
+
+        records = []
+        for second in range(0, 2401, 4):
+            records.append(
+                {
+                    "activity_id": 9002,
+                    "timestamp": start + timedelta(seconds=second),
+                    "distance": 2.2 * second,
+                    "heart_rate": 150 + (second // 600),
+                    "cadence": 170,
+                }
+            )
+        self.storage.save_activity_details(records)
+
+        enriched = enrich_fit_speed_from_distance(self.storage.get_activity_details(9002))
+        self.assertGreaterEqual((enriched["speed"] > 0).sum(), 20)
+
+        service = AnalysisService(self.storage)
+        result = service.calculate_negative_split(9002, self.db)
+        self.assertIsNotNone(result)
+        self.assertIn("negative_split_percent", result)
 
 
 if __name__ == "__main__":

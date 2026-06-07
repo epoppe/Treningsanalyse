@@ -5,6 +5,13 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
 from ..services.garmin_client import GarminClient
+from ..services.hrv_fetch import (
+    get_local_hrv_payload,
+    hrv_record_to_api_dict,
+    local_hrv_fetch_result,
+    resolve_hrv_for_date,
+    upsert_hrv_to_db,
+)
 from ..dependencies import get_garmin_client, get_db, get_data_storage
 from ..storage import DataStorage
 from ..database.models import HRV, Sleep, BodyBattery, Stress
@@ -159,11 +166,21 @@ async def get_stress_range_endpoint(
 async def get_hrv_range_endpoint(
     start_date: date = Query(..., description="Startdato (YYYY-MM-DD)"),
     end_date: date = Query(..., description="Sluttdato (YYYY-MM-DD)"),
+    fill_gaps: bool = Query(
+        False,
+        description="Hent manglende dager fra Garmin (treg). Bruk helsesynk for å fylle database.",
+    ),
     garmin_client: GarminClient = Depends(get_garmin_client),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
 ):
-    """Henter HRV-data for en datoperiode med intelligent database-caching. HRV-data er kun tilgjengelig fra 2023 og fremover."""
-    logger.info(f"📊 HRV: Forespørsel om HRV-data fra {start_date} til {end_date}")
+    """Henter HRV-data for en datoperiode. Returnerer raskt fra database. Bruk fill_gaps=true for live backfill."""
+    logger.info(
+        "HRV range-forespørsel %s til %s (fill_gaps=%s)",
+        start_date,
+        end_date,
+        fill_gaps,
+    )
     if start_date.year < 2023:
         start_date = date(2023, 1, 1)
         logger.info("HRV-startdato justert til 2023-01-01 (HRV-data kun tilgjengelig fra 2023)")
@@ -176,7 +193,7 @@ async def get_hrv_range_endpoint(
         ).all()
         
         existing_dates = {h.measurement_date for h in existing_hrv}
-        logger.info(f"💾 HRV: Fant {len(existing_dates)} dager i database")
+        logger.info("HRV: fant %s dager i database", len(existing_dates))
         
         # 2. Finn manglende datoer (ekskluder datoer vi allerede vet ikke har HRV)
         hrv_missing_recorded = {r.missing_date for r in db.query(HealthDataMissing.missing_date).filter(
@@ -191,47 +208,59 @@ async def get_hrv_range_endpoint(
                 missing_dates.append(current)
             current += timedelta(days=1)
         
-        logger.info(f"📥 HRV: {len(missing_dates)} dager mangler, henter fra Garmin...")
-        
+        if fill_gaps:
+            logger.info("HRV: %s manglende dager, henter fra Garmin", len(missing_dates))
+        else:
+            logger.info(
+                "HRV: fill_gaps=false, returnerer %s dager fra database",
+                len(existing_dates),
+            )
+
         # 3. Hent manglende data fra Garmin og lagre i database
-        if missing_dates:
+        if fill_gaps and missing_dates:
             for missing_date in missing_dates:
                 try:
-                    # Bruk alternative metode som henter baseline-verdier
-                    hrv_data = await garmin_client.get_hrv_data_alternative(datetime.combine(missing_date, datetime.min.time()))
-                    if hrv_data and hrv_data.get('hrv_summary'):
-                        hrv_summary = hrv_data.get('hrv_summary', {})
-                        last_night_avg = hrv_summary.get('last_night_avg')
-                        
-                        if last_night_avg:
-                            # Lagre i database med baseline-verdier
-                            new_hrv = HRV(
-                                measurement_date=missing_date,
-                                measurement_time=datetime.combine(missing_date, datetime.min.time()),
-                                rmssd=last_night_avg,
-                                measurement_type='during_sleep',
-                                baseline_balanced_lower=hrv_summary.get('baseline_balanced_lower'),
-                                baseline_balanced_upper=hrv_summary.get('baseline_balanced_upper'),
-                                baseline_low_upper=hrv_summary.get('baseline_low_upper'),
-                                status=hrv_summary.get('status'),
-                                created_at=datetime.now(timezone.utc),
-                                updated_at=datetime.now(timezone.utc)
-                            )
-                            db.add(new_hrv)
-                            logger.debug(f"✅ HRV: Lagret data for {missing_date} (baseline: {hrv_summary.get('baseline_balanced_lower')}-{hrv_summary.get('baseline_balanced_upper')})")
-                        else:
+                    resolved = await resolve_hrv_for_date(
+                        garmin_client,
+                        missing_date,
+                        db=db,
+                        storage=storage,
+                    )
+                    if not resolved.available or not resolved.data:
+                        local_payload, _local_source = get_local_hrv_payload(
+                            missing_date,
+                            db=db,
+                            storage=storage,
+                        )
+                        if local_payload:
+                            continue
+
+                        if resolved.live_status in {"not_found", "empty"}:
                             try:
-                                existing_m = db.query(HealthDataMissing).filter_by(data_type="hrv", missing_date=missing_date).first()
+                                existing_m = db.query(HealthDataMissing).filter_by(
+                                    data_type="hrv",
+                                    missing_date=missing_date,
+                                ).first()
                                 if not existing_m:
                                     db.add(HealthDataMissing(data_type="hrv", missing_date=missing_date))
                             except Exception:
                                 pass
+                        continue
+
+                    if resolved.source == "local_parquet":
+                        upsert_hrv_to_db(db, missing_date, resolved.data)
+                        continue
+
+                    if resolved.source != "garmin_live":
+                        continue
+
+                    upsert_hrv_to_db(db, missing_date, resolved.data)
                 except Exception as e:
-                    logger.debug(f"⚠️ HRV: Ingen data for {missing_date}: {e}")
+                    logger.debug("HRV backfill uten data for %s: %s", missing_date, e)
             
             # Commit alle nye HRV-records
             db.commit()
-            logger.info(f"💾 HRV: Lagret nye data i database")
+            logger.info("HRV backfill fullført")
         
         # 4. Hent all data fra database (nå komplett)
         all_hrv = db.query(HRV).filter(
@@ -241,18 +270,8 @@ async def get_hrv_range_endpoint(
         
         # 5. Returner formatert data med 7-dagers glidende gjennomsnitt
         result = []
-        for i, hrv in enumerate(all_hrv):
-            result.append({
-                "date": hrv.measurement_date.isoformat(),
-                "last_night_avg": hrv.rmssd,
-                "last_night_5_min_high": hrv.rmssd,  # Placeholder
-                "measurement_time": hrv.measurement_time.isoformat() if hrv.measurement_time else None,
-                "measurement_type": hrv.measurement_type,
-                "baseline_balanced_lower": hrv.baseline_balanced_lower if hrv.baseline_balanced_lower else None,
-                "baseline_balanced_upper": hrv.baseline_balanced_upper if hrv.baseline_balanced_upper else None,
-                "baseline_low_upper": hrv.baseline_low_upper if hrv.baseline_low_upper else None,
-                "status": hrv.status if hrv.status else "unknown"
-            })
+        for hrv in all_hrv:
+            result.append(hrv_record_to_api_dict(hrv))
         
         # 6. Beregn 7-dagers glidende gjennomsnitt
         if len(result) >= 7:
@@ -274,11 +293,11 @@ async def get_hrv_range_endpoint(
             for data in result:
                 data['rolling_avg_7d'] = None
         
-        logger.info(f"✅ HRV: Returnerer {len(result)} dager med data")
+        logger.info("HRV: returnerer %s dager", len(result))
         return result
         
     except Exception as e:
-        logger.error(f"❌ HRV: Feil ved henting: {e}", exc_info=True)
+        logger.error("HRV range feilet: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Intern serverfeil ved henting av HRV-data.")
 
 @router.get("/body-battery/range", response_model=List[Dict[str, Any]])
@@ -427,16 +446,32 @@ async def get_stress_data_endpoint(
 @router.get("/hrv/{request_date}", response_model=Optional[Dict[str, Any]])
 async def get_hrv_data_endpoint(
     request_date: date,
-    garmin_client: GarminClient = Depends(get_garmin_client)
+    garmin_client: GarminClient = Depends(get_garmin_client),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
 ):
-    logger.info(f"Mottok forespørsel om HRV-data for {request_date}")
+    logger.info("HRV enkelt-dag forespørsel for %s", request_date)
     if request_date.year < 2023:
         raise HTTPException(status_code=400, detail=f"HRV-data er ikke tilgjengelig for {request_date}. HRV-data er kun tilgjengelig fra 2023 og fremover.")
     try:
-        hrv_data = await garmin_client.get_hrv_data(request_date)
-        if hrv_data is None:
-            raise HTTPException(status_code=404, detail="HRV-data ikke funnet.")
-        return hrv_data
+        local = local_hrv_fetch_result(request_date, db=db, storage=storage)
+        if local:
+            return local.to_reporting_dict(target_date=request_date)
+
+        resolved = await resolve_hrv_for_date(
+            garmin_client,
+            request_date,
+            db=db,
+            storage=storage,
+        )
+        if not resolved.available:
+            raise HTTPException(
+                status_code=404,
+                detail=resolved.message or "HRV-data ikke funnet.",
+            )
+        return resolved.to_reporting_dict(target_date=request_date)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Feil ved henting av hrvdata: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Intern serverfeil ved henting av HRV-data.")

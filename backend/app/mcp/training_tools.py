@@ -5,10 +5,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterator, List, Optional
 
 import pandas as pd
-from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import settings
+from ..services.hrv_fetch import hrv_mcp_recovery_payload
 from ..database.models import BodyBattery, DailySummary, HRV, MonthlySummary, RestingHeartRate, Sleep, Stress, WeeklySummary, YearlySummary
 from ..database.models.activity import (
     Activity,
@@ -30,11 +31,9 @@ from ..utils.activity_filters import is_running_activity
 
 
 NOT_INGESTED_METRICS: Dict[str, str] = {
-    "activity.body_battery_start": "Body Battery ved aktivitetsstart skrives ikke inn i activities ennå.",
     "activity.intensity_factor": "Intensity Factor beregnes ikke og lagres ikke i activities ennå.",
     "activity.max_running_cadence": "Maks kadens skrives ikke inn i activities ennå.",
     "activity.recovery_time": "Recovery time per aktivitet skrives ikke inn i activities ennå.",
-    "activity.training_readiness_score": "Training readiness per aktivitet skrives ikke inn i activities ennå.",
     "health.body_battery_net_charge": "Kun max/min Body Battery lagres i dagens sync.",
     "body_battery.body_battery_charged": "Kun max/min Body Battery lagres i dagens sync.",
     "body_battery.body_battery_charged_start": "Kun max/min Body Battery lagres i dagens sync.",
@@ -62,6 +61,82 @@ DERIVED_EMPTY_SOURCE_DEPENDENCIES: Dict[str, tuple[Any, str]] = {
     "cardio.rhr_7d": (RestingHeartRate, "Resting heart rate-tabellen er tom."),
     "cardio.rhr_30d": (RestingHeartRate, "Resting heart rate-tabellen er tom."),
 }
+
+# Alias → kanonisk nøkkel (auto-oppdagede duplikater peker til health.* / eksplisitte nøkler)
+METRIC_KEY_ALIASES: Dict[str, str] = {
+    "hrv.rmssd": "health.hrv_rmssd",
+    "sleep.sleep_score": "health.sleep_score",
+    "sleep.overall_score": "health.sleep_overall_score",
+    "sleep.total_sleep_time": "health.sleep_duration_s",
+    "resting_heart_rate.resting_heart_rate": "health.resting_heart_rate",
+    "body_battery.max_body_battery": "health.body_battery_max",
+    "body_battery.min_body_battery": "health.body_battery_min",
+    "body_battery.net_charge": "health.body_battery_net_charge",
+    "stress.stress_level": "health.stress_level",
+    "stress.high_stress_time": "health.high_stress_time_s",
+    "activity.activity_body_battery_delta": "activity.body_battery_delta",
+}
+
+
+def _resolve_metric_key(metric_key: str) -> tuple[str, Optional[str]]:
+    canonical = METRIC_KEY_ALIASES.get(metric_key, metric_key)
+    alias_of = metric_key if canonical != metric_key else None
+    return canonical, alias_of
+
+
+def _metric_alias_index() -> Dict[str, List[str]]:
+    index: Dict[str, List[str]] = {}
+    for alias, canonical in METRIC_KEY_ALIASES.items():
+        index.setdefault(canonical, []).append(alias)
+    return index
+
+METRIC_SEMANTIC_LINKS: List[Dict[str, Any]] = [
+    {
+        "topic": "Readiness",
+        "primary": "readiness.total_score",
+        "related": [
+            "readiness.sleep_component",
+            "readiness.hrv_component",
+            "readiness.form_component",
+            "activity.training_readiness_score",
+            "readiness_score",
+        ],
+        "note": (
+            "readiness.total_score er Garmin-modellen (TrainingReadinessService). "
+            "readiness_score er intern coaching-heuristikk — ikke bytt om."
+        ),
+    },
+    {
+        "topic": "HRV",
+        "primary": "health.hrv_rmssd",
+        "related": [
+            "cardio.hrv_7d",
+            "cardio.hrv_30d",
+            "recovery.hrv_baseline",
+            "recovery.hrv_delta_pct",
+        ],
+        "note": "health.hrv_rmssd er rå nattverdi; cardio/recovery-* er rullerende eller delta.",
+    },
+    {
+        "topic": "Body Battery",
+        "primary": "health.body_battery_max",
+        "related": [
+            "activity.body_battery_start",
+            "activity.activity_body_battery_delta",
+            "activity.body_battery_delta",
+        ],
+        "note": (
+            "activity.body_battery_delta og activity.activity_body_battery_delta peker på samme kolonne; "
+            "start er estimert per aktivitet."
+        ),
+    },
+    {
+        "topic": "Belastning",
+        "primary": "fitness.tsb",
+        "related": ["fitness.ctl", "fitness.atl", "load.acwr", "fitness_score", "fatigue_score"],
+        "note": "CTL/ATL/TSB fra lokal TSS; load.acwr fra Garmin der tilgjengelig.",
+    },
+]
 
 METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.distance_m": {"model": Activity, "date_field": "start_time", "column": "distance", "category": "activity", "unit": "m"},
@@ -95,6 +170,7 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.vertical_ratio": {"model": Activity, "date_field": "start_time", "column": "vertical_ratio", "category": "running_dynamics", "unit": "%"},
     "activity.training_readiness_score": {"model": Activity, "date_field": "start_time", "column": "training_readiness_score", "category": "readiness", "unit": "score"},
     "activity.total_ascent": {"model": Activity, "date_field": "start_time", "column": "total_ascent", "category": "terrain", "unit": "m"},
+    "activity.body_battery_start": {"model": Activity, "date_field": "start_time", "column": "body_battery_start", "category": "recovery", "unit": "score"},
     "activity.body_battery_delta": {"model": Activity, "date_field": "start_time", "column": "activity_body_battery_delta", "category": "recovery", "unit": "score"},
     "activity.begin_potential_stamina": {"model": Activity, "date_field": "start_time", "column": "begin_potential_stamina", "category": "stamina", "unit": "score"},
     "activity.end_potential_stamina": {"model": Activity, "date_field": "start_time", "column": "end_potential_stamina", "category": "stamina", "unit": "score"},
@@ -317,7 +393,12 @@ def athlete_profile() -> Dict[str, Any]:
             .order_by(GarminPerformanceMetric.date.desc())
             .first()
         )
-        latest_hrv = db.query(HRV).order_by(HRV.measurement_date.desc()).first()
+        latest_hrv_row = (
+            db.query(HRV)
+            .filter(HRV.rmssd.isnot(None))
+            .order_by(HRV.measurement_date.desc(), HRV.measurement_time.desc())
+            .first()
+        )
         route_groups = (
             db.query(ActivityRouteFingerprint.route_group_key)
             .filter(ActivityRouteFingerprint.route_group_key.isnot(None))
@@ -351,9 +432,13 @@ def athlete_profile() -> Dict[str, Any]:
             },
             "latest_garmin_performance": _garmin_performance_payload(latest_perf),
             "latest_hrv": {
-                "date": latest_hrv.measurement_date.isoformat() if latest_hrv else None,
-                "rmssd": latest_hrv.rmssd if latest_hrv else None,
-                "status": latest_hrv.status if latest_hrv else None,
+                **hrv_mcp_recovery_payload(latest_hrv_row),
+                "date": latest_hrv_row.measurement_date.isoformat() if latest_hrv_row else None,
+            },
+            "recovery_tools": {
+                "daily_context": "daily_recovery_context",
+                "readiness_snapshot": "readiness_snapshot",
+                "coaching_check": "training_readiness_check",
             },
             "stable_context": [
                 "Use metric units and min/km pace.",
@@ -389,12 +474,40 @@ def training_readiness_check(target_date: Optional[str] = None) -> Dict[str, Any
         else:
             recommendation = "normal_training"
 
+        derived = McpDerivedMetricsService(db, storage)
+        composites = derived.get_readiness_composites(end_date)
+        readiness_composites = {
+            "readiness.total_score": _latest_derived_metric_value(derived, "readiness.total_score", end_date),
+            "readiness_score": composites.get("readiness_score"),
+            "recovery_score": composites.get("recovery_score"),
+            "fitness_tsb": composites.get("fitness_tsb"),
+            "recovery_hrv_delta_pct": composites.get("recovery_hrv_delta_pct"),
+            "recovery.predicted_hours_to_baseline": _latest_derived_metric_value(
+                derived,
+                "recovery.predicted_hours_to_baseline",
+                end_date,
+            ),
+        }
+
         return {
             "date": end_date.isoformat(),
             "recommendation": recommendation,
             "banister": banister,
             "hrv_guidance": hrv,
             "flags": flags,
+            "recovery_context": _daily_recovery_context(end_date, db),
+            "readiness_composites": readiness_composites,
+            "metric_links": {
+                "garmin_readiness": "readiness.total_score",
+                "coaching_readiness": "readiness_score",
+                "hrv_raw": "health.hrv_rmssd",
+                "hrv_baseline": "recovery.hrv_baseline",
+                "hrv_delta": "recovery.hrv_delta_pct",
+            },
+            "related_tools": {
+                "daily_recovery_context": "Full daglig recovery-kontekst.",
+                "readiness_snapshot": "Komplette PPAP-kompositter + recovery.",
+            },
         }
 
 
@@ -446,6 +559,7 @@ def activity_deep_dive(activity_id: Optional[str] = None) -> Dict[str, Any]:
                 "quality_score": route.quality_score if route else None,
                 "route_distance_m": route.route_distance_m if route else None,
             },
+            "recovery_context": _activity_recovery_context(activity, db),
             "kilometer_splits": splits,
         }
 
@@ -515,8 +629,55 @@ def metric_glossary(
     search: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Return coaching glossary for metrics — definitions, interpretation and caveats."""
-    return build_metric_glossary(metric_key=metric_key, category=category, search=search)
+    if metric_key:
+        canonical, alias_of = _resolve_metric_key(metric_key)
+        result = build_metric_glossary(metric_key=canonical, category=category, search=search)
+        if alias_of and result.get("status") == "ok":
+            entry = result["entry"]
+            entry["requested_metric_key"] = alias_of
+            entry["canonical_key"] = canonical
+            entry["alias_note"] = f"{alias_of} er alias for {canonical}."
+        return result
+    result = build_metric_glossary(metric_key=metric_key, category=category, search=search)
+    if result.get("status") == "ok" and "entries" in result:
+        result["semantic_links"] = METRIC_SEMANTIC_LINKS
+        result["metric_aliases"] = METRIC_KEY_ALIASES
+    return result
 
+
+
+def daily_recovery_context(target_date: Optional[str] = None) -> Dict[str, Any]:
+    """Daglig recovery-bilde: HRV, søvn, puls, stress, body battery og readiness for én dato."""
+    day = _parse_date(target_date) if target_date else date.today()
+    with training_context() as (db, _storage):
+        return {
+            "status": "ok",
+            **_daily_recovery_context(day, db),
+        }
+
+
+def readiness_snapshot(target_date: Optional[str] = None) -> Dict[str, Any]:
+    """PPAP readiness-kompositter + recovery-kontekst og lenker til timeseries-nøkler."""
+    day = _parse_date(target_date) if target_date else date.today()
+    with training_context() as (db, storage):
+        derived = McpDerivedMetricsService(db, storage)
+        return {
+            "status": "ok",
+            "date": day.isoformat(),
+            "composites": derived.get_readiness_composites(day),
+            "recovery_context": _daily_recovery_context(day, db),
+            "metric_links": {
+                "garmin_total": "readiness.total_score",
+                "garmin_sleep_component": "readiness.sleep_component",
+                "garmin_hrv_component": "readiness.hrv_component",
+                "garmin_form_component": "readiness.form_component",
+                "coaching_readiness": "readiness_score",
+                "coaching_recovery": "recovery_score",
+                "activity_stored": "activity.training_readiness_score",
+                "hrv_raw": "health.hrv_rmssd",
+            },
+            "glossary_hint": "Bruk metric_glossary for readiness.total_score vs readiness_score.",
+        }
 
 
 def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, Any]:
@@ -534,9 +695,10 @@ def metric_catalog() -> Dict[str, Any]:
         table_counts = _model_table_counts(db)
 
     metrics = []
+    alias_index = _metric_alias_index()
     for key, definition in sorted(METRIC_CATALOG.items()):
         gloss = get_glossary_entry(key)
-        metrics.append({
+        entry = {
             "key": key,
             "category": definition["category"],
             "unit": definition["unit"],
@@ -544,10 +706,15 @@ def metric_catalog() -> Dict[str, Any]:
             "scope": "stored",
             "summary": gloss.get("definition"),
             **_stored_metric_availability(key, definition, table_counts),
-        })
+        }
+        if key in alias_index:
+            entry["aliases"] = sorted(alias_index[key])
+        if key in METRIC_KEY_ALIASES:
+            entry["canonical_key"] = METRIC_KEY_ALIASES[key]
+        metrics.append(entry)
     for key, definition in sorted(DERIVED_METRIC_CATALOG.items()):
         gloss = get_glossary_entry(key)
-        metrics.append({
+        entry = {
             "key": key,
             "category": definition["category"],
             "unit": definition["unit"],
@@ -556,16 +723,34 @@ def metric_catalog() -> Dict[str, Any]:
             "heuristic": definition.get("heuristic", False),
             "summary": gloss.get("definition"),
             **_derived_metric_availability(key, definition, table_counts),
-        })
+        }
+        if key in alias_index:
+            entry["aliases"] = sorted(alias_index[key])
+        if key in METRIC_KEY_ALIASES:
+            entry["canonical_key"] = METRIC_KEY_ALIASES[key]
+        metrics.append(entry)
     categories = sorted({m["category"] for m in metrics})
+    scopes = sorted({m["scope"] for m in metrics if m.get("scope")})
+    stored_count = sum(1 for m in metrics if m.get("scope") == "stored")
+    derived_count = len(metrics) - stored_count
     return {
         "schema_version": "ppap-3",
         "metrics": metrics,
         "count": len(metrics),
+        "stored_metric_count": stored_count,
+        "derived_metric_count": derived_count,
         "categories": categories,
+        "scopes": scopes,
         "availability_states": ["supported", "computed", "not_ingested", "empty_source", "unsupported"],
+        "semantic_links": METRIC_SEMANTIC_LINKS,
+        "metric_aliases": METRIC_KEY_ALIASES,
         "glossary_hint": "Bruk metric_glossary eller treningsanalyse://metric-glossary.",
-        "note": "Use query_metric_timeseries with one of these whitelisted metric keys.",
+        "timeseries_hint": "Use query_metric_timeseries with one of these whitelisted metric keys.",
+        "recovery_tools": {
+            "daily_recovery_context": "Daglig HRV/søvn/stress/body battery/readiness.",
+            "readiness_snapshot": "Kompositter + recovery_context + metric_links.",
+            "activity_deep_dive": "Recovery_context knyttet til én aktivitet.",
+        },
     }
 
 
@@ -575,28 +760,35 @@ def query_metric_timeseries(
     end_date: Optional[str] = None,
     limit: int = 365,
 ) -> Dict[str, Any]:
+    requested_key = metric_key
+    metric_key, alias_of = _resolve_metric_key(metric_key)
+
     if metric_key in DERIVED_METRIC_CATALOG:
         limit = max(1, min(int(limit), 5000))
         with training_context() as (db, storage):
             service = McpDerivedMetricsService(db, storage)
             try:
-                return service.query_timeseries(
+                result = service.query_timeseries(
                     metric_key,
                     start_date=_parse_date(start_date) if start_date else None,
                     end_date=_parse_date(end_date) if end_date else None,
                     limit=limit,
                 )
             except Exception as exc:
-                return {
+                result = {
                     "status": "error",
                     "metric_key": metric_key,
                     "message": str(exc),
                 }
+        if alias_of:
+            result["requested_metric_key"] = requested_key
+            result["canonical_key"] = metric_key
+        return result
 
     if metric_key not in METRIC_CATALOG:
         return {
             "status": "unknown_metric",
-            "metric_key": metric_key,
+            "metric_key": requested_key,
             "available_metric_count": len(METRIC_CATALOG) + len(DERIVED_METRIC_CATALOG),
         }
     definition = METRIC_CATALOG[metric_key]
@@ -626,7 +818,7 @@ def query_metric_timeseries(
         rows = query.order_by(date_field.desc()).limit(limit).all()
         points = [_metric_point(row, definition) for row in reversed(rows)]
         points = [point for point in points if point["value"] is not None]
-        return {
+        result = {
             "status": "ok",
             "metric_key": metric_key,
             "category": definition["category"],
@@ -634,6 +826,25 @@ def query_metric_timeseries(
             "points": points,
             "count": len(points),
         }
+        if alias_of:
+            result["requested_metric_key"] = requested_key
+            result["canonical_key"] = metric_key
+        return result
+
+
+def _latest_derived_metric_value(
+    service: McpDerivedMetricsService,
+    metric_key: str,
+    day: date,
+) -> Optional[float]:
+    series = service.query_timeseries(metric_key, end_date=day, limit=1)
+    if series.get("status") != "ok":
+        return None
+    points = series.get("points") or []
+    if not points:
+        return None
+    value = points[-1].get("value")
+    return float(value) if isinstance(value, (int, float)) else None
 
 
 def metric_quality_report(
@@ -655,6 +866,8 @@ def metric_quality_report(
     )
     if markdown:
         report["markdown"] = format_metric_quality_markdown(report)
+    report["semantic_links"] = METRIC_SEMANTIC_LINKS
+    report["metric_aliases"] = METRIC_KEY_ALIASES
     return report
 
 
@@ -727,13 +940,345 @@ def _activity_summary(activity: Activity) -> Dict[str, Any]:
         "average_speed_mps": activity.average_speed,
         "training_stress_score": activity.training_stress_score,
         "epoc": activity.epoc,
+        "recovery": _activity_recovery_fields(activity),
     }
+
+
+def _stored_body_battery_start(activity: Activity) -> Dict[str, Any]:
+    value = activity.body_battery_start
+    if value is not None and value < 0:
+        return {
+            "value": None,
+            "availability": "unavailable",
+            "source": "none",
+            "reason": "Markert som utilgjengelig i activities (f.eks. -1 fra precompute).",
+        }
+    if value is not None:
+        return {
+            "value": round(float(value), 1),
+            "availability": "estimated",
+            "source": "activity_db",
+            "reason": "Lagret estimat; Garmin leverer ikke Body Battery ved aktivitetsstart direkte.",
+        }
+    return {
+        "value": None,
+        "availability": "missing",
+        "source": "none",
+        "reason": "Ikke beregnet eller lagret for aktiviteten.",
+    }
+
+
+def _stored_body_battery_delta(activity: Activity) -> Dict[str, Any]:
+    value = activity.activity_body_battery_delta
+    if value is not None:
+        return {
+            "value": round(float(value), 1),
+            "availability": "supported",
+            "source": "garmin_activity_summary",
+            "reason": "Synket fra Garmin summaryDTO.differenceBodyBattery.",
+        }
+    return {
+        "value": None,
+        "availability": "missing",
+        "source": "none",
+        "reason": "Ikke synket fra Garmin activity summary.",
+    }
+
+
+def _stored_training_readiness(activity: Activity) -> Dict[str, Any]:
+    value = activity.training_readiness_score
+    if value is not None:
+        return {
+            "value": round(float(value), 1),
+            "availability": "stored",
+            "source": "activity_db",
+            "reason": "Lagret på aktiviteten etter TrainingReadinessService-beregning.",
+        }
+    return {
+        "value": None,
+        "availability": "missing",
+        "source": "none",
+        "reason": "Ikke lagret på aktiviteten.",
+    }
+
+
+def _activity_recovery_fields(activity: Activity) -> Dict[str, Any]:
+    return {
+        "body_battery_start": _stored_body_battery_start(activity),
+        "activity_body_battery_delta": _stored_body_battery_delta(activity),
+        "training_readiness_score": _stored_training_readiness(activity),
+    }
+
+
+def _resolve_activity_training_readiness(activity: Activity, db: Session, activity_day: date) -> Dict[str, Any]:
+    stored = _stored_training_readiness(activity)
+    if stored["value"] is not None:
+        from ..services.training_readiness_service import TrainingReadinessService
+
+        service = TrainingReadinessService(db)
+        stored["readiness_status"] = service._get_readiness_status(stored["value"])
+        return stored
+
+    try:
+        from ..services.training_readiness_service import TrainingReadinessService
+
+        service = TrainingReadinessService(db)
+        computed = service.calculate_training_readiness(activity_day)
+        if computed and computed.get("total_score") is not None and "error" not in computed:
+            return {
+                "value": round(float(computed["total_score"]), 1),
+                "readiness_status": computed.get("readiness_status"),
+                "components": computed.get("components"),
+                "availability": "computed",
+                "source": "training_readiness_service",
+                "reason": "Beregnet daglig readiness fra lokal søvn/HRV/form-data.",
+            }
+    except Exception:
+        pass
+
+    return {
+        "value": None,
+        "availability": "missing",
+        "source": "none",
+        "reason": "Ingen lagret eller beregnbar readiness for aktivitetsdagen.",
+    }
+
+
+def _derived_body_battery_end(start: Dict[str, Any], delta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if start.get("value") is None or delta.get("value") is None:
+        return None
+    end_value = round(float(start["value"]) + float(delta["value"]), 1)
+    return {
+        "value": end_value,
+        "availability": "computed",
+        "source": "derived_from_start_and_delta",
+        "reason": "Beregnet som body_battery_start + activity_body_battery_delta.",
+    }
+
+
+def _resolve_daily_training_readiness(db: Session, activity_day: date) -> Dict[str, Any]:
+    stored_activity = (
+        db.query(Activity)
+        .filter(
+            func.date(Activity.start_time) == activity_day,
+            Activity.training_readiness_score.isnot(None),
+        )
+        .order_by(Activity.start_time.desc())
+        .first()
+    )
+    if stored_activity is not None:
+        return _resolve_activity_training_readiness(stored_activity, db, activity_day)
+
+    try:
+        from ..services.training_readiness_service import TrainingReadinessService
+
+        service = TrainingReadinessService(db)
+        computed = service.calculate_training_readiness(activity_day)
+        if computed and computed.get("total_score") is not None and "error" not in computed:
+            return {
+                "value": round(float(computed["total_score"]), 1),
+                "readiness_status": computed.get("readiness_status"),
+                "components": computed.get("components"),
+                "availability": "computed",
+                "source": "training_readiness_service",
+                "reason": "Beregnet daglig readiness fra lokal søvn/HRV/form-data.",
+            }
+    except Exception:
+        pass
+
+    return {
+        "value": None,
+        "availability": "missing",
+        "source": "none",
+        "reason": "Ingen lagret eller beregnbar readiness for dagen.",
+    }
+
+
+def _hrv_baseline_for_day(db: Session, activity_day: date) -> tuple[Optional[float], Optional[float]]:
+    baseline_rows = (
+        db.query(HRV.rmssd)
+        .filter(
+            HRV.measurement_date < activity_day,
+            HRV.rmssd.isnot(None),
+        )
+        .order_by(HRV.measurement_date.desc())
+        .limit(7)
+        .all()
+    )
+    baseline_values = [float(row.rmssd) for row in baseline_rows if row.rmssd is not None]
+    baseline_avg = sum(baseline_values) / len(baseline_values) if baseline_values else None
+    hrv_delta_pct = None
+    hrv = (
+        db.query(HRV)
+        .filter(
+            HRV.measurement_date == activity_day,
+            HRV.rmssd.isnot(None),
+        )
+        .order_by(HRV.measurement_time.desc())
+        .first()
+    )
+    if hrv and hrv.rmssd is not None and baseline_avg not in (None, 0):
+        hrv_delta_pct = ((float(hrv.rmssd) / baseline_avg) - 1.0) * 100.0
+    return (
+        round(baseline_avg, 1) if baseline_avg is not None else None,
+        round(hrv_delta_pct, 1) if hrv_delta_pct is not None else None,
+    )
+
+
+def _sleep_recovery_payload(sleep: Optional[Sleep]) -> Dict[str, Any]:
+    return {
+        "total_sleep_time_s": sleep.total_sleep_time if sleep else None,
+        "sleep_score": sleep.sleep_score if sleep else None,
+        "overall_score": sleep.overall_score if sleep else None,
+        "sleep_efficiency": sleep.sleep_efficiency if sleep else None,
+        "stress_score": sleep.stress_score if sleep else None,
+        "recovery_score": sleep.recovery_score if sleep else None,
+        "source": "local_db" if sleep else "none",
+        "availability": "supported" if sleep else "missing",
+        "reason": (
+            "Søvn fra lokal database (synk fra Garmin)."
+            if sleep
+            else "Ingen søvn registrert for dagen."
+        ),
+    }
+
+
+def _resting_hr_recovery_payload(rhr: Optional[RestingHeartRate]) -> Dict[str, Any]:
+    return {
+        "value": rhr.resting_heart_rate if rhr else None,
+        "source": "local_db" if rhr else "none",
+        "availability": "supported" if rhr else "missing",
+        "reason": (
+            "Hvilepuls fra lokal database (synk fra Garmin)."
+            if rhr
+            else "Ingen hvilepuls registrert for dagen."
+        ),
+    }
+
+
+def _stress_recovery_payload(stress: Optional[Stress]) -> Dict[str, Any]:
+    return {
+        "stress_level": stress.stress_level if stress else None,
+        "high_stress_time_s": stress.high_stress_time if stress else None,
+        "rest_time_s": stress.rest_time if stress else None,
+        "source": "local_db" if stress else "none",
+        "availability": "supported" if stress else "missing",
+        "reason": (
+            "Daglig stress fra lokal database (synk fra Garmin)."
+            if stress
+            else "Ingen stress registrert for dagen."
+        ),
+    }
+
+
+def _body_battery_recovery_payload(
+    body_battery: Optional[BodyBattery],
+    activity: Optional[Activity] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "daily_max": body_battery.max_body_battery if body_battery else None,
+        "daily_min": body_battery.min_body_battery if body_battery else None,
+        "daily_net_charge": body_battery.net_charge if body_battery else None,
+        "daily_source": "local_db" if body_battery else "none",
+        "daily_availability": "supported" if body_battery else "missing",
+        "daily_reason": (
+            "Daglig Body Battery fra lokal database (synk fra Garmin)."
+            if body_battery
+            else "Ingen daglig Body Battery registrert for dagen."
+        ),
+    }
+    if activity is not None:
+        start = _stored_body_battery_start(activity)
+        delta = _stored_body_battery_delta(activity)
+        payload.update(
+            {
+                "start": start,
+                "delta": delta,
+                "end_derived": _derived_body_battery_end(start, delta),
+            }
+        )
+    return payload
+
+
+def _daily_recovery_context(
+    activity_day: date,
+    db: Session,
+    *,
+    activity: Optional[Activity] = None,
+) -> Dict[str, Any]:
+    sleep = db.query(Sleep).filter(Sleep.sleep_date == activity_day).first()
+    hrv = (
+        db.query(HRV)
+        .filter(
+            HRV.measurement_date == activity_day,
+            HRV.rmssd.isnot(None),
+        )
+        .order_by(HRV.measurement_time.desc())
+        .first()
+    )
+    rhr = (
+        db.query(RestingHeartRate)
+        .filter(
+            RestingHeartRate.measurement_date == activity_day,
+            RestingHeartRate.resting_heart_rate.isnot(None),
+        )
+        .order_by(RestingHeartRate.measurement_date.desc())
+        .first()
+    )
+    stress = db.query(Stress).filter(Stress.stress_date == activity_day).first()
+    body_battery = db.query(BodyBattery).filter(BodyBattery.date == activity_day).first()
+    perf = (
+        db.query(GarminPerformanceMetric)
+        .filter(func.date(GarminPerformanceMetric.date) == activity_day)
+        .first()
+    )
+    baseline_7d, hrv_delta_pct = _hrv_baseline_for_day(db, activity_day)
+
+    training_readiness = (
+        _resolve_activity_training_readiness(activity, db, activity_day)
+        if activity is not None
+        else _resolve_daily_training_readiness(db, activity_day)
+    )
+
+    return {
+        "date": activity_day.isoformat(),
+        "hrv": hrv_mcp_recovery_payload(
+            hrv,
+            baseline_7d=baseline_7d,
+            delta_pct=hrv_delta_pct,
+        ),
+        "sleep": _sleep_recovery_payload(sleep),
+        "resting_heart_rate": _resting_hr_recovery_payload(rhr),
+        "stress": _stress_recovery_payload(stress),
+        "body_battery": _body_battery_recovery_payload(body_battery, activity),
+        "training_readiness": training_readiness,
+        "garmin_performance": _garmin_performance_payload(perf),
+        "metric_links": {
+            "hrv_timeseries": "health.hrv_rmssd",
+            "readiness_timeseries": "readiness.total_score",
+            "sleep_score_timeseries": "health.sleep_overall_score",
+            "stress_timeseries": "health.stress_level",
+        },
+    }
+
+
+def _activity_recovery_context(activity: Activity, db: Session) -> Dict[str, Any]:
+    if activity.start_time is None:
+        return {}
+    return _daily_recovery_context(activity.start_time.date(), db, activity=activity)
 
 
 def _garmin_performance_payload(row: Optional[GarminPerformanceMetric]) -> Dict[str, Any]:
     if row is None:
-        return {}
+        return {
+            "source": "none",
+            "availability": "missing",
+            "reason": "Ingen Garmin performance-metrics synket for dagen.",
+        }
     return {
+        "source": "local_db",
+        "availability": "supported",
+        "reason": "Garmin performance-metrics fra lokal database (synk).",
         "date": row.date.isoformat() if row.date else None,
         "vo2_max": row.vo2_max,
         "vo2_max_precise": row.vo2_max_precise,

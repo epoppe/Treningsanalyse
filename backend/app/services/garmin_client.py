@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.services.activity_field_extraction import extract_activity_summary_fields
+from app.services.hrv_fetch import HrvLiveResult, is_garth_not_found, normalize_garmin_hrv_raw
 
 # Sett opp logging tidlig så den er tilgjengelig
 logging.basicConfig(level=logging.INFO)
@@ -392,241 +393,245 @@ class GarminClient:
             return None
 
     async def get_hrv_data_alternative(self, date: datetime) -> Optional[Dict[str, Any]]:
-        """Alternativ implementasjon som bruker garth's innebygde HRV-funksjonalitet."""
-        if not self.is_authenticated():
-            logger.error("Ikke autentiseret. Kan ikke hente HRV-data.")
-            return None
-        
-        date_obj = date.date()
-        date_str = date.strftime("%Y-%m-%d")
-        logger.debug(f"Henter HRV-data (alternativ metode) for {date_str}")
+        """Bakoverkompatibel wrapper rundt fetch_hrv_live."""
+        live_result = await self.fetch_hrv_live(date)
+        return live_result.data
 
-        garth_attrs = [attr for attr in dir(garth) if 'HRV' in attr or 'hrv' in attr]
-        logger.debug(f"Garth HRV-relaterte attributter: {garth_attrs}")
-        logger.debug(f"Garth HRV klasser tilgjengelig: DailyHRV={DailyHRV is not None}, HRVData={HRVData is not None}")
-
-        if DailyHRV:
-            logger.debug(f"DailyHRV metoder: {[m for m in dir(DailyHRV) if not m.startswith('_')]}")
-        if HRVData:
-            logger.debug(f"HRVData metoder: {[m for m in dir(HRVData) if not m.startswith('_')]}")
-        
-        # Prøv flere garth-metoder i prioritert rekkefølge
+    async def _try_fetch_hrv_via_garth(self, date_str: str) -> Optional[Dict[str, Any]]:
+        """Prøver garth-klasser før REST-endepunkter."""
         methods_to_try = []
-        
-        if DailyHRV is not None and hasattr(DailyHRV, 'list'):
+
+        if DailyHRV is not None and hasattr(DailyHRV, "list"):
             methods_to_try.append(("DailyHRV.list", lambda: DailyHRV.list(date_str, 1)))
-        
-        if HRVData is not None and hasattr(HRVData, 'get'):
+
+        if HRVData is not None and hasattr(HRVData, "get"):
             methods_to_try.append(("HRVData.get", lambda: HRVData.get(date_str)))
-            
-        if HRVData is not None and hasattr(HRVData, 'list'):
+
+        if HRVData is not None and hasattr(HRVData, "list"):
             methods_to_try.append(("HRVData.list", lambda: HRVData.list(date_str, 1)))
-        
-        # Prøv også direct garth calls
+
         methods_to_try.append(("garth.DailyHRV.list", lambda: garth.DailyHRV.list(date_str, 1)))
-        
+
         for method_name, method_func in methods_to_try:
             try:
                 logger.debug(f"Prøver {method_name} for {date_str}")
                 hrv_data = await asyncio.to_thread(method_func)
+                if not hrv_data:
+                    continue
 
-                if hrv_data:
-                    logger.debug(f"HRV-data funnet med {method_name} for {date_str}")
-                    
-                    # Håndter ulike returformater
-                    if isinstance(hrv_data, list) and len(hrv_data) > 0:
-                        # DailyHRV.list returnerer liste
-                        hrv_item = hrv_data[0]
-                        if hasattr(hrv_item, 'last_night_avg'):
-                            # Prøv å hente baseline-verdier på ulike måter
-                            baseline_low_upper = None
-                            baseline_balanced_lower = None
-                            baseline_balanced_upper = None
-                            
-                            # Prøv direkte attributter
-                            if hasattr(hrv_item, 'baseline_balanced_lower'):
-                                baseline_balanced_lower = hrv_item.baseline_balanced_lower
-                            elif hasattr(hrv_item, 'balanced_low'):
-                                baseline_balanced_lower = hrv_item.balanced_low
-                            
-                            if hasattr(hrv_item, 'baseline_balanced_upper'):
-                                baseline_balanced_upper = hrv_item.baseline_balanced_upper
-                            elif hasattr(hrv_item, 'balanced_upper'):
-                                baseline_balanced_upper = hrv_item.balanced_upper
-                            
-                            if hasattr(hrv_item, 'baseline_low_upper'):
-                                baseline_low_upper = hrv_item.baseline_low_upper
-                            
-                            # Prøv gjennom baseline-objekt hvis det eksisterer
-                            if hasattr(hrv_item, 'baseline') and hrv_item.baseline:
-                                if baseline_balanced_lower is None:
-                                    baseline_balanced_lower = getattr(hrv_item.baseline, 'balanced_lower', None) or getattr(hrv_item.baseline, 'balanced_low', None)
-                                if baseline_balanced_upper is None:
-                                    baseline_balanced_upper = getattr(hrv_item.baseline, 'balanced_upper', None)
-                                if baseline_low_upper is None:
-                                    baseline_low_upper = getattr(hrv_item.baseline, 'low_upper', None)
-                            
-                            logger.debug(f"HRV baseline-verdier for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
-                            
-                            hrv_dict = {
-                                "hrv_summary": {
-                                    "last_night_avg": hrv_item.last_night_avg,
-                                    "last_night_5_min_high": getattr(hrv_item, 'last_night_5_min_high', None),
-                                    "weekly_avg": getattr(hrv_item, 'weekly_avg', None),
-                                    "status": getattr(hrv_item, 'status', None),
-                                    "baseline_low_upper": baseline_low_upper,
-                                    "baseline_balanced_lower": baseline_balanced_lower,
-                                    "baseline_balanced_upper": baseline_balanced_upper,
-                                }
-                            }
-                            return hrv_dict
-                    elif hasattr(hrv_data, 'hrv_summary'):
-                        # HRVData.get returnerer objekt med hrv_summary
-                        hrv_summary = hrv_data.hrv_summary
-                        
-                        # Prøv å hente baseline-verdier på ulike måter
+                logger.debug(f"HRV-data funnet med {method_name} for {date_str}")
+                if isinstance(hrv_data, list) and len(hrv_data) > 0:
+                    hrv_item = hrv_data[0]
+                    if hasattr(hrv_item, "last_night_avg"):
                         baseline_low_upper = None
                         baseline_balanced_lower = None
                         baseline_balanced_upper = None
-                        
-                        if hrv_summary:
-                            if hasattr(hrv_summary, 'baseline') and hrv_summary.baseline:
-                                baseline_obj = hrv_summary.baseline
-                                baseline_low_upper = getattr(baseline_obj, 'low_upper', None)
-                                baseline_balanced_lower = getattr(baseline_obj, 'balanced_lower', None) or getattr(baseline_obj, 'balanced_low', None)
-                                baseline_balanced_upper = getattr(baseline_obj, 'balanced_upper', None)
-                            
-                            # Prøv direkte på hrv_summary hvis baseline-objekt ikke fungerte
+
+                        if hasattr(hrv_item, "baseline_balanced_lower"):
+                            baseline_balanced_lower = hrv_item.baseline_balanced_lower
+                        elif hasattr(hrv_item, "balanced_low"):
+                            baseline_balanced_lower = hrv_item.balanced_low
+
+                        if hasattr(hrv_item, "baseline_balanced_upper"):
+                            baseline_balanced_upper = hrv_item.baseline_balanced_upper
+                        elif hasattr(hrv_item, "balanced_upper"):
+                            baseline_balanced_upper = hrv_item.balanced_upper
+
+                        if hasattr(hrv_item, "baseline_low_upper"):
+                            baseline_low_upper = hrv_item.baseline_low_upper
+
+                        if hasattr(hrv_item, "baseline") and hrv_item.baseline:
                             if baseline_balanced_lower is None:
-                                baseline_balanced_lower = getattr(hrv_summary, 'baseline_balanced_lower', None) or getattr(hrv_summary, 'balanced_low', None)
+                                baseline_balanced_lower = (
+                                    getattr(hrv_item.baseline, "balanced_lower", None)
+                                    or getattr(hrv_item.baseline, "balanced_low", None)
+                                )
                             if baseline_balanced_upper is None:
-                                baseline_balanced_upper = getattr(hrv_summary, 'baseline_balanced_upper', None) or getattr(hrv_summary, 'balanced_upper', None)
+                                baseline_balanced_upper = getattr(hrv_item.baseline, "balanced_upper", None)
                             if baseline_low_upper is None:
-                                baseline_low_upper = getattr(hrv_summary, 'baseline_low_upper', None)
-                            
-                            logger.debug(f"HRV baseline-verdier (hrv_summary) for {date_str}: lower={baseline_balanced_lower}, upper={baseline_balanced_upper}")
-                        
-                        hrv_dict = {
+                                baseline_low_upper = getattr(hrv_item.baseline, "low_upper", None)
+
+                        payload = {
                             "hrv_summary": {
-                                "last_night_avg": hrv_summary.last_night_avg if hrv_summary else None,
-                                "last_night_5_min_high": hrv_summary.last_night_5_min_high if hrv_summary else None,
-                                "weekly_avg": hrv_summary.weekly_avg if hrv_summary else None,
-                                "status": hrv_summary.status if hrv_summary else None,
+                                "last_night_avg": hrv_item.last_night_avg,
+                                "last_night_5_min_high": getattr(hrv_item, "last_night_5_min_high", None),
+                                "weekly_avg": getattr(hrv_item, "weekly_avg", None),
+                                "status": getattr(hrv_item, "status", None),
                                 "baseline_low_upper": baseline_low_upper,
                                 "baseline_balanced_lower": baseline_balanced_lower,
                                 "baseline_balanced_upper": baseline_balanced_upper,
                             }
                         }
-                        return hrv_dict
-                        
-                logger.info(f"{method_name} returnerte data men i ukjent format for {date_str}")
-                        
-            except Exception as e:
-                logger.debug(f"{method_name} feilet for {date_str}: {e}")
-                continue
-        
-        logger.info(f"Ingen av garth-metodene fant HRV-data for {date_str}, faller tilbake til API-kall")
-        return await self.get_hrv_data(date)
+                        normalized = normalize_garmin_hrv_raw(payload, HRVData.model_validate)
+                        if normalized:
+                            return normalized
+                elif hasattr(hrv_data, "hrv_summary"):
+                    hrv_summary = hrv_data.hrv_summary
+                    baseline_low_upper = None
+                    baseline_balanced_lower = None
+                    baseline_balanced_upper = None
 
-    async def get_hrv_data(self, date: datetime) -> Optional[Dict[str, Any]]:
-        """Henter HRV-data for en spesifikk dato."""
+                    if hrv_summary:
+                        if hasattr(hrv_summary, "baseline") and hrv_summary.baseline:
+                            baseline_obj = hrv_summary.baseline
+                            baseline_low_upper = getattr(baseline_obj, "low_upper", None)
+                            baseline_balanced_lower = (
+                                getattr(baseline_obj, "balanced_lower", None)
+                                or getattr(baseline_obj, "balanced_low", None)
+                            )
+                            baseline_balanced_upper = getattr(baseline_obj, "balanced_upper", None)
+
+                        if baseline_balanced_lower is None:
+                            baseline_balanced_lower = (
+                                getattr(hrv_summary, "baseline_balanced_lower", None)
+                                or getattr(hrv_summary, "balanced_low", None)
+                            )
+                        if baseline_balanced_upper is None:
+                            baseline_balanced_upper = (
+                                getattr(hrv_summary, "baseline_balanced_upper", None)
+                                or getattr(hrv_summary, "balanced_upper", None)
+                            )
+                        if baseline_low_upper is None:
+                            baseline_low_upper = getattr(hrv_summary, "baseline_low_upper", None)
+
+                    payload = {
+                        "hrv_summary": {
+                            "last_night_avg": hrv_summary.last_night_avg if hrv_summary else None,
+                            "last_night_5_min_high": hrv_summary.last_night_5_min_high if hrv_summary else None,
+                            "weekly_avg": hrv_summary.weekly_avg if hrv_summary else None,
+                            "status": hrv_summary.status if hrv_summary else None,
+                            "baseline_low_upper": baseline_low_upper,
+                            "baseline_balanced_lower": baseline_balanced_lower,
+                            "baseline_balanced_upper": baseline_balanced_upper,
+                        }
+                    }
+                    normalized = normalize_garmin_hrv_raw(payload, HRVData.model_validate)
+                    if normalized:
+                        return normalized
+
+                logger.debug(f"{method_name} returnerte data men i ukjent format for {date_str}")
+            except Exception as exc:
+                logger.debug(f"{method_name} feilet for {date_str}: {exc}")
+                continue
+
+        return None
+
+    async def fetch_hrv_live(self, date: datetime) -> HrvLiveResult:
+        """Henter HRV direkte fra Garmin med eksplisitt live-status."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente HRV-data.")
-            return None
+            return HrvLiveResult(
+                data=None,
+                live_status="not_authenticated",
+                message="Garmin-klienten er ikke autentisert.",
+            )
+
+        date_str = date.strftime("%Y-%m-%d")
+        logger.debug(f"Henter live HRV-data for {date_str}")
+
+        garth_payload = await self._try_fetch_hrv_via_garth(date_str)
+        if garth_payload:
+            return HrvLiveResult(data=garth_payload, live_status="ok")
+
+        saw_not_found = False
+
         try:
-            date_str = date.strftime("%Y-%m-%d")
-            logger.info(f"Henter HRV-data for {date_str}")
-            
-            # Prøv først standard API-endepunkt
             try:
-                hrv_data = await asyncio.to_thread(
+                raw_hrv = await asyncio.to_thread(
                     garth.connectapi, f"/hrv-service/hrv/daily/{date_str}"
                 )
             except GarthHTTPError as api_error:
-                logger.info(f"Standard HRV API feilet for {date_str}, prøver alternative endepunkter: {api_error}")
-                hrv_data = None
-                
-                # Prøv flere alternative API-endepunkter
-                alternative_endpoints = [
-                    # Prøv DailyHRV endpoint som garth bruker
-                    (f"/usersummary-service/stats/hrv/daily/{date_str}", {}),
-                    # Prøv wellness endpoint
-                    (f"/usersummary-service/usersummary/daily/{garth.client.username}", {"calendarDate": date_str}),
-                    # Prøv direkte wellness HRV endpoint
-                    (f"/wellness-service/wellness/dailyHRV/{garth.client.username}", {"date": date_str}),
-                ]
-                
-                for endpoint, params in alternative_endpoints:
-                    try:
-                        logger.info(f"Prøver alternativt endepunkt: {endpoint} med params: {params}")
-                        alt_data = await asyncio.to_thread(
-                            garth.connectapi, endpoint, params=params
-                        )
-                        logger.debug(f"Alternativt endepunkt {endpoint} returnerte: {alt_data}")
-                        
-                        if alt_data:
-                            # Prøv å trekke ut HRV-data fra ulike responsformater
-                            if 'allMetrics' in alt_data:
-                                # Format fra usersummary endpoint
-                                hrv_metrics = alt_data.get('allMetrics', {}).get('metricsMap', {}).get('WELLNESS_HRV_RMSSD', {})
-                                if hrv_metrics and hrv_metrics.get('value'):
-                                    hrv_data = {
-                                        "hrv_summary": {
-                                            "last_night_avg": hrv_metrics.get('value'),
-                                            "last_night_5_min_high": None,
-                                            "weekly_avg": None,
-                                            "status": None,
-                                            "baseline_low_upper": None,
-                                            "baseline_balanced_lower": None,
-                                            "baseline_balanced_upper": None,
-                                        }
-                                    }
-                                    logger.info(f"Hentet HRV-data fra usersummary endpoint for {date_str}: {hrv_data}")
-                                    break
-                            elif 'hrvSummary' in alt_data:
-                                # Format fra wellness endpoint
-                                hrv_data = {"hrv_summary": alt_data['hrvSummary']}
-                                logger.info(f"Hentet HRV-data fra wellness endpoint for {date_str}: {hrv_data}")
-                                break
-                            elif isinstance(alt_data, dict) and any(key in alt_data for key in ['last_night_avg', 'weekly_avg']):
-                                # Direkte HRV format
-                                hrv_data = {"hrv_summary": alt_data}
-                                logger.info(f"Hentet HRV-data i direkte format for {date_str}: {hrv_data}")
-                                break
-                                
-                    except Exception as alt_error:
-                        logger.debug(f"Alternativt endepunkt {endpoint} feilet: {alt_error}")
-                        continue
-                
-                if not hrv_data:
-                    logger.info(f"Ingen HRV-data funnet i noen av de alternative endepunktene for {date_str}")
-                    return None
-            
-            # Logg rå data for debugging
-            logger.debug(f"Rå HRV-data for {date_str}: {hrv_data}")
-            
-            # Sjekk om data er tomt eller None
-            if not hrv_data:
-                logger.info(f"Tomt HRV-data-svar for {date_str}")
-                return None
-            
-            # Validerer data med Pydantic-modellen
-            validated_data = HRVData.model_validate(hrv_data)
-            logger.info(f"Validerte HRV-data for {date_str}: {validated_data.model_dump()}")
-            return validated_data.model_dump()
-        except GarthHTTPError as e:
-            # Denne catch-blokken håndterer bare feil som ikke ble håndtert i try-blokken over
-            logger.info(f"GarthHTTPError ved henting av HRV-data for {date_str}: {e}")
-            # Sjekk om det er en 404-feil (ingen data funnet)
-            if "404" in str(e) or "not found" in str(e).lower():
-                logger.info(f"Ingen HRV-data funnet for {date_str} (404 Not Found)")
-                return None
-            logger.error(f"HTTP-feil ved henting av HRV-data for {date_str}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"En uventet feil oppstod under henting av HRV-data for {date_str}: {e}")
+                if is_garth_not_found(api_error):
+                    saw_not_found = True
+                logger.debug(
+                    "Standard HRV API feilet for %s, prøver alternative endepunkter: %s",
+                    date_str,
+                    api_error,
+                )
+                raw_hrv, alt_not_found = await self._fetch_hrv_from_alternative_endpoints(date_str)
+                saw_not_found = saw_not_found or alt_not_found
+                if raw_hrv is None and saw_not_found:
+                    return HrvLiveResult(
+                        data=None,
+                        live_status="not_found",
+                        message=f"Ingen live HRV hos Garmin for {date_str}.",
+                    )
+            except Exception as exc:
+                logger.error(f"Uventet feil ved henting av HRV-data for {date_str}: {exc}")
+                return HrvLiveResult(
+                    data=None,
+                    live_status="error",
+                    message=str(exc),
+                )
+
+            if raw_hrv in (None, {}, []):
+                return HrvLiveResult(
+                    data=None,
+                    live_status="empty",
+                    message=f"Tomt HRV-svar fra Garmin for {date_str}.",
+                )
+
+            normalized = normalize_garmin_hrv_raw(raw_hrv, HRVData.model_validate)
+            if normalized:
+                logger.debug(f"Validerte live HRV-data for {date_str}")
+                return HrvLiveResult(data=normalized, live_status="ok")
+
+            return HrvLiveResult(
+                data=None,
+                live_status="empty",
+                message=f"Garmin returnerte HRV uten brukbar last_night_avg for {date_str}.",
+            )
+        except GarthHTTPError as exc:
+            if is_garth_not_found(exc):
+                return HrvLiveResult(
+                    data=None,
+                    live_status="not_found",
+                    message=f"Ingen live HRV hos Garmin for {date_str}.",
+                )
+            logger.error(f"HTTP-feil ved henting av HRV-data for {date_str}: {exc}")
+            return HrvLiveResult(data=None, live_status="error", message=str(exc))
+        except Exception as exc:
+            logger.error(f"En uventet feil oppstod under henting av HRV-data for {date_str}: {exc}")
             logger.error(traceback.format_exc())
-            return None
+            return HrvLiveResult(data=None, live_status="error", message=str(exc))
+
+    async def _fetch_hrv_from_alternative_endpoints(
+        self,
+        date_str: str,
+    ) -> tuple[Optional[Any], bool]:
+        saw_not_found = False
+        alternative_endpoints = [
+            (f"/usersummary-service/stats/hrv/daily/{date_str}", {}),
+            (
+                f"/usersummary-service/usersummary/daily/{garth.client.username}",
+                {"calendarDate": date_str},
+            ),
+            (
+                f"/wellness-service/wellness/dailyHRV/{garth.client.username}",
+                {"date": date_str},
+            ),
+        ]
+
+        for endpoint, params in alternative_endpoints:
+            try:
+                alt_data = await asyncio.to_thread(garth.connectapi, endpoint, params=params)
+                normalized = normalize_garmin_hrv_raw(alt_data, HRVData.model_validate)
+                if normalized:
+                    logger.debug("HRV hentet fra alternativt endepunkt for %s", date_str)
+                    return normalized, saw_not_found
+            except GarthHTTPError as alt_error:
+                if is_garth_not_found(alt_error):
+                    saw_not_found = True
+                logger.debug(f"Alternativt endepunkt {endpoint} feilet: {alt_error}")
+            except Exception as alt_error:
+                logger.debug(f"Alternativt endepunkt {endpoint} feilet: {alt_error}")
+
+        return None, saw_not_found
+
+    async def get_hrv_data(self, date: datetime) -> Optional[Dict[str, Any]]:
+        """Henter HRV-data for en spesifikk dato."""
+        live_result = await self.fetch_hrv_live(date)
+        return live_result.data
 
     async def get_resting_heart_rate_data(
         self, target_date: date | datetime | str

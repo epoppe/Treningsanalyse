@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from ..database.models import HRV
+from ..services.hrv_fetch import hrv_record_to_api_dict
 from ..storage import DataStorage
 import pandas as pd
 
@@ -197,16 +198,12 @@ class HRVService:
                     "total_records": 0
                 }
 
-            # Konverter til liste av dictionaries
+            # Konverter til liste av dictionaries med felles HRV-kontrakt
             hrv_data = []
             for record in hrv_records:
-                hrv_data.append({
-                    "date": record.measurement_date.strftime('%Y-%m-%d'),
-                    "last_night_avg": record.rmssd,
-                    "measurement_time": record.measurement_time.isoformat() if record.measurement_time else None,
-                    "measurement_type": record.measurement_type,
-                    "created_at": record.created_at.isoformat() if record.created_at else None
-                })
+                row = hrv_record_to_api_dict(record)
+                row["created_at"] = record.created_at.isoformat() if record.created_at else None
+                hrv_data.append(row)
 
             # Beregn 7-dagers glidende gjennomsnitt
             if len(hrv_data) >= 7:
@@ -227,12 +224,6 @@ class HRVService:
                 # Hvis mindre enn 7 dager, sett rolling_avg_7d til None
                 for data in hrv_data:
                     data['rolling_avg_7d'] = None
-
-            # Legg til baseline-verdier (placeholder - kan utvides senere)
-            for data in hrv_data:
-                data['baseline_balanced_lower'] = 30.0  # Placeholder
-                data['baseline_balanced_upper'] = 50.0  # Placeholder
-                data['status'] = 'normal'  # Placeholder
 
             return {
                 "hrv_data": hrv_data,

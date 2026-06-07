@@ -102,10 +102,10 @@ class PpapMetricsTests(unittest.TestCase):
     def test_metric_catalog_schema_version(self):
         with patch.object(training_tools, "training_context", self._context):
             catalog = training_tools.metric_catalog()
-        self.assertEqual(catalog["schema_version"], "ppap-2")
+        self.assertEqual(catalog["schema_version"], "ppap-3")
         keys = {metric["key"] for metric in catalog["metrics"]}
         self.assertIn("fitness.ctl", keys)
-        self.assertIn("activity.efficiency_factor", keys)
+        self.assertIn("activity.avg_efficiency_factor", keys)
 
 if __name__ == "__main__":
     unittest.main()

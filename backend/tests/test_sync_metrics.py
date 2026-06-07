@@ -1,6 +1,6 @@
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,7 +9,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database.models import Base
 from app.database.models.activity import Activity, ActivityType
+from app.services.analysis_service import AnalysisService
 from app.services.sync_modules.metrics_service import SyncMetricsService, tss_needs_refresh
+from app.storage import DataStorage
 
 
 class TssNeedsRefreshTests(unittest.TestCase):
@@ -89,6 +91,75 @@ class SyncMetricsBatchTests(unittest.TestCase):
             metrics.begin_batch()
             metrics.end_batch()
             mock_once.assert_not_called()
+
+
+class TreadmillDerivedMetricsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        engine = create_engine(f"sqlite:///{Path(self.tmpdir.name) / 'test.db'}")
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.db = self.Session()
+        self.storage = DataStorage(str(Path(self.tmpdir.name) / "data"))
+
+        treadmill_type = ActivityType(type_key="treadmill_running", type_name="Treadmill")
+        self.db.add(treadmill_type)
+        self.db.commit()
+        self.treadmill_type_id = treadmill_type.id
+
+        self.sync_service = MagicMock()
+        self.sync_service.db = self.db
+        self.sync_service.storage = self.storage
+        self.sync_service.analysis_service = AnalysisService(self.storage)
+        self.metrics = SyncMetricsService(self.sync_service)
+
+    def tearDown(self):
+        self.db.close()
+        self.tmpdir.cleanup()
+
+    def _seed_treadmill_activity(self, activity_id: str = "9001"):
+        start = datetime(2024, 4, 26, 14, 17, 36, tzinfo=timezone.utc)
+        self.db.add(
+            Activity(
+                activity_id=activity_id,
+                activity_name="Treadmill",
+                start_time=start,
+                duration=2400,
+                distance=8000,
+                average_speed=2.2,
+                average_heart_rate=152,
+                activity_type_id=self.treadmill_type_id,
+            )
+        )
+        self.db.commit()
+
+        records = []
+        for second in range(0, 2401, 4):
+            records.append(
+                {
+                    "activity_id": int(activity_id),
+                    "timestamp": start + timedelta(seconds=second),
+                    "distance": 2.2 * second,
+                    "speed": 2.2,
+                    "heart_rate": 150 + (second // 600),
+                    "cadence": 170,
+                }
+            )
+        self.storage.save_activity_details(records)
+
+    def test_treadmill_gets_all_three_derived_metrics(self):
+        self._seed_treadmill_activity()
+        self.metrics.begin_batch()
+        result = self.metrics.calculate_metrics_for_new_activity("9001", skip_snapshot_recalc=True)
+        self.metrics.end_batch()
+
+        activity = self.db.query(Activity).filter_by(activity_id="9001").one()
+        self.assertTrue(result["negative_split_calculated"])
+        self.assertTrue(result["decoupling_calculated"])
+        self.assertTrue(result["running_economy_calculated"])
+        self.assertIsNotNone(activity.negative_split_percent)
+        self.assertIsNotNone(activity.decoupling_percent)
+        self.assertIsNotNone(activity.running_economy)
 
 
 if __name__ == "__main__":

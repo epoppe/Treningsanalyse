@@ -238,6 +238,24 @@ class DataStorage:
 
 
 
+    def get_activity_date_coverage(self) -> tuple[Optional[datetime], Optional[datetime]]:
+        """
+        Returnerer min/max starttid for lagrede aktiviteter (parquet).
+        Brukes av sync for å finne hull i aktivitetsliste.
+        """
+        if self.activities_df.empty or "start_time" not in self.activities_df.columns:
+            return None, None
+        series = pd.to_datetime(self.activities_df["start_time"], errors="coerce").dropna()
+        if series.empty:
+            return None, None
+        min_ts = series.min()
+        max_ts = series.max()
+        if getattr(min_ts, "tzinfo", None) is not None:
+            min_ts = min_ts.tz_convert(None)
+        if getattr(max_ts, "tzinfo", None) is not None:
+            max_ts = max_ts.tz_convert(None)
+        return min_ts.to_pydatetime(), max_ts.to_pydatetime()
+
     def get_hrv_data(self) -> Optional[pd.DataFrame]:
         """Henter HRV-data som en DataFrame."""
         if self.hrv_df.empty:
@@ -365,7 +383,10 @@ class DataStorage:
             existing_df.drop(common_dates, inplace=True)
         
         # 4. Kombiner de gamle (filtrerte) dataene med de helt nye dataene
-        combined_df = pd.concat([existing_df, new_data_df])
+        if existing_df.empty:
+            combined_df = new_data_df.copy()
+        else:
+            combined_df = pd.concat([existing_df, new_data_df])
         combined_df.sort_index(inplace=True)
 
         # 5. Lagre den oppdaterte DataFrame-en

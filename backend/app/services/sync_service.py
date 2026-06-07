@@ -525,21 +525,9 @@ class SyncService:
             added_count = 0
             inserted_activity_ids: List[str] = []
             buffered_parquet_records: List[Dict[str, Any]] = []
-            logged_one = False  # Flagg for å bare logge én gang
 
-            for i, act_data in enumerate(activities_to_save):
-                if not logged_one:
-                    logger.info(f"DEBUG: Nøkler i første aktivitet: {list(act_data.keys())}")
-                    # Log alle Training Effect-relaterte felter
-                    training_fields = [f"{k}: {v}" for k, v in act_data.items() if 'training' in k.lower() or 'effect' in k.lower()]
-                    logger.info(f"DEBUG: Training Effect-felter: {training_fields}")
-                    logged_one = True
-
+            for act_data in activities_to_save:
                 activity_id = str(act_data.get('activityId'))
-                
-                if i < 5: # Logger de 5 første for feilsøking
-                    is_in_db = activity_id in existing_ids
-                    logger.info(f"DEBUG: Behandler aktivitet {i+1}/{len(activities_to_save)}: ID='{activity_id}', Finnes i DB? {is_in_db}")
 
                 if not activity_id:
                     continue
@@ -556,7 +544,10 @@ class SyncService:
                 if ignore_sync_state:
                     should_skip = False
                     if activity_id in existing_ids:
-                        logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (ignore_sync_state=True, overskriver alltid).")
+                        logger.debug(
+                            "Oppdaterer eksisterende aktivitet %s (ignore_sync_state=True, overskriver alltid).",
+                            activity_id,
+                        )
                         existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                         if existing_activity:
                             self.db.delete(existing_activity)
@@ -566,7 +557,10 @@ class SyncService:
                                   not (force_refresh_recent and is_recent))
                     
                     if activity_id in existing_ids and force_refresh_recent and is_recent:
-                        logger.info(f"Oppdaterer eksisterende aktivitet {activity_id} (force_refresh_recent=True).")
+                        logger.debug(
+                            "Oppdaterer eksisterende aktivitet %s (force_refresh_recent=True).",
+                            activity_id,
+                        )
                         # Slett eksisterende aktivitet først
                         existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                         if existing_activity:
@@ -588,10 +582,6 @@ class SyncService:
                         
                         if parquet_records:
                             buffered_parquet_records.extend(parquet_records)
-                            logger.info(
-                                f"Bufret {len(parquet_records)} FIT-records for aktivitet {activity_id} "
-                                f"(buffer totalt: {len(buffered_parquet_records)})"
-                            )
                         else:
                             logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
                     else:
@@ -764,13 +754,17 @@ class SyncService:
             successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
             successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
             
-            logger.info(f"📊 Metrics-beregning fullført:")
-            logger.info(f"  - TSS: {successful_tss}/{len(metrics_results)}")
-            logger.info(f"  - Power: {successful_power}/{len(metrics_results)}")
-            logger.info(f"  - Løpsøkonomi: {successful_running_economy}/{len(metrics_results)}")
-            logger.info(f"  - Negative split: {successful_negative_splits}/{len(metrics_results)}")
-            logger.info(f"  - Decoupling: {successful_decouplings}/{len(metrics_results)}")
-            logger.info(f"  - HRV tilgjengelig: {successful_hrv}/{len(metrics_results)}")
+            logger.info(
+                "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
+                "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s",
+                len(metrics_results),
+                successful_tss,
+                successful_power,
+                successful_running_economy,
+                successful_negative_splits,
+                successful_decouplings,
+                successful_hrv,
+            )
             
             summary["total_fetched"] = added_count
             summary["activity_ids"] = inserted_activity_ids
@@ -1460,21 +1454,25 @@ class SyncService:
                     skipped_count += 1
                     continue
                 
-                logger.info(f"Prosesserer Training Effect for aktivitet {activity_id} ({i}/{len(activities)}) - {activity.activity_name}")
-                
+                logger.debug(
+                    "Prosesserer Training Effect for aktivitet %s (%s/%s)",
+                    activity_id,
+                    i,
+                    len(activities),
+                )
+
                 try:
                     summary_metrics = await self.garmin_client.get_activity_summary_metrics(activity_id)
                     if summary_metrics:
                         self._apply_activity_summary_metrics(activity, summary_metrics)
-                    
-                    # Oppdater databasen
-                    logger.info(f"✅ Oppdatert Training Effect for aktivitet {activity_id}: "
-                              f"Aerobic={activity.total_training_effect}, "
-                              f"Anaerobic={activity.total_anaerobic_training_effect}")
-                    
+
                     updated_count += 1
                 except Exception as e:
-                    logger.error(f"❌ Feil ved henting av Training Effect for aktivitet {activity_id}: {e}")
+                    logger.warning(
+                        "Feil ved henting av Training Effect for aktivitet %s: %s",
+                        activity_id,
+                        e,
+                    )
                     failed_count += 1
             
             # Lagre endringene til databasen

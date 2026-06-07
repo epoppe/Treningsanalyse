@@ -42,6 +42,12 @@ def _call_tool(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
+@mcp.resource("treningsanalyse://metric-catalog")
+def metric_catalog_resource() -> str:
+    """Whitelisted MCP metrics with availability, categories and semantic links."""
+    return json.dumps(_call_tool(training_tools.metric_catalog), ensure_ascii=False, indent=2)
+
+
 @mcp.resource("treningsanalyse://athlete-profile")
 def athlete_profile_resource() -> str:
     """Stable athlete profile, thresholds, latest performance metrics and data inventory."""
@@ -60,6 +66,30 @@ def metric_glossary_resource() -> str:
     return json.dumps(_call_tool(training_tools.metric_glossary), ensure_ascii=False, indent=2)
 
 
+@mcp.resource("treningsanalyse://daily-recovery")
+def daily_recovery_resource() -> str:
+    """Daily recovery context: HRV, sleep, stress, body battery and readiness for today."""
+    return json.dumps(_call_tool(training_tools.daily_recovery_context), ensure_ascii=False, indent=2)
+
+
+@mcp.resource("treningsanalyse://readiness-snapshot")
+def readiness_snapshot_resource() -> str:
+    """PPAP readiness composites plus daily recovery context and metric links."""
+    return json.dumps(_call_tool(training_tools.readiness_snapshot), ensure_ascii=False, indent=2)
+
+
+@mcp.tool()
+def daily_recovery_context(target_date: Optional[str] = None) -> dict:
+    """Daily recovery picture: HRV, sleep, resting HR, stress, body battery and readiness for one date."""
+    return _call_tool(training_tools.daily_recovery_context, target_date=target_date)
+
+
+@mcp.tool()
+def readiness_snapshot(target_date: Optional[str] = None) -> dict:
+    """PPAP readiness composites plus recovery_context and links to related timeseries metric keys."""
+    return _call_tool(training_tools.readiness_snapshot, target_date=target_date)
+
+
 @mcp.tool()
 def athlete_profile() -> dict:
     """Return stable athlete context: units, latest thresholds, VO2max, HRV and data inventory."""
@@ -76,6 +106,18 @@ def analyze_recent_training(days: int = 90, include_treadmill: bool = False) -> 
 def training_readiness_check(target_date: Optional[str] = None) -> dict:
     """Check if hard training is sensible on target_date (YYYY-MM-DD) using load, HRV, sleep and fatigue flags."""
     return _call_tool(training_tools.training_readiness_check, target_date=target_date)
+
+
+@mcp.tool()
+def daily_recovery_context(target_date: Optional[str] = None) -> dict:
+    """Daily recovery picture for target_date (YYYY-MM-DD): HRV, sleep, RHR, stress, body battery and readiness."""
+    return _call_tool(training_tools.daily_recovery_context, target_date=target_date)
+
+
+@mcp.tool()
+def readiness_snapshot(target_date: Optional[str] = None) -> dict:
+    """PPAP readiness composites, recovery context and links to related timeseries metric keys."""
+    return _call_tool(training_tools.readiness_snapshot, target_date=target_date)
 
 
 @mcp.tool()
@@ -162,11 +204,23 @@ def metric_quality_report(
 
 
 @mcp.prompt()
+def recovery_context_prompt(target_date: Optional[str] = None) -> str:
+    return (
+        "Assess Erik's recovery for a specific day using MCP tools. "
+        f"Target date: {target_date or 'today'}. "
+        "Call daily_recovery_context first, then readiness_snapshot for composites. "
+        "Use metric_glossary if readiness.total_score vs readiness_score is unclear. "
+        "Answer in Norwegian with recovery summary and training intensity recommendation."
+    )
+
+
+@mcp.prompt()
 def training_readiness_prompt(target_date: Optional[str] = None) -> str:
     return (
         "Use treningsanalyse tools to assess whether Erik should train hard today. "
         f"Target date: {target_date or 'today'}. "
-        "Call training_readiness_check first, then athlete_profile if threshold context is needed. "
+        "Call training_readiness_check first, then readiness_snapshot or daily_recovery_context for HRV/sleep detail. "
+        "Use athlete_profile if threshold context is needed. "
         "Answer in Norwegian with a concrete recommendation: hard / moderate / easy / rest, and why."
     )
 
