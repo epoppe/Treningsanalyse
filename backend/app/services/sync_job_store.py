@@ -3,15 +3,18 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, FrozenSet, Iterator, Optional, Set, Tuple
 
 from ..database.session import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 ACTIVE_JOB_STATUSES = frozenset({"queued", "processing"})
+
+_job_slot_lock = threading.RLock()
 
 
 class PersistedSyncJobs(dict):
@@ -106,10 +109,8 @@ def _hydrate_from_database(store: PersistedSyncJobs) -> None:
         logger.debug("Hydrering av synk-jobber hoppet over: %s", exc)
 
 
-def create_job(job_type: str, message: str = "Queued") -> str:
-    store = get_sync_jobs_store()
-    job_id = str(uuid.uuid4())
-    store[job_id] = {
+def _new_job_payload(job_type: str, message: str) -> Dict[str, Any]:
+    return {
         "status": "queued",
         "message": message,
         "job_type": job_type,
@@ -118,7 +119,68 @@ def create_job(job_type: str, message: str = "Queued") -> str:
         "end_time": None,
         "progress": None,
     }
+
+
+def find_active_job_by_types(job_types: Set[str]) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """Finn nyeste aktiv jobb for ett av job_type-verdiene."""
+    for existing_job_id, job in iter_jobs_reversed():
+        if job.get("job_type") in job_types and job.get("status") in ACTIVE_JOB_STATUSES:
+            return existing_job_id, job
+    return None
+
+
+def acquire_job_slot(
+    job_type: str,
+    message: str = "Queued",
+    *,
+    shared_job_types: Optional[FrozenSet[str]] = None,
+) -> Tuple[str, Dict[str, Any], bool]:
+    """Atomisk deduplisering: returner aktiv jobb eller opprett ny.
+
+    Returns:
+        (job_id, job_dict, reused_existing)
+    """
+    with _job_slot_lock:
+        types_to_check = {job_type}
+        if shared_job_types:
+            types_to_check |= set(shared_job_types)
+
+        active = find_active_job_by_types(types_to_check)
+        if active is not None:
+            return active[0], active[1], True
+
+        store = get_sync_jobs_store()
+        job_id = str(uuid.uuid4())
+        store[job_id] = _new_job_payload(job_type, message)
+        return job_id, store[job_id], False
+
+
+def create_job(job_type: str, message: str = "Queued") -> str:
+    """Opprett ny jobb uten deduplisering (bruk acquire_job_slot for trygg start)."""
+    store = get_sync_jobs_store()
+    job_id = str(uuid.uuid4())
+    store[job_id] = _new_job_payload(job_type, message)
     return job_id
+
+
+def reset_sync_jobs_store_for_tests() -> None:
+    """Tøm in-memory jobblager (kun for tester)."""
+    global _store
+    with _job_slot_lock:
+        if _store is not None:
+            _store.clear()
+        _store = None
+        try:
+            from ..database.models.sync_job import SyncJob
+
+            db = SessionLocal()
+            try:
+                db.query(SyncJob).delete()
+                db.commit()
+            finally:
+                db.close()
+        except Exception as exc:
+            logger.debug("Kunne ikke tømme sync_job-tabell i test-reset: %s", exc)
 
 
 def set_job_phase(

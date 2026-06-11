@@ -1,4 +1,17 @@
 {
+  "name": "treningsanalyse",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:backend": "cd backend && SKIP_GARMIN_INIT=true .venv/bin/python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000",
+    "build": "npm run build --prefix frontend",
+    "start": "npm run start --prefix frontend",
+    "lint": "npm run lint --prefix frontend",
+    "test": "cd backend && PYTHONPATH=. .venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v",
+    "test:guardrails": "cd backend && PYTHONPATH=. .venv/bin/python -m unittest tests.test_sync_jobs tests.test_sync_job_acquire_guardrail tests.test_force_refresh_parquet tests.test_summary_activity_type_filter tests.test_sleep_and_hrv_sync -v",
+    "preflight": "bash backend/scripts/preflight.sh"
+  },
   "dependencies": {
     "date-fns": "^4.1.0"
   }

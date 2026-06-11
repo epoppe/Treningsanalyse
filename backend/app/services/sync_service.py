@@ -27,7 +27,14 @@ from .activity_data_validation import (
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
-from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields, extract_garmin_weather_fields
+from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields
+from .activity_metric_backfill import (
+    derive_average_pace_sec_per_km,
+    derive_total_steps,
+    normalize_garmin_average_pace,
+)
+from .body_battery_service import BodyBatteryService
+from ..utils.activity_filters import is_running_activity
 
 logger = logging.getLogger(__name__)
 
@@ -180,11 +187,18 @@ class SyncService:
                         self.db.flush() # Få ID-en før commit
                     activity_type_cache[activity_type_key] = activity_type_obj
             
-            # Konverter pace til speed hvis nødvendig
-            avg_pace = act_data.get('averagePace')
-            avg_speed = act_data.get('averageSpeed', 0)
-            if not avg_speed and avg_pace and avg_pace > 0:
-                avg_speed = (1000 / (avg_pace * 60))
+            # Konverter pace/speed — Garmin averagePace er min/km, lagres som s/km
+            avg_pace = normalize_garmin_average_pace(act_data.get("averagePace"))
+            avg_speed = act_data.get("averageSpeed") or 0
+            if (not avg_speed or avg_speed <= 0) and avg_pace:
+                avg_speed = 1000.0 / avg_pace
+            elif not avg_pace and avg_speed and avg_speed > 0:
+                avg_pace = derive_average_pace_sec_per_km(average_speed=avg_speed)
+            elif not avg_pace:
+                avg_pace = derive_average_pace_sec_per_km(
+                    distance_m=act_data.get("distance"),
+                    duration_s=act_data.get("duration"),
+                )
 
             try:
                 start_time = parse_activity_start_from_json(act_data)
@@ -194,6 +208,13 @@ class SyncService:
                 continue
 
             list_fields = extract_activity_list_fields(act_data)
+            total_steps = list_fields["total_steps"]
+            if total_steps is None:
+                total_steps = derive_total_steps(
+                    distance_m=act_data.get("distance"),
+                    average_speed_mps=avg_speed if avg_speed and avg_speed > 0 else None,
+                    average_running_cadence_spm=act_data.get("averageRunningCadenceInStepsPerMinute"),
+                )
 
             new_activity = Activity(
                 activity_id=activity_id,
@@ -203,7 +224,7 @@ class SyncService:
                 duration=act_data.get('duration'),
                 moving_duration=list_fields["moving_duration"],
                 elapsed_duration=list_fields["elapsed_duration"],
-                total_steps=list_fields["total_steps"],
+                total_steps=total_steps,
                 min_elevation=list_fields["min_elevation"],
                 max_elevation=list_fields["max_elevation"],
                 calories=act_data.get('calories'),
@@ -218,6 +239,7 @@ class SyncService:
                 average_pace=avg_pace,
                 activity_type_id=activity_type_obj.id if activity_type_obj else None,
                 average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
+                max_running_cadence=list_fields["max_running_cadence"],
                 total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                 total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                 training_effect_label=act_data.get('trainingEffectLabel'),
@@ -525,6 +547,7 @@ class SyncService:
             added_count = 0
             inserted_activity_ids: List[str] = []
             buffered_parquet_records: List[Dict[str, Any]] = []
+            refreshed_parquet_activity_ids: List[int] = []
 
             for act_data in activities_to_save:
                 activity_id = str(act_data.get('activityId'))
@@ -533,10 +556,7 @@ class SyncService:
                     continue
                     
                 # Sjekk om aktiviteten er nylig og om vi skal force refresh
-                activity_start_time = datetime.fromisoformat(act_data['startTimeGMT'])
-                # Sørg for at begge datetimes har samme timezone-oppsett
-                if activity_start_time.tzinfo is None:
-                    activity_start_time = activity_start_time.replace(tzinfo=timezone.utc)
+                activity_start_time = parse_activity_start_from_json(act_data)
                 is_recent = activity_start_time >= recent_cutoff
                 
                 # Hvis ignore_sync_state er True (brukt ved manuell synk av valgt periode),
@@ -551,6 +571,7 @@ class SyncService:
                         existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                         if existing_activity:
                             self.db.delete(existing_activity)
+                            refreshed_parquet_activity_ids.append(int(activity_id))
                 else:
                     # Normal logikk: hopp over hvis ikke nylig, eller oppdater hvis force_refresh_recent
                     should_skip = (activity_id in existing_ids and 
@@ -565,6 +586,7 @@ class SyncService:
                         existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
                         if existing_activity:
                             self.db.delete(existing_activity)
+                            refreshed_parquet_activity_ids.append(int(activity_id))
                 
                 if should_skip:
                     continue
@@ -605,16 +627,20 @@ class SyncService:
                             self.db.flush()
                         activity_type_cache[activity_type_key] = activity_type_obj
 
-                # Konverter pace til speed hvis nødvendig
-                avg_pace = act_data.get('averagePace')
-                avg_speed = act_data.get('averageSpeed', 0)
-                if not avg_speed and avg_pace and avg_pace > 0:
-                    avg_speed = (1000 / (avg_pace * 60))
+                # Konverter pace/speed — Garmin averagePace er min/km, lagres som s/km
+                avg_pace = normalize_garmin_average_pace(act_data.get("averagePace"))
+                avg_speed = act_data.get("averageSpeed") or 0
+                if (not avg_speed or avg_speed <= 0) and avg_pace:
+                    avg_speed = 1000.0 / avg_pace
+                elif not avg_pace and avg_speed and avg_speed > 0:
+                    avg_pace = derive_average_pace_sec_per_km(average_speed=avg_speed)
+                elif not avg_pace:
+                    avg_pace = derive_average_pace_sec_per_km(
+                        distance_m=act_data.get("distance"),
+                        duration_s=act_data.get("duration"),
+                    )
 
-                # Sørg for at start_time har timezone-info
-                start_time = datetime.fromisoformat(act_data['startTimeGMT'])
-                if start_time.tzinfo is None:
-                    start_time = start_time.replace(tzinfo=timezone.utc)
+                start_time = parse_activity_start_from_json(act_data)
                 
                 # Hent elevation gain fra Garmin API (kan være i ulike felter)
                 elevation_gain = (
@@ -640,14 +666,25 @@ class SyncService:
                 if elevation_gain is None and is_recent:
                     try:
                         epoc_data = await self.garmin_client.get_activity_epoc_data(activity_id)
-                        if epoc_data:
-                            elevation_gain = epoc_data.get('elevation_gain')
-                            elevation_loss = elevation_loss or epoc_data.get('elevation_loss')
+                        if isinstance(epoc_data, dict):
+                            ep_gain = self._extract_numeric_value(epoc_data.get("elevation_gain"))
+                            ep_loss = self._extract_numeric_value(epoc_data.get("elevation_loss"))
+                            if elevation_gain is None:
+                                elevation_gain = ep_gain
+                            if elevation_loss is None:
+                                elevation_loss = ep_loss
                     except Exception as e:
                         logger.debug(f"Kunne ikke hente elevation gain fra activity-service for {activity_id}: {e}")
 
                 list_fields = extract_activity_list_fields(act_data)
                 weather_fields = extract_garmin_weather_fields(act_data)
+                total_steps = list_fields["total_steps"]
+                if total_steps is None:
+                    total_steps = derive_total_steps(
+                        distance_m=act_data.get("distance"),
+                        average_speed_mps=avg_speed if avg_speed and avg_speed > 0 else None,
+                        average_running_cadence_spm=act_data.get("averageRunningCadenceInStepsPerMinute"),
+                    )
                 if isinstance(details_json, dict):
                     for key in ("minTemperature", "maxTemperature"):
                         if act_data.get(key) is not None:
@@ -661,7 +698,7 @@ class SyncService:
                     duration=act_data.get('duration'),
                     moving_duration=list_fields["moving_duration"],
                     elapsed_duration=list_fields["elapsed_duration"],
-                    total_steps=list_fields["total_steps"],
+                    total_steps=total_steps,
                     min_elevation=list_fields["min_elevation"],
                     max_elevation=list_fields["max_elevation"],
                     calories=act_data.get('calories'),
@@ -676,6 +713,7 @@ class SyncService:
                     average_pace=avg_pace,
                     activity_type_id=activity_type_obj.id if activity_type_obj else None,
                     average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
+                    max_running_cadence=list_fields["max_running_cadence"],
                     total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
                     total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
                     training_effect_label=act_data.get('trainingEffectLabel'),
@@ -699,7 +737,10 @@ class SyncService:
                     logger.info(
                         f"Lagrer {len(buffered_parquet_records)} bufrede FIT-records til parquet i én batch..."
                     )
-                    self.storage.save_activity_details(buffered_parquet_records)
+                    self.storage.save_activity_details(
+                        buffered_parquet_records,
+                        replace_activity_ids=refreshed_parquet_activity_ids or None,
+                    )
                 except Exception as e:
                     logger.error(f"Feil ved batch-lagring av FIT-data til parquet: {e}")
 
@@ -719,8 +760,9 @@ class SyncService:
                     last_date = end_date.date()
                     try:
                         latest = max(
-                            datetime.fromisoformat(a.get('startTimeGMT')).date()
-                            for a in activities_to_save if a.get('startTimeGMT')
+                            parse_activity_start_from_json(a).date()
+                            for a in activities_to_save
+                            if a.get('startTimeGMT') or a.get('startTimeInSeconds') or a.get('startTimeLocal')
                         )
                         last_date = latest
                     except Exception:
@@ -846,7 +888,7 @@ class SyncService:
             logger.warning(f"Søvn synk feilet: {e}")
 
         try:
-            await self.stress_sync.sync_stress_data(start_date, end_date)
+            await self.stress_sync.sync_stress_data(start_date, end_date, force_refresh_recent)
         except Exception as e:
             logger.warning(f"Stress synk feilet: {e}")
 
@@ -1227,6 +1269,7 @@ class SyncService:
             "begin_potential_stamina": "begin_potential_stamina",
             "end_potential_stamina": "end_potential_stamina",
             "min_available_stamina": "min_available_stamina",
+            "recovery_time": "recovery_time",
             "activity_body_battery_delta": "activity_body_battery_delta",
             "training_load": "epoc",
             "aerobic_training_effect": "total_training_effect",
@@ -1240,6 +1283,8 @@ class SyncService:
             "elapsed_duration": "elapsed_duration",
             "min_elevation": "min_elevation",
             "max_elevation": "max_elevation",
+            "total_steps": "total_steps",
+            "max_running_cadence": "max_running_cadence",
         }
         changed = False
         for source_key, attr in field_map.items():
@@ -1258,7 +1303,23 @@ class SyncService:
             changed = True
             for fix in repair.fixes:
                 logger.info("Aktivitet %s: %s", activity.activity_id, fix)
+        if activity.avg_grade_adjusted_speed is None:
+            if self._fill_grade_adjusted_speed_from_fit(activity):
+                changed = True
         return changed
+
+    def _fill_grade_adjusted_speed_from_fit(self, activity: Activity) -> bool:
+        """Utled grade-adjusted speed fra FIT når Garmin summary mangler feltet."""
+        if activity.avg_grade_adjusted_speed is not None:
+            return False
+        try:
+            result = self.analysis_service.calculate_grade_adjusted_speed(
+                int(activity.activity_id),
+                self.db,
+            )
+        except (TypeError, ValueError):
+            return False
+        return bool(result and result.get("calculation_method") not in {None, "stored"})
 
     async def sync_garmin_performance_metrics(
         self,
@@ -1417,6 +1478,7 @@ class SyncService:
             updated_count = 0
             skipped_count = 0
             failed_count = 0
+            bb_service = BodyBatteryService(self.garmin_client)
             
             for i, activity in enumerate(activities, 1):
                 activity_id = str(activity.activity_id)
@@ -1437,17 +1499,34 @@ class SyncService:
                     activity.total_anaerobic_training_effect is not None
                     and activity.total_anaerobic_training_effect > 0
                 )
-                has_extended_summary = (
-                    activity.vo2_max_precise is not None
-                    or activity.training_effect_label is not None
-                    or activity.avg_grade_adjusted_speed is not None
-                    or activity.begin_potential_stamina is not None
+                missing_activity_body_battery = (
+                    activity.activity_body_battery_delta is None
+                    or activity.body_battery_start is None
+                    or activity.body_battery_start < 0
                 )
-                # Skip kun når både TE og de nye activity-service-feltene allerede finnes.
+                # vo2_max_precise kommer ofte fra activitylist uten full activity-service-fetch.
+                has_extended_summary = (
+                    activity.begin_potential_stamina is not None
+                    or activity.min_available_stamina is not None
+                    or activity.avg_grade_adjusted_speed is not None
+                    or (
+                        activity.activity_body_battery_delta is not None
+                        and activity.body_battery_start is not None
+                        and activity.body_battery_start >= 0
+                    )
+                )
+                missing_grade_adjusted_speed = (
+                    is_running_activity(activity)
+                    and activity.avg_grade_adjusted_speed is None
+                    and (activity.total_ascent or 0) >= 10
+                )
+                # Skip kun når TE og utvidede summary-/recovery-felter allerede finnes.
                 if (
                     has_valid_aerobic_te
                     and has_valid_anaerobic_te
                     and has_extended_summary
+                    and not missing_activity_body_battery
+                    and not missing_grade_adjusted_speed
                     and not (force_refresh_recent and is_recent)
                     and not is_latest
                 ):
@@ -1465,7 +1544,7 @@ class SyncService:
                     summary_metrics = await self.garmin_client.get_activity_summary_metrics(activity_id)
                     if summary_metrics:
                         self._apply_activity_summary_metrics(activity, summary_metrics)
-
+                    await bb_service.enrich_activity_body_battery_from_wellness(activity)
                     updated_count += 1
                 except Exception as e:
                     logger.warning(
@@ -1533,11 +1612,15 @@ class SyncService:
                 ).order_by(desc(Activity.start_time)).all()
             updated = 0
             failed = 0
+            bb_service = BodyBatteryService(self.garmin_client)
             for i, act in enumerate(activities, 1):
                 try:
                     summary_metrics = await self.garmin_client.get_activity_summary_metrics(str(act.activity_id))
                     if summary_metrics:
                         self._apply_activity_summary_metrics(act, summary_metrics)
+                    if await bb_service.enrich_activity_body_battery_from_wellness(act):
+                        updated += 1
+                    elif summary_metrics:
                         updated += 1
                     await asyncio.sleep(0.5)
                 except Exception as e:

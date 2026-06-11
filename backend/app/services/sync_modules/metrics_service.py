@@ -124,6 +124,7 @@ class SyncMetricsService:
             "running_economy_calculated": False,
             "negative_split_calculated": False,
             "decoupling_calculated": False,
+            "grade_adjusted_speed_calculated": False,
             "efficiency_calculated": False,
             "fatigue_resistance_calculated": False,
             "performance_snapshots_updated": False,
@@ -197,7 +198,9 @@ class SyncMetricsService:
             if _is_derived_running_activity(activity) and activity.negative_split_percent is None:
                 try:
                     negative_split_result = self.sync_service.analysis_service.calculate_negative_split(
-                        activity_id_int, self.sync_service.db
+                        activity_id_int,
+                        self.sync_service.db,
+                        persist=False,
                     )
                     if negative_split_result and "negative_split_percent" in negative_split_result:
                         results["negative_split_calculated"] = True
@@ -213,6 +216,29 @@ class SyncMetricsService:
                         results["skip_reasons"].append(f"negative_split:{exc.detail}")
                     logger.debug(f"Kunne ikke beregne negative split for aktivitet {activity_id}: {exc}")
 
+            if _is_derived_running_activity(activity) and activity.avg_grade_adjusted_speed is None:
+                try:
+                    gap_result = self.sync_service.analysis_service.calculate_grade_adjusted_speed(
+                        activity_id_int,
+                        self.sync_service.db,
+                        persist=False,
+                    )
+                    if gap_result and gap_result.get("avg_grade_adjusted_speed") is not None:
+                        if gap_result.get("calculation_method") != "stored":
+                            results["grade_adjusted_speed_calculated"] = True
+                        logger.debug(
+                            "Grade-adjusted speed for aktivitet %s: %s m/s (%s)",
+                            activity_id,
+                            gap_result.get("avg_grade_adjusted_speed"),
+                            gap_result.get("calculation_method"),
+                        )
+                except Exception as exc:
+                    logger.debug(
+                        "Kunne ikke beregne grade-adjusted speed for aktivitet %s: %s",
+                        activity_id,
+                        exc,
+                    )
+
             if _is_derived_running_activity(activity) and (
                 activity.decoupling_percent is None
                 or activity.avg_efficiency_factor is None
@@ -220,7 +246,9 @@ class SyncMetricsService:
             ):
                 try:
                     efficiency_result = self.sync_service.analysis_service.calculate_efficiency_metrics(
-                        activity_id_int, self.sync_service.db
+                        activity_id_int,
+                        self.sync_service.db,
+                        persist=False,
                     )
                     if efficiency_result and "decoupling_percent" in efficiency_result:
                         results["decoupling_calculated"] = True
@@ -282,6 +310,10 @@ class SyncMetricsService:
                 results["errors"].append(f"Lagringsfeil: {str(exc)}")
         except Exception as exc:
             logger.error(f"Generell feil ved beregning av metrics for aktivitet {activity_id}: {exc}")
+            try:
+                self.sync_service.db.rollback()
+            except Exception:
+                pass
             results["errors"].append(f"Generell feil: {str(exc)}")
         return results
 

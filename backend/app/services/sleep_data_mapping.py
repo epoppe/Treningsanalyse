@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping, Optional
 
 from ..database.models.sleep import Sleep
+from ..utils.sleep_field_derivation import derive_sleep_fields_from_row
 
 
 def sleep_minutes_to_seconds(value: Any) -> Optional[float]:
@@ -156,3 +157,8 @@ def apply_sleep_data_to_row(row: Sleep, data: Mapping[str, Any]) -> None:
     detailed = data.get("detailed_sleep_data")
     if detailed is not None:
         row.detailed_sleep_data = detailed
+
+    derived = derive_sleep_fields_from_row(row)
+    for attr, value in derived.items():
+        if value is not None and getattr(row, attr, None) is None:
+            setattr(row, attr, value)

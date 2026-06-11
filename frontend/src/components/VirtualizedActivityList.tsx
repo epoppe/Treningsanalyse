@@ -13,7 +13,7 @@ const ActivityContainer = styled.div`
 
 const VirtualScrollContainer = styled.div`
   height: 100vh;
-  overflow-auto;
+  overflow: auto;
 `;
 
 const VirtualList = styled.div<{ height: number }>`

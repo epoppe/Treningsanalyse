@@ -4,7 +4,12 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 
+from ..database.models.activity import Activity
 from ..database.models.body_battery import BodyBattery
+from ..utils.body_battery_timeseries import (
+    derive_activity_body_battery_from_timeseries,
+    enrich_body_battery_day_data,
+)
 from .garmin_client import GarminClient
 
 logger = logging.getLogger(__name__)
@@ -39,6 +44,7 @@ class BodyBatteryService:
                     continue
                 
                 try:
+                    day_data = enrich_body_battery_day_data(day_data)
                     # Konverter dato
                     data_date = datetime.strptime(day_data['date'], '%Y-%m-%d').date()
                     
@@ -142,6 +148,42 @@ class BodyBatteryService:
             logger.error(f"Feil ved Body Battery-synkronisering: {e}")
             db.rollback()
             raise
+
+    async def enrich_activity_body_battery_from_wellness(
+        self,
+        activity: Activity,
+    ) -> bool:
+        """
+        Fyller activity.body_battery_start og activity_body_battery_delta fra daglig
+        wellness-tidsserie når Garmin activity summary mangler differenceBodyBattery.
+        """
+        if activity.start_time is None:
+            return False
+
+        needs_start = activity.body_battery_start is None
+        needs_delta = activity.activity_body_battery_delta is None
+        if not needs_start and not needs_delta:
+            return False
+
+        activity_day = activity.start_time.date()
+        day_data = await self.garmin_client.get_body_battery_data(activity_day)
+        values_array = (day_data or {}).get("body_battery_values_array")
+        if not values_array:
+            return False
+
+        derived = derive_activity_body_battery_from_timeseries(
+            activity.start_time,
+            activity.duration,
+            values_array,
+        )
+        changed = False
+        if needs_start and derived["body_battery_start"] is not None:
+            activity.body_battery_start = derived["body_battery_start"]
+            changed = True
+        if needs_delta and derived["activity_body_battery_delta"] is not None:
+            activity.activity_body_battery_delta = derived["activity_body_battery_delta"]
+            changed = True
+        return changed
     
     def get_body_battery_over_time(self, db: Session, start_date: str, end_date: str) -> Dict[str, Any]:
         """

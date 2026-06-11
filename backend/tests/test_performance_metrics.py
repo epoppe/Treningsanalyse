@@ -221,6 +221,23 @@ class PerformanceMetricsTests(unittest.TestCase):
         self.assertTrue(any(p["duration_seconds"] == 300 and p["speed_mps"] >= 3.9 for p in speed_points))
         self.assertTrue(any(p["duration_seconds"] == 1200 and p["speed_mps"] >= 2.9 for p in speed_points))
 
+    def test_duration_curve_estimates_power_when_raw_column_missing(self):
+        start = datetime(2026, 2, 10, 8, 0, tzinfo=timezone.utc)
+        self._add_constant_activity("2101", start, 3.5, 600)
+
+        service = PerformanceMetricsService(self.db, self.storage)
+        efforts = service.collect_best_efforts(days=None)
+        power_efforts = [effort for effort in efforts if effort.get("metric_type") == "power"]
+        curve = service.build_duration_curve()
+
+        self.assertGreater(len(power_efforts), 0)
+        self.assertTrue(
+            any(
+                point["duration_seconds"] == 300 and point["power_watts"] > 0
+                for point in curve["curves"]["power"]
+            )
+        )
+
     def test_fatigue_resistance_is_persisted_per_long_activity(self):
         self._add_fatigue_activity("900")
         activity = self.db.query(Activity).filter_by(activity_id="900").first()

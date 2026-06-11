@@ -16,6 +16,34 @@ from app.services.training_stress_service import TrainingStressService
 
 logger = logging.getLogger(__name__)
 
+_READINESS_FALLBACK_SLEEP = frozenset({"fallback_no_data", "fallback_no_scores"})
+_READINESS_FALLBACK_HRV = frozenset(
+    {"fallback_no_data", "fallback_no_morning_data", "fallback_no_rmssd"}
+)
+_READINESS_FALLBACK_FORM = frozenset({"fallback_no_metrics", "fallback_error"})
+
+
+def is_robust_training_readiness(readiness_data: Dict[str, Any]) -> bool:
+    """
+    True når readiness bygger på reell treningsbelastning (form/TSB) og minst én
+    helsekomponent (søvn eller HRV) — ikke ren fallback uten underliggende data.
+    """
+    if not isinstance(readiness_data, dict) or readiness_data.get("error"):
+        return False
+
+    details = readiness_data.get("details") or {}
+    sleep_method = (details.get("sleep_baseline") or {}).get("method")
+    hrv_method = (details.get("hrv_baseline") or {}).get("method")
+    form_method = (details.get("form_baseline") or {}).get("method")
+
+    form_ok = form_method not in _READINESS_FALLBACK_FORM
+    health_ok = (
+        sleep_method not in _READINESS_FALLBACK_SLEEP
+        or hrv_method not in _READINESS_FALLBACK_HRV
+    )
+    return form_ok and health_ok
+
+
 class TrainingReadinessService:
     """Service for å beregne training readiness score."""
     
@@ -193,6 +221,7 @@ class TrainingReadinessService:
                     "form_score": form_score
                 },
                 "has_trained_on_date": has_trained_on_date,
+                "is_robust": False,
                 "details": {
                     "sleep_data": sleep_data,
                     "hrv_data": hrv_data,
@@ -204,6 +233,7 @@ class TrainingReadinessService:
                     "form_baseline": form_baseline,
                 }
             }
+            result["is_robust"] = is_robust_training_readiness(result)
             
             # 7. Logger info
             logger.info(f"Beregnet readiness for {target_date}: {total_score:.1f} (søvn:{sleep_score:.1f}, hrv:{hrv_score:.1f}, form:{form_score:.1f}, raw form:{form_score_value:.1f})")

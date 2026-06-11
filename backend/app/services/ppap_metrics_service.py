@@ -235,7 +235,15 @@ class PpapMetricsService:
             return self._duration_curve_cache
         service = PerformanceMetricsService(self.db, self.storage)
         payload = service.get_snapshot_payload("duration_curve")
-        if not payload:
+        curves = (payload or {}).get("all_time", {}).get("curves", {})
+        power_curve = curves.get("power") or []
+        power_missing = bool(curves.get("speed")) and not power_curve
+        power_stale = any(
+            float(point.get("power_watts") or 0)
+            > service._max_plausible_avg_power(int(point.get("duration_seconds") or 0))
+            for point in power_curve
+        )
+        if not payload or power_missing or power_stale:
             payload = service.recalculate_performance_snapshots().get("duration_curve", {})
         self._duration_curve_cache = payload or {}
         return self._duration_curve_cache

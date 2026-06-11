@@ -7,6 +7,10 @@ import logging
 from sqlalchemy.sql import func
 
 from ...database.models.health_data_missing import HealthDataMissing
+from ...services.health_data_missing_helpers import (
+    clear_health_data_missing,
+    should_retry_health_data_missing,
+)
 from ...database.models.sleep import RestingHeartRate
 from ...database.models.sync_state import SyncState
 
@@ -71,12 +75,23 @@ class RestingHeartRateSyncService:
             processed_successfully = False
             is_recent = current_date >= recent_cutoff
             should_skip = current_date.date() in existing_rhr_dates and not (force_refresh_recent and is_recent)
-            if should_skip or current_date.date() in rhr_missing_dates:
+            if should_skip:
                 processed_successfully = True
                 if not sync_state_blocked:
                     last_synced_candidate = current_date.date()
                 current_date += timedelta(days=1)
                 continue
+            if current_date.date() in rhr_missing_dates:
+                if not should_retry_health_data_missing(is_recent, force_refresh_recent):
+                    processed_successfully = True
+                    if not sync_state_blocked:
+                        last_synced_candidate = current_date.date()
+                    current_date += timedelta(days=1)
+                    continue
+                logger.debug(
+                    "Prøver hvilepuls på nytt for %s (force_refresh_recent=True).",
+                    current_date.date(),
+                )
             try:
                 data = await self.sync_service.garmin_client.get_resting_heart_rate_data(current_date)
                 if data and data.get("resting_heart_rate") is not None:
@@ -94,6 +109,9 @@ class RestingHeartRateSyncService:
                     row.measurement_method = data.get("measurement_method") or "automatic"
                     row.updated_at = func.now()
                     existing_rhr_dates.add(measurement_date)
+                    clear_health_data_missing(self.sync_service.db, "resting_heart_rate", measurement_date)
+                    rhr_missing_dates.discard(measurement_date)
+                    pending_missing_dates.discard(measurement_date)
                     saved += 1
                 else:
                     try:

@@ -21,10 +21,9 @@ from ..services.hrv_service import HRVService
 from ..services.body_battery_service import BodyBatteryService
 from ..services.sync_job_store import (
     ACTIVE_JOB_STATUSES,
-    create_job as _store_create_job,
+    acquire_job_slot,
     get_job as _store_get_job,
     get_sync_jobs_store,
-    iter_jobs_reversed,
     mark_job_processing as _store_mark_job_processing,
     set_job_phase,
 )
@@ -42,26 +41,18 @@ FULL_SYNC_PHASES = 4
 ACTIVITY_QUEUE_JOB_TYPES = frozenset({"activities_sync", "new_activities_sync"})
 
 
-def _create_job(job_type: str, message: str = "Queued") -> str:
-    return _store_create_job(job_type, message)
-
-
-def _find_active_job_by_type(job_type: str) -> Optional[tuple[str, Dict[str, Any]]]:
-    for existing_job_id, job in iter_jobs_reversed():
-        if job.get("job_type") == job_type and job.get("status") in ACTIVE_JOB_STATUSES:
-            return existing_job_id, job
-    return None
-
-
-def _find_active_activity_queue_job() -> Optional[tuple[str, Dict[str, Any]]]:
-    """Finn aktiv aktivitetssynk eller «nye aktiviteter»-jobb (samme kø)."""
-    for existing_job_id, job in iter_jobs_reversed():
-        if (
-            job.get("job_type") in ACTIVITY_QUEUE_JOB_TYPES
-            and job.get("status") in ACTIVE_JOB_STATUSES
-        ):
-            return existing_job_id, job
-    return None
+def _enqueue_sync_job(
+    job_type: str,
+    queue_message: str,
+    *,
+    shared_job_types: Optional[frozenset[str]] = None,
+) -> tuple[str, Dict[str, Any], bool]:
+    """Atomisk deduplisering ved jobbstart. Returnerer (job_id, job, reused)."""
+    return acquire_job_slot(
+        job_type,
+        queue_message,
+        shared_job_types=shared_job_types,
+    )
 
 
 def _mark_job_processing(job_id: str, message: Optional[str] = None, phase: Optional[int] = None, total_phases: Optional[int] = None):
@@ -71,7 +62,7 @@ def _mark_job_processing(job_id: str, message: Optional[str] = None, phase: Opti
 
 
 def _completed_job_response(message: str, job_id: str) -> Dict[str, Any]:
-    job = sync_jobs.get(job_id, {})
+    job = get_sync_jobs_store().get(job_id, {})
     return {
         "message": message,
         "job_id": job_id,
@@ -346,15 +337,17 @@ async def trigger_activity_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    active = _find_active_activity_queue_job()
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "activities_sync",
+        "Aktivitetssynk er køet.",
+        shared_job_types=ACTIVITY_QUEUE_JOB_TYPES,
+    )
+    if reused:
         return _existing_job_response(
             "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("activities_sync", "Aktivitetssynk er køet.")
     # Bruk force_refresh_recent=True for å sikre at nylige aktiviteter oppdateres
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
@@ -387,15 +380,17 @@ async def trigger_activity_sync_historical(
     start_datetime = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    active = _find_active_activity_queue_job()
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "activities_sync",
+        "Historisk aktivitetssynk er køet.",
+        shared_job_types=ACTIVITY_QUEUE_JOB_TYPES,
+    )
+    if reused:
         return _existing_job_response(
             "Historisk aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("activities_sync", "Historisk aktivitetssynk er køet.")
 
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
@@ -421,15 +416,16 @@ async def trigger_missing_fit_download(
     limit: int = Query(50, ge=1, le=500, description="Maks antall manglende aktiviteter per kjøring")
 ):
     """Fortsetter nedlasting av manglende FIT-data i batcher."""
-    active = _find_active_job_by_type("fit_download")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "fit_download",
+        "FIT-nedlasting (manglende) er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("fit_download", "FIT-nedlasting (manglende) er køet.")
 
     async def _run_missing_fit_job():
         db_session = None
@@ -461,15 +457,17 @@ async def trigger_recent_activity_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=30)
     
-    active = _find_active_activity_queue_job()
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "activities_sync",
+        "Synk av nye aktiviteter er køet.",
+        shared_job_types=ACTIVITY_QUEUE_JOB_TYPES,
+    )
+    if reused:
         return _existing_job_response(
             "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("activities_sync", "Synk av nye aktiviteter er køet.")
     background_tasks.add_task(
         run_activity_sync_with_fit_data,
         job_id,
@@ -499,15 +497,16 @@ async def trigger_health_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    active = _find_active_job_by_type("health_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "health_sync",
+        "Helsesynk er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Helsesynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("health_sync", "Helsesynk er køet.")
     background_tasks.add_task(run_health_sync, job_id, garmin_client, storage, start_datetime, end_datetime)
     
     return _completed_job_response("Synkronisering av helsedata startet.", job_id)
@@ -522,15 +521,16 @@ async def trigger_recent_health_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=90)
     
-    active = _find_active_job_by_type("health_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "health_sync",
+        "Helsesynk (recent) er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Helsesynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("health_sync", "Helsesynk (recent) er køet.")
     background_tasks.add_task(run_health_sync_with_force, job_id, garmin_client, storage, start_datetime, end_datetime, True)
     
     return _completed_job_response(
@@ -549,15 +549,16 @@ async def trigger_garmin_performance_metrics_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    active = _find_active_job_by_type("garmin_performance_metrics_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "garmin_performance_metrics_sync",
+        "Garmin performance metrics-synk er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Garmin performance metrics-synk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("garmin_performance_metrics_sync", "Garmin performance metrics-synk er køet.")
     background_tasks.add_task(
         run_garmin_performance_metrics_sync,
         job_id,
@@ -580,15 +581,16 @@ async def trigger_recent_garmin_performance_metrics_sync(
     end_datetime = datetime.now(timezone.utc)
     start_datetime = end_datetime - timedelta(days=90)
 
-    active = _find_active_job_by_type("garmin_performance_metrics_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "garmin_performance_metrics_sync",
+        "Garmin performance metrics recent-synk er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Garmin performance metrics-synk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("garmin_performance_metrics_sync", "Garmin performance metrics recent-synk er køet.")
     background_tasks.add_task(
         run_garmin_performance_metrics_sync,
         job_id,
@@ -609,15 +611,16 @@ async def trigger_fit_data_download(
     garmin_client: GarminClient = Depends(get_garmin_client)
 ):
     """Starter nedlasting av FIT-data for aktiviteter som mangler detaljerte data."""
-    active = _find_active_job_by_type("fit_download")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "fit_download",
+        "FIT-nedlasting er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("fit_download", "FIT-nedlasting er køet.")
     background_tasks.add_task(run_fit_data_download, job_id, garmin_client, storage, None, limit)
     
     return _completed_job_response(f"FIT-data nedlasting startet for opptil {limit} aktiviteter.", job_id)
@@ -633,15 +636,16 @@ async def trigger_fit_data_download_period_endpoint(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
 
-    active = _find_active_job_by_type("fit_download")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "fit_download",
+        "FIT-periode-nedlasting er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "FIT-nedlasting er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("fit_download", "FIT-periode-nedlasting er køet.")
     background_tasks.add_task(run_fit_data_download_period, job_id, garmin_client, storage, start_datetime, end_datetime)
     
     return _completed_job_response(
@@ -657,15 +661,16 @@ async def trigger_training_effect_refresh(
     garmin_client: GarminClient = Depends(get_garmin_client),
 ):
     """Henter aerob/anaerob effekt fra Garmin for aktiviteter som mangler eller viser 0."""
-    active = _find_active_job_by_type("training_effect_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "training_effect_sync",
+        "Training Effect-synk er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Training Effect-synk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("training_effect_sync", "Training Effect-synk er køet.")
     background_tasks.add_task(run_training_effect_refresh, job_id, garmin_client, storage, force)
     msg = "Henter Training Effect for aktiviteter som mangler eller har 0."
     if force:
@@ -910,15 +915,16 @@ async def trigger_full_sync(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    active = _find_active_job_by_type("full_sync")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "full_sync",
+        "Full synkronisering er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Full synkronisering er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("full_sync", "Full synkronisering er køet.")
     background_tasks.add_task(
         run_full_sync, 
         job_id, 
@@ -1083,15 +1089,16 @@ async def trigger_calculations(
     start_datetime = datetime.combine(request.start_date, datetime.min.time(), tzinfo=timezone.utc)
     end_datetime = datetime.combine(request.end_date, datetime.max.time(), tzinfo=timezone.utc)
     
-    active = _find_active_job_by_type("calculations")
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "calculations",
+        "Beregninger/caching er køet.",
+    )
+    if reused:
         return _existing_job_response(
             "Beregninger/caching er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("calculations", "Beregninger/caching er køet.")
     background_tasks.add_task(run_calculations_only, job_id, storage, start_datetime, end_datetime)
     
     return _completed_job_response(
@@ -1109,15 +1116,17 @@ async def trigger_new_activities_sync(
     Starter synkronisering av nye aktiviteter fra siste lagrede aktivitet.
     Dette inkluderer aktiviteter, FIT-data, helsedata, Training Effect data og beregninger.
     """
-    active = _find_active_activity_queue_job()
-    if active:
-        existing_job_id, existing_job = active
+    job_id, job, reused = _enqueue_sync_job(
+        "new_activities_sync",
+        "Synk av nye aktiviteter er køet.",
+        shared_job_types=ACTIVITY_QUEUE_JOB_TYPES,
+    )
+    if reused:
         return _existing_job_response(
             "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
-            existing_job_id,
-            existing_job,
+            job_id,
+            job,
         )
-    job_id = _create_job("new_activities_sync", "Synk av nye aktiviteter er køet.")
     background_tasks.add_task(run_new_activities_sync, job_id, garmin_client, storage)
     
     return _completed_job_response(
@@ -1163,15 +1172,16 @@ async def sync_hrv_data(
 ):
     """Synkroniserer HRV-data fra parquet-filer til databasen for raskere tilgang."""
     try:
-        active = _find_active_job_by_type("hrv_sync")
-        if active:
-            existing_job_id, existing_job = active
+        job_id, job, reused = _enqueue_sync_job(
+            "hrv_sync",
+            "HRV-synk er køet.",
+        )
+        if reused:
             return _existing_job_response(
                 "HRV-synk er allerede i gang. Returnerer eksisterende jobb.",
-                existing_job_id,
-                existing_job,
+                job_id,
+                job,
             )
-        job_id = _create_job("hrv_sync", "HRV-synk er køet.")
         
         # Start synkronisering som bakgrunnsjobb
         background_tasks.add_task(
@@ -1270,15 +1280,16 @@ async def sync_body_battery_data(
 ):
     """Synkroniserer Body Battery-data fra Garmin til databasen."""
     try:
-        active = _find_active_job_by_type("body_battery_sync")
-        if active:
-            existing_job_id, existing_job = active
+        job_id, job, reused = _enqueue_sync_job(
+            "body_battery_sync",
+            "Body Battery-synk er køet.",
+        )
+        if reused:
             return _existing_job_response(
                 "Body Battery-synk er allerede i gang. Returnerer eksisterende jobb.",
-                existing_job_id,
-                existing_job,
+                job_id,
+                job,
             )
-        job_id = _create_job("body_battery_sync", "Body Battery-synk er køet.")
         
         # Start synkronisering som bakgrunnsjobb
         background_tasks.add_task(

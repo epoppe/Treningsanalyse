@@ -6,6 +6,10 @@ import asyncio
 import logging
 
 from ...database.models.health_data_missing import HealthDataMissing
+from ...services.health_data_missing_helpers import (
+    clear_health_data_missing,
+    should_retry_health_data_missing,
+)
 from ...database.models.sync_state import SyncState
 from ...database.models.sleep import HRV
 from ...services.hrv_fetch import get_local_hrv_payload, resolve_hrv_for_date, upsert_hrv_to_db
@@ -55,6 +59,16 @@ class HRVSyncService:
             hrv_missing_dates.add(missing_day)
         except Exception as add_exc:
             logger.debug(f"Kunne ikke lagre HRV manglende dato {missing_day}: {add_exc}")
+
+    def _clear_hrv_missing(
+        self,
+        missing_day: date,
+        hrv_missing_dates: set[date],
+        pending_missing_dates: set[date],
+    ) -> None:
+        clear_health_data_missing(self.sync_service.db, "hrv", missing_day)
+        hrv_missing_dates.discard(missing_day)
+        pending_missing_dates.discard(missing_day)
 
     async def sync_hrv_data(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False):
         hrv_start_date = max(start_date, datetime(2023, 1, 1, tzinfo=timezone.utc))
@@ -147,12 +161,14 @@ class HRVSyncService:
                 current_date += timedelta(days=1)
                 continue
             if current_date.date() in hrv_missing_dates:
-                logger.debug(f"Hopper over HRV-data for {date_str} (ingen data sist gang).")
-                processed_successfully = True
-                if not sync_state_blocked:
-                    last_synced_candidate = current_date.date()
-                current_date += timedelta(days=1)
-                continue
+                if not should_retry_health_data_missing(is_recent, force_refresh_recent):
+                    logger.debug(f"Hopper over HRV-data for {date_str} (ingen data sist gang).")
+                    processed_successfully = True
+                    if not sync_state_blocked:
+                        last_synced_candidate = current_date.date()
+                    current_date += timedelta(days=1)
+                    continue
+                logger.debug(f"Prøver HRV på nytt for {date_str} (force_refresh_recent=True).")
             elif current_date.date() in existing_dates and force_refresh_recent and is_recent:
                 logger.debug(f"Oppdaterer eksisterende HRV-data for {date_str} (force_refresh_recent=True).")
             try:
@@ -173,12 +189,22 @@ class HRVSyncService:
                                 resolved.data,
                             )
                             existing_dates.add(current_date.date())
+                            self._clear_hrv_missing(
+                                current_date.date(),
+                                hrv_missing_dates,
+                                pending_missing_dates,
+                            )
                         elif get_local_hrv_payload(current_date.date(), db=self.sync_service.db, storage=self.sync_service.storage)[0]:
                             logger.debug(
                                 "Live Garmin HRV for %s var ugyldig, men lokal HRV finnes — markeres ikke som manglende.",
                                 date_str,
                             )
                             existing_dates.add(current_date.date())
+                            self._clear_hrv_missing(
+                                current_date.date(),
+                                hrv_missing_dates,
+                                pending_missing_dates,
+                            )
                         else:
                             self._mark_hrv_missing(
                                 current_date.date(),
@@ -199,6 +225,11 @@ class HRVSyncService:
                                 resolved.data,
                             )
                         existing_dates.add(current_date.date())
+                        self._clear_hrv_missing(
+                            current_date.date(),
+                            hrv_missing_dates,
+                            pending_missing_dates,
+                        )
                 else:
                     local_payload, _local_source = get_local_hrv_payload(
                         current_date.date(),
@@ -211,6 +242,11 @@ class HRVSyncService:
                             date_str,
                         )
                         existing_dates.add(current_date.date())
+                        self._clear_hrv_missing(
+                            current_date.date(),
+                            hrv_missing_dates,
+                            pending_missing_dates,
+                        )
                     else:
                         self._mark_hrv_missing(
                             current_date.date(),

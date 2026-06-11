@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from ..database.models import Activity
 from .hrv_service import HRVService
 from .body_battery_service import BodyBatteryService
+from ..utils.activity_filters import is_running_activity
+from ..utils.grade_adjusted_pace import compute_avg_grade_adjusted_speed_mps
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,12 @@ class AnalysisService:
         self.storage = storage
         self.hrv_service = HRVService(storage)
         self.body_battery_service = None  # Vil bli initialisert når nødvendig
+
+    @staticmethod
+    def _maybe_commit(db: Session, *, persist: bool) -> None:
+        """Commit kun når kaller ber om det (batch-orkestrering samler én commit)."""
+        if persist:
+            db.commit()
 
     def _to_float(self, value: Any) -> Optional[float]:
         """Konverterer ulike numeriske representasjoner til float."""
@@ -169,10 +177,22 @@ class AnalysisService:
                 or record.get("heartrate")
                 or record.get("hr")
             )
+            distance = self._to_float(
+                record.get("distance")
+                or record.get("enhanced_distance")
+                or record.get("enhancedDistance")
+            )
+            altitude = self._to_float(
+                record.get("altitude")
+                or record.get("enhanced_altitude")
+                or record.get("enhancedAltitude")
+            )
             parsed_records.append({
                 "timestamp": timestamp,
                 "speed": speed,
-                "heart_rate": heart_rate
+                "heart_rate": heart_rate,
+                "distance": distance,
+                "altitude": altitude,
             })
 
         if not parsed_records:
@@ -180,7 +200,63 @@ class AnalysisService:
 
         return enrich_fit_speed_from_distance(pd.DataFrame(parsed_records))
 
-    def calculate_negative_split(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
+    def _split_activity_halves(self, valid_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+        """
+        Del aktivitet i to halvdeler etter distanse (foretrukket) eller tid — ikke sample-telling.
+        """
+        ordered = valid_data.sort_values("timestamp").copy()
+        if len(ordered) < 2:
+            return ordered.iloc[0:0], ordered.iloc[0:0], "time"
+
+        if "distance" in ordered.columns:
+            distance = pd.to_numeric(ordered["distance"], errors="coerce")
+            if int(distance.notna().sum()) >= _MIN_DERIVED_SPEED_SAMPLES:
+                start_dist = float(distance.min())
+                end_dist = float(distance.max())
+                total_distance = end_dist - start_dist
+                if total_distance >= 200:
+                    half_distance = start_dist + total_distance / 2
+                    first_half = ordered[distance <= half_distance]
+                    second_half = ordered[distance > half_distance]
+                    if len(first_half) >= 10 and len(second_half) >= 10:
+                        return first_half, second_half, "distance"
+
+        start = ordered["timestamp"].iloc[0]
+        end = ordered["timestamp"].iloc[-1]
+        midpoint_time = start + (end - start) / 2
+        first_half = ordered[ordered["timestamp"] < midpoint_time]
+        second_half = ordered[ordered["timestamp"] >= midpoint_time]
+        return first_half, second_half, "time"
+
+    def _half_pace_min_per_km(self, half: pd.DataFrame) -> Optional[float]:
+        """Pace (min/km) for en halvdel basert på tid/distanse når mulig."""
+        if len(half) < 2:
+            return None
+
+        ordered = half.sort_values("timestamp")
+        duration_sec = (ordered["timestamp"].iloc[-1] - ordered["timestamp"].iloc[0]).total_seconds()
+        if duration_sec <= 0:
+            return None
+
+        if "distance" in ordered.columns:
+            distance = pd.to_numeric(ordered["distance"], errors="coerce").dropna()
+            if len(distance) >= 2:
+                distance_m = float(distance.iloc[-1] - distance.iloc[0])
+                if distance_m >= 50:
+                    return (duration_sec / distance_m) * 1000 / 60
+
+        mean_speed = float(ordered["speed"].mean())
+        if mean_speed <= 0:
+            return None
+        return 1000 / (mean_speed * 60)
+
+    def calculate_negative_split(
+        self,
+        activity_id: int,
+        db: Session,
+        *,
+        persist: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """
         Beregner negativ split for en aktivitet basert på FIT-data.
         Negativ split = (andre halvdel pace - første halvdel pace) / første halvdel pace * 100
@@ -224,39 +300,51 @@ class AnalysisService:
                 logger.warning(f"Ikke nok datapunkter for negative split beregning: {len(valid_data)}")
                 raise HTTPException(status_code=404, detail="Insufficient data points for negative split calculation")
             
-            # Sorter etter timestamp
-            valid_data = valid_data.sort_values('timestamp')
-            
-            # Del i to halvdeler
-            midpoint = len(valid_data) // 2
-            first_half = valid_data.iloc[:midpoint]
-            second_half = valid_data.iloc[midpoint:]
-            
-            # Beregn gjennomsnittlig pace for hver halvdel (pace = 1000 / speed / 60)
-            first_half_pace = 1000 / (first_half['speed'].mean() * 60)  # min/km
-            second_half_pace = 1000 / (second_half['speed'].mean() * 60)  # min/km
-            
-            if first_half_pace <= 0:
-                logger.warning(f"Ugyldig pace for første halvdel: {first_half_pace}")
+            valid_data = valid_data.sort_values("timestamp")
+            first_half, second_half, split_method = self._split_activity_halves(valid_data)
+
+            if len(first_half) < 10 or len(second_half) < 10:
+                logger.warning(
+                    "Ikke nok datapunkter per halvdel for negative split: %s/%s",
+                    len(first_half),
+                    len(second_half),
+                )
+                raise HTTPException(
+                    status_code=404,
+                    detail="Insufficient split data for negative split calculation",
+                )
+
+            first_half_pace = self._half_pace_min_per_km(first_half)
+            second_half_pace = self._half_pace_min_per_km(second_half)
+
+            if not first_half_pace or first_half_pace <= 0 or not second_half_pace:
+                logger.warning(
+                    "Ugyldig pace for negative split: first=%s second=%s",
+                    first_half_pace,
+                    second_half_pace,
+                )
                 return None
-            
-            # Beregn negative split prosentvis
-            # Endret logikk: negativ verdi = raskere andre halvdel (negativ split)
-            # positiv verdi = saktere andre halvdel (positiv split)
+
             negative_split_percent = ((second_half_pace - first_half_pace) / first_half_pace) * 100
-            
-            # Lagre i database
+
             activity.negative_split_percent = negative_split_percent
-            db.commit()
-            
-            logger.info(f"Beregnet negative split for aktivitet {activity_id}: {negative_split_percent:.2f}%")
-            
+            self._maybe_commit(db, persist=persist)
+
+            logger.info(
+                "Beregnet negative split for aktivitet %s: %.2f%% (split=%s)",
+                activity_id,
+                negative_split_percent,
+                split_method,
+            )
+
             return {
                 "activity_id": activity_id,
                 "negative_split_percent": round(negative_split_percent, 2),
                 "calculation_method": "calculated",
                 "first_half_pace": round(first_half_pace, 2),
-                "second_half_pace": round(second_half_pace, 2)
+                "second_half_pace": round(second_half_pace, 2),
+                "data_points": len(valid_data),
+                "split_method": split_method,
             }
             
         except HTTPException:
@@ -264,6 +352,73 @@ class AnalysisService:
             raise
         except Exception as e:
             logger.error(f"Feil ved beregning av negative split for aktivitet {activity_id}: {e}")
+            return None
+
+    def calculate_grade_adjusted_speed(
+        self,
+        activity_id: int,
+        db: Session,
+        *,
+        overwrite: bool = False,
+        persist: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Beregner grade-adjusted speed (m/s) fra FIT når Garmin ikke leverer avgGradeAdjustedSpeed.
+        """
+        try:
+            activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
+            if not activity:
+                logger.warning("Aktivitet %s ikke funnet i database", activity_id)
+                return None
+
+            if not is_running_activity(activity, include_treadmill=True):
+                return None
+
+            if activity.avg_grade_adjusted_speed is not None and not overwrite:
+                pace_sec = 1000.0 / activity.avg_grade_adjusted_speed
+                return {
+                    "activity_id": activity_id,
+                    "avg_grade_adjusted_speed": round(activity.avg_grade_adjusted_speed, 4),
+                    "grade_adjusted_pace_sec_per_km": round(pace_sec, 1),
+                    "calculation_method": "stored",
+                }
+
+            details_df = self._get_fit_details_for_activity(activity_id, activity)
+            if details_df is None or details_df.empty:
+                return None
+
+            ref_speed = None
+            if activity.average_moving_speed and activity.average_moving_speed > 0:
+                ref_speed = float(activity.average_moving_speed)
+            elif activity.average_speed and activity.average_speed > 0:
+                ref_speed = float(activity.average_speed)
+
+            result = compute_avg_grade_adjusted_speed_mps(
+                details_df,
+                reference_speed_mps=ref_speed,
+            )
+            if result is None:
+                return None
+
+            activity.avg_grade_adjusted_speed = result.speed_mps
+            self._maybe_commit(db, persist=persist)
+
+            pace_sec = 1000.0 / result.speed_mps
+            logger.info(
+                "Beregnet grade-adjusted speed for aktivitet %s: %.4f m/s (%s samples)",
+                activity_id,
+                result.speed_mps,
+                result.sample_count,
+            )
+            return {
+                "activity_id": activity_id,
+                "avg_grade_adjusted_speed": result.speed_mps,
+                "grade_adjusted_pace_sec_per_km": round(pace_sec, 1),
+                "calculation_method": result.method,
+                "sample_count": result.sample_count,
+            }
+        except Exception as exc:
+            logger.error("Feil ved beregning av grade-adjusted speed for aktivitet %s: %s", activity_id, exc)
             return None
 
     def calculate_decoupling(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
@@ -449,6 +604,8 @@ class AnalysisService:
         activity_id: int,
         db: Session,
         force_recalculate: bool = False,
+        *,
+        persist: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Beregner Efficiency Factor og Aerobic Decoupling fra FIT-data.
@@ -527,7 +684,7 @@ class AnalysisService:
                 activity.decoupling_suitability_flag = suitability["decoupling_suitability_flag"]
                 activity.decoupling_reason_if_unsuitable = suitability["decoupling_reason_if_unsuitable"]
                 activity.decoupling_data_quality_score = suitability["decoupling_data_quality_score"]
-                db.commit()
+                self._maybe_commit(db, persist=persist)
 
             first_half_hr = first_half["heart_rate"].mean()
             first_half_speed = first_half["speed_mps"].mean()
@@ -752,7 +909,13 @@ class AnalysisService:
         
         return activity_details[['timestamp', 'heart_rate_per_speed']]
 
-    def calculate_body_battery_start(self, activity_id: int, db: Session) -> Optional[Dict[str, Any]]:
+    def calculate_body_battery_start(
+        self,
+        activity_id: int,
+        db: Session,
+        *,
+        persist: bool = True,
+    ) -> Optional[Dict[str, Any]]:
         """
         Beregner Body Battery-nivå ved start av aktivitet.
         Nå basert på faktiske FIT-data verdier som training_stress_score, 
@@ -1005,10 +1168,9 @@ class AnalysisService:
             # Begrens til 5-95 range (realistisk Body Battery range før trening)
             body_battery = max(5, min(95, body_battery))
             
-            # Lagre i database
             activity.body_battery_start = body_battery
-            db.commit()
-            
+            self._maybe_commit(db, persist=persist)
+
             # Legg til informasjon om FIT-data som ble brukt
             fit_data_used = {
                 "tss": activity.training_stress_score if hasattr(activity, 'training_stress_score') else None,

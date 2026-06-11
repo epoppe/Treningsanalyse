@@ -7,6 +7,10 @@ import logging
 
 from ...database.models import Stress
 from ...database.models.health_data_missing import HealthDataMissing
+from ...services.health_data_missing_helpers import (
+    clear_health_data_missing,
+    should_retry_health_data_missing,
+)
 from ...database.models.sync_state import SyncState
 
 logger = logging.getLogger(__name__)
@@ -16,10 +20,15 @@ class StressSyncService:
     def __init__(self, sync_service: Any):
         self.sync_service = sync_service
 
-    async def sync_stress_data(self, start_date: datetime, end_date: datetime):
+    async def sync_stress_data(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+    ):
         stress_state = self.sync_service.db.query(SyncState).filter_by(key="stress").first()
         stress_start_date = max(start_date, datetime(2020, 1, 1, tzinfo=timezone.utc))
-        if stress_state and stress_state.last_synced_date:
+        if stress_state and stress_state.last_synced_date and not force_refresh_recent:
             stress_start_date = max(
                 stress_start_date,
                 datetime.combine(stress_state.last_synced_date, datetime.min.time(), tzinfo=timezone.utc)
@@ -43,6 +52,7 @@ class StressSyncService:
             .all()
         }
         pending_missing_dates: set[date] = set()
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=2)
 
         missing_count = max(
             0, (end_date - stress_start_date).days + 1 - len(existing_stress_dates) - len(stress_missing_dates)
@@ -54,9 +64,18 @@ class StressSyncService:
         current_date = stress_start_date
         saved = 0
         while current_date <= end_date:
-            if current_date.date() in existing_stress_dates or current_date.date() in stress_missing_dates:
+            is_recent = current_date >= recent_cutoff
+            if current_date.date() in existing_stress_dates and not (force_refresh_recent and is_recent):
                 current_date += timedelta(days=1)
                 continue
+            if current_date.date() in stress_missing_dates:
+                if not should_retry_health_data_missing(is_recent, force_refresh_recent):
+                    current_date += timedelta(days=1)
+                    continue
+                logger.debug(
+                    "Prøver stress på nytt for %s (force_refresh_recent=True).",
+                    current_date.date(),
+                )
             try:
                 stress_data = await self.sync_service.garmin_client.get_stress_data(current_date)
                 if stress_data and (stress_data.get("stress_time") or stress_data.get("rest_time")):
@@ -65,19 +84,30 @@ class StressSyncService:
                             return None
                         return float(minutes) * 60.0
 
-                    row = Stress(
-                        stress_date=current_date.date(),
-                        stress_level=stress_data.get("stress_level"),
-                        total_time=to_sec(stress_data.get("total_time")),
-                        stress_time=to_sec(stress_data.get("stress_time")),
-                        rest_time=to_sec(stress_data.get("rest_time")),
-                        low_stress_time=to_sec(stress_data.get("low_stress_time")),
-                        medium_stress_time=to_sec(stress_data.get("medium_stress_time")),
-                        high_stress_time=to_sec(stress_data.get("high_stress_time")),
-                        created_at=datetime.now(timezone.utc),
-                        updated_at=datetime.now(timezone.utc),
+                    row = (
+                        self.sync_service.db.query(Stress)
+                        .filter_by(stress_date=current_date.date())
+                        .first()
                     )
-                    self.sync_service.db.add(row)
+                    if not row:
+                        row = Stress(
+                            stress_date=current_date.date(),
+                            created_at=datetime.now(timezone.utc),
+                        )
+                        self.sync_service.db.add(row)
+
+                    row.stress_level = stress_data.get("stress_level")
+                    row.total_time = to_sec(stress_data.get("total_time"))
+                    row.stress_time = to_sec(stress_data.get("stress_time"))
+                    row.rest_time = to_sec(stress_data.get("rest_time"))
+                    row.low_stress_time = to_sec(stress_data.get("low_stress_time"))
+                    row.medium_stress_time = to_sec(stress_data.get("medium_stress_time"))
+                    row.high_stress_time = to_sec(stress_data.get("high_stress_time"))
+                    row.updated_at = datetime.now(timezone.utc)
+                    existing_stress_dates.add(current_date.date())
+                    clear_health_data_missing(self.sync_service.db, "stress", current_date.date())
+                    stress_missing_dates.discard(current_date.date())
+                    pending_missing_dates.discard(current_date.date())
                     saved += 1
                 else:
                     try:

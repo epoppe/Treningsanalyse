@@ -107,6 +107,10 @@ def extract_activity_list_fields(act_data: Dict[str, Any]) -> Dict[str, Optional
         "total_steps": _coerce_int(act_data.get("steps")),
         "min_elevation": _coerce_float(act_data.get("minElevation")),
         "max_elevation": _coerce_float(act_data.get("maxElevation")),
+        "max_running_cadence": _coerce_float(
+            act_data.get("maxRunningCadenceInStepsPerMinute")
+            or act_data.get("maxRunningCadence")
+        ),
     }
 
 
@@ -123,6 +127,11 @@ def extract_activity_summary_fields(summary: Dict[str, Any]) -> Dict[str, Option
             summary.get("elapsedDuration"),
             duration,
         ),
+        "total_steps": _coerce_int(summary.get("steps")),
         "min_elevation": _coerce_float(summary.get("minElevation")),
         "max_elevation": _coerce_float(summary.get("maxElevation")),
+        "max_running_cadence": _coerce_float(
+            summary.get("maxRunningCadenceInStepsPerMinute")
+            or summary.get("maxRunningCadence")
+        ),
     }

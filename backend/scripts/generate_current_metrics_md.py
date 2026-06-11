@@ -272,7 +272,8 @@ def main() -> None:
         "snapshot-henting som speiler `query_metric_timeseries`.",
         "",
         "> Kjør på nytt med din lokale database: "
-        "`cd backend && python3 scripts/generate_current_metrics_md.py`",
+        "`cd backend && python3 scripts/generate_current_metrics_md.py` "
+        "og `python3 scripts/generate_mcp_fresh_export.py`",
         "",
         "---",
         "",
@@ -409,6 +410,8 @@ def main() -> None:
                 "scope": metric.get("scope"),
                 "source": metric.get("source"),
                 "heuristic": metric.get("heuristic", False),
+                "availability": metric.get("availability"),
+                "availability_reason": metric.get("availability_reason"),
             }
             lines.extend(_metric_row(key, meta, value, as_of))
 

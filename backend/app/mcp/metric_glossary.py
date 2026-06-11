@@ -376,6 +376,19 @@ METRIC_GLOSSARY: Dict[str, Dict[str, Any]] = {
     "coaching_use": "Kun på steady-state økter >45 min; se suitability-flagg.",
     "source": "computed_fit",
   },
+  "activity.grade_adjusted_pace_sec_per_km": {
+    "title": "Grade Adjusted Pace (GAP)",
+    "definition": (
+      "Garmin sin stigningsjusterte snittfart (avgGradeAdjustedSpeed), lagret som m/s "
+      "i activities.avg_grade_adjusted_speed og eksponert som M:SS/km."
+    ),
+    "interpretation": (
+      "Lavere pace enn rå snittfart på kupert terreng; mangler ofte på flate, innendørs "
+      "eller ikke-løpsaktiviteter. Kan ikke beregnes lokalt uten Garmins modell."
+    ),
+    "coaching_use": "Sammenlign faktisk innsats på bakke mot flat pace og terskelfart.",
+    "source": "garmin_sync",
+  },
     "activity.training_stress_score": {
         "title": "Training Stress Score (TSS)",
         "definition": "Belastningsscore per økt (≈ EPOC fra Garmin der tilgjengelig).",

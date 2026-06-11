@@ -247,7 +247,10 @@ class FitSyncService:
                 logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
                 return False, None
 
-            self.sync_service.storage.save_activity_details(parquet_records)
+            self.sync_service.storage.save_activity_details(
+                parquet_records,
+                replace_activity_ids=[activity_id],
+            )
             logger.info(f"Lagret {len(parquet_records)} FIT-records for aktivitet {activity_id}")
 
             metrics_result = None

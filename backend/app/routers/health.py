@@ -18,7 +18,7 @@ from ..database.models import HRV, Sleep, BodyBattery, Stress
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from ..database.models.health_data_missing import HealthDataMissing
-from ..services.sleep_data_mapping import apply_sleep_data_to_row
+from ..services.health_data_missing_helpers import clear_health_data_missing
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,7 +98,7 @@ async def get_stress_range_endpoint(
             current = start_date
             missing_dates = []
             while current <= end_date:
-                if current not in existing_dates and current not in stress_missing_recorded:
+                if current not in existing_dates:
                     missing_dates.append(current)
                 current += timedelta(days=1)
             
@@ -126,6 +126,7 @@ async def get_stress_range_endpoint(
                             )
                             db.add(new_stress)
                             all_stress.append(new_stress)
+                            clear_health_data_missing(db, "stress", missing_date)
                         else:
                             try:
                                 existing_m = db.query(HealthDataMissing).filter_by(data_type="stress", missing_date=missing_date).first()
@@ -204,7 +205,7 @@ async def get_hrv_range_endpoint(
         current = start_date
         missing_dates = []
         while current <= end_date:
-            if current not in existing_dates and current not in hrv_missing_recorded:
+            if current not in existing_dates and (fill_gaps or current not in hrv_missing_recorded):
                 missing_dates.append(current)
             current += timedelta(days=1)
         
@@ -249,12 +250,14 @@ async def get_hrv_range_endpoint(
 
                     if resolved.source == "local_parquet":
                         upsert_hrv_to_db(db, missing_date, resolved.data)
+                        clear_health_data_missing(db, "hrv", missing_date)
                         continue
 
                     if resolved.source != "garmin_live":
                         continue
 
                     upsert_hrv_to_db(db, missing_date, resolved.data)
+                    clear_health_data_missing(db, "hrv", missing_date)
                 except Exception as e:
                     logger.debug("HRV backfill uten data for %s: %s", missing_date, e)
             
@@ -348,7 +351,7 @@ async def get_sleep_range_endpoint(
         dates_without_overall_score = []
         
         while current <= end_date:
-            if current not in existing_dates and current not in sleep_missing_recorded:
+            if current not in existing_dates:
                 missing_dates.append(current)
             else:
                 # Sjekk om eksisterende record mangler overall_score
@@ -375,6 +378,7 @@ async def get_sleep_range_endpoint(
                             )
                             apply_sleep_data_to_row(new_sleep, sleep_data)
                             db.add(new_sleep)
+                            clear_health_data_missing(db, "sleep", fetch_date)
                             logger.debug(f"✅ Søvn: Lagret ny data for {fetch_date}")
                         elif fetch_date in dates_without_overall_score:
                             # Eksisterende record - oppdater bare overall_score

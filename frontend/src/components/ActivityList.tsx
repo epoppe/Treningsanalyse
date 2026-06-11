@@ -4,6 +4,9 @@ import { memo, useEffect, useState } from 'react';
 import { Activity } from '../types';
 import { activitiesApi } from '../utils/api';
 import ActivityCard from './ActivityCard';
+import VirtualizedActivityList from './VirtualizedActivityList';
+
+const VIRTUALIZE_THRESHOLD = 40;
 
 interface ActivityListProps {
   activities: Activity[];
@@ -124,6 +127,10 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
         </p>
       </div>
     );
+  }
+
+  if (activities.length >= VIRTUALIZE_THRESHOLD) {
+    return <VirtualizedActivityList activities={activities} />;
   }
 
   // Beregn forrige gyldige VO2 Max-verdi for hver aktivitet

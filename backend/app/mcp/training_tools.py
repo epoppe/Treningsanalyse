@@ -23,8 +23,26 @@ from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.session import SessionLocal
 from ..services.coaching_analysis_service import CoachingAnalysisService
 from ..services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG, McpDerivedMetricsService
+from ..services.metric_source_audit import (
+    activity_summary_not_ingested_reason,
+    audit_model_column_sources,
+    body_battery_not_ingested_reason,
+    performance_not_ingested_reason,
+    sleep_vital_empty_source_reason,
+)
 from .metric_glossary import build_metric_glossary, get_glossary_entry
 from .metric_quality import build_metric_quality_report, format_metric_quality_markdown
+from .speed_metric_format import (
+    audit_user_facing_speed_units,
+    enrich_activity_summary_speed_fields,
+    enrich_athlete_threshold_payload,
+    enrich_derived_metric_point,
+    enrich_dict_pace_fields,
+    enrich_stored_metric_point,
+    infer_metric_unit_for_column,
+    mcp_display_unit,
+)
+from ..utils.speed_pace import mps_to_pace_sec_per_km
 from ..services.route_analysis_service import RouteAnalysisService
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
@@ -32,20 +50,75 @@ from ..utils.activity_filters import is_running_activity
 
 NOT_INGESTED_METRICS: Dict[str, str] = {
     "activity.intensity_factor": "Intensity Factor beregnes ikke og lagres ikke i activities ennå.",
-    "activity.max_running_cadence": "Maks kadens skrives ikke inn i activities ennå.",
-    "activity.recovery_time": "Recovery time per aktivitet skrives ikke inn i activities ennå.",
-    "health.body_battery_net_charge": "Kun max/min Body Battery lagres i dagens sync.",
-    "body_battery.body_battery_charged": "Kun max/min Body Battery lagres i dagens sync.",
-    "body_battery.body_battery_charged_start": "Kun max/min Body Battery lagres i dagens sync.",
-    "body_battery.body_battery_drained": "Kun max/min Body Battery lagres i dagens sync.",
-    "body_battery.body_battery_drained_start": "Kun max/min Body Battery lagres i dagens sync.",
-    "body_battery.net_charge": "Kun max/min Body Battery lagres i dagens sync.",
+    "activity.recovery_time": (
+        "Recovery time per aktivitet finnes sjelden i Garmin activity summary "
+        "(recoveryTime/timeToRecover). Ikke i FIT eller lokale parquet-filer."
+    ),
+    "activity.begin_potential_stamina": (
+        "Potential stamina krever Garmin activity summary (beginPotentialStamina). "
+        "Ikke tilgjengelig i FIT/parquet; lokale rader mangler feltet fordi summary ikke returnerte verdier."
+    ),
+    "activity.end_potential_stamina": (
+        "Potential stamina krever Garmin activity summary (endPotentialStamina). "
+        "Ikke tilgjengelig i FIT/parquet; lokale rader mangler feltet fordi summary ikke returnerte verdier."
+    ),
+    "activity.min_available_stamina": (
+        "Min available stamina krever Garmin activity summary (minAvailableStamina). "
+        "Ikke tilgjengelig i FIT/parquet; lokale rader mangler feltet fordi summary ikke returnerte verdier."
+    ),
+    "health.body_battery_net_charge": (
+        "Net charge krever charged/drained fra wellness-tidsserie. "
+        "Eksisterende DB-rader har kun max/min; tidsserie ble ikke persistert ved sync."
+    ),
+    "body_battery.body_battery_charged": (
+        "Charged/drained utledes fra body_battery_values_array ved sync, men tidsserien "
+        "lagres ikke i DB. Eksisterende rader har kun max/min."
+    ),
+    "body_battery.body_battery_charged_start": (
+        "Startverdier utledes fra wellness-tidsserie ved sync; tidsserie er ikke lagret i DB."
+    ),
+    "body_battery.body_battery_drained": (
+        "Charged/drained utledes fra body_battery_values_array ved sync, men tidsserien "
+        "lagres ikke i DB. Eksisterende rader har kun max/min."
+    ),
+    "body_battery.body_battery_drained_start": (
+        "Startverdier utledes fra wellness-tidsserie ved sync; tidsserie er ikke lagret i DB."
+    ),
+    "body_battery.net_charge": (
+        "Net charge krever charged/drained eller wellness-tidsserie. "
+        "Eksisterende DB-rader har kun max/min uten persistert tidsserie."
+    ),
+    "performance.fitness_age": (
+        "fitnessAge i lagret raw_maxmet er null fra Garmin for denne kontoen "
+        "(generic.fitnessAge mangler verdi i alle synkede rader)."
+    ),
+    "performance.endurance_score": (
+        "raw_endurance_score er null fra Garmin metrics-service for denne kontoen."
+    ),
+    "performance.endurance_classification": (
+        "raw_endurance_score er null fra Garmin metrics-service for denne kontoen."
+    ),
+    "performance.hill_score": (
+        "raw_hill_score er null fra Garmin metrics-service for denne kontoen."
+    ),
+    "performance.hill_endurance_score": (
+        "raw_hill_score er null fra Garmin metrics-service for denne kontoen."
+    ),
+    "performance.hill_strength_score": (
+        "raw_hill_score er null fra Garmin metrics-service for denne kontoen."
+    ),
     "hrv.breathing_rate": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
     "hrv.heart_rate": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
     "hrv.measurement_duration": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
     "hrv.measurement_quality": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
     "hrv.pnn50": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
     "hrv.stress_score": "Kun et kjerneutvalg HRV-felt lagres i dagens sync.",
+    "resting_heart_rate.confidence_level": (
+        "Garmin dailyHeartRate returnerer ikke confidenceLevel; feltet synkes ikke i dagens pipeline."
+    ),
+    "resting_heart_rate.measurement_quality": (
+        "Garmin dailyHeartRate returnerer ikke measurementQuality; feltet synkes ikke i dagens pipeline."
+    ),
     "stress.activity_stress_duration": "Kun stress_level og high_stress_time lagres i dagens sync.",
     "stress.data_quality": "Kun stress_level og high_stress_time lagres i dagens sync.",
 }
@@ -62,6 +135,19 @@ DERIVED_EMPTY_SOURCE_DEPENDENCIES: Dict[str, tuple[Any, str]] = {
     "cardio.rhr_30d": (RestingHeartRate, "Resting heart rate-tabellen er tom."),
 }
 
+ACTIVITY_BODY_BATTERY_METRICS: Dict[str, str] = {
+    "activity.body_battery_start": "body_battery_start",
+    "activity.body_battery_delta": "activity_body_battery_delta",
+    "activity.activity_body_battery_delta": "activity_body_battery_delta",
+}
+
+GRADE_ADJUSTED_PACE_METRIC = "activity.grade_adjusted_pace_sec_per_km"
+GRADE_ADJUSTED_PACE_EMPTY_REASON = (
+    "Grade Adjusted Pace mangler når verken Garmin (avgGradeAdjustedSpeed) "
+    "eller FIT-beregning (fart+høyde, Minetti 2002) kan fylle feltet. "
+    "Verdien lagres som m/s i activities.avg_grade_adjusted_speed og eksponeres som M:SS/km."
+)
+
 # Alias → kanonisk nøkkel (auto-oppdagede duplikater peker til health.* / eksplisitte nøkler)
 METRIC_KEY_ALIASES: Dict[str, str] = {
     "hrv.rmssd": "health.hrv_rmssd",
@@ -75,6 +161,8 @@ METRIC_KEY_ALIASES: Dict[str, str] = {
     "stress.stress_level": "health.stress_level",
     "stress.high_stress_time": "health.high_stress_time_s",
     "activity.activity_body_battery_delta": "activity.body_battery_delta",
+    "activity.grade_adjusted_speed_mps": "activity.grade_adjusted_pace_sec_per_km",
+    "activity.avg_grade_adjusted_speed": "activity.grade_adjusted_pace_sec_per_km",
 }
 
 
@@ -141,11 +229,18 @@ METRIC_SEMANTIC_LINKS: List[Dict[str, Any]] = [
 METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "activity.distance_m": {"model": Activity, "date_field": "start_time", "column": "distance", "category": "activity", "unit": "m"},
     "activity.duration_s": {"model": Activity, "date_field": "start_time", "column": "duration", "category": "activity", "unit": "s"},
-    "activity.pace_sec_per_km": {"model": Activity, "date_field": "start_time", "column": None, "category": "activity", "unit": "s/km", "derived": "activity_pace"},
+    "activity.pace_sec_per_km": {"model": Activity, "date_field": "start_time", "column": None, "category": "activity", "unit": "M:SS/km", "derived": "activity_pace"},
     "activity.average_heart_rate": {"model": Activity, "date_field": "start_time", "column": "average_heart_rate", "category": "activity", "unit": "bpm"},
     "activity.max_heart_rate": {"model": Activity, "date_field": "start_time", "column": "max_heart_rate", "category": "activity", "unit": "bpm"},
-    "activity.average_speed_mps": {"model": Activity, "date_field": "start_time", "column": "average_speed", "category": "activity", "unit": "m/s"},
-    "activity.grade_adjusted_speed_mps": {"model": Activity, "date_field": "start_time", "column": "avg_grade_adjusted_speed", "category": "activity", "unit": "m/s"},
+    "activity.average_speed_mps": {"model": Activity, "date_field": "start_time", "column": "average_speed", "category": "activity", "unit": "km/h"},
+    "activity.grade_adjusted_pace_sec_per_km": {
+        "model": Activity,
+        "date_field": "start_time",
+        "column": "avg_grade_adjusted_speed",
+        "category": "activity",
+        "unit": "M:SS/km",
+        "derived": "grade_adjusted_pace",
+    },
     "activity.training_stress_score": {"model": Activity, "date_field": "start_time", "column": "training_stress_score", "category": "training_load", "unit": "score"},
     "activity.epoc": {"model": Activity, "date_field": "start_time", "column": "epoc", "category": "training_load", "unit": "score"},
     "activity.aerobic_training_effect": {"model": Activity, "date_field": "start_time", "column": "total_training_effect", "category": "training_effect", "unit": "score"},
@@ -218,6 +313,7 @@ EXCLUDED_METRIC_COLUMNS = {
     "detailed_metrics",
     "detailed_sleep_data",
     "detailed_stress_data",
+    "avg_grade_adjusted_speed",
     "description",
     "activity_name",
     "device_name",
@@ -274,7 +370,7 @@ def _refresh_metric_catalog_units() -> None:
     """Oppdater enheter for auto-oppdagede felt (inkl. eksisterende catalog-nøkler)."""
     for definition in METRIC_CATALOG.values():
         column = definition.get("column")
-        if column:
+        if column and not definition.get("derived"):
             definition["unit"] = _infer_metric_unit(column)
 
 
@@ -294,10 +390,11 @@ def _infer_metric_unit(column_name: str) -> str:
         return "s"
     if "heart_rate" in name or name.endswith("_hr") or name.startswith("hr_"):
         return "bpm"
-    if "speed" in name:
-        return "m/s"
+    speed_unit = infer_metric_unit_for_column(name)
+    if speed_unit:
+        return speed_unit
     if "pace" in name:
-        return "s/km"
+        return "M:SS/km"
     if "distance" in name:
         return "m"
     if "time" in name:
@@ -331,10 +428,70 @@ def _model_table_counts(db: Session) -> Dict[Any, int]:
     }
 
 
+def _activity_body_battery_fill_stats(db: Session) -> Dict[str, int]:
+    total = db.query(Activity).count()
+    start_filled = db.query(Activity).filter(
+        Activity.body_battery_start.isnot(None),
+        Activity.body_battery_start >= 0,
+    ).count()
+    delta_filled = db.query(Activity).filter(Activity.activity_body_battery_delta.isnot(None)).count()
+    return {"total": total, "start_filled": start_filled, "delta_filled": delta_filled}
+
+
+def _grade_adjusted_pace_fill_stats(db: Session) -> Dict[str, int]:
+    total = db.query(Activity).count()
+    filled = db.query(Activity).filter(Activity.avg_grade_adjusted_speed.isnot(None)).count()
+    return {"total": total, "filled": filled}
+
+
+def _activity_column_fill_stats(db: Session, column: str) -> Dict[str, int]:
+    return audit_model_column_sources(db, Activity, column)
+
+
+def _stored_column_fill_availability(
+    definition: Dict[str, Any],
+    db: Session,
+) -> Optional[Dict[str, str]]:
+    column = definition.get("column")
+    if not column or definition.get("derived"):
+        return None
+    stats = audit_model_column_sources(db, definition["model"], column)
+    table = definition["model"].__tablename__
+    if stats["filled"] == 0:
+        return {
+            "availability": "empty_source",
+            "availability_reason": (
+                f"Kolonne `{column}` i `{table}` har 0/{stats['total']} rader med verdi "
+                "i denne databasen etter sync/backfill."
+            ),
+        }
+    return {
+        "availability": "supported",
+        "availability_reason": (
+            f"Data lagret for {stats['filled']}/{stats['total']} rader "
+            f"i `{table}.{column}`."
+        ),
+    }
+
+
+def _body_battery_charge_fill_stats(db: Session) -> Dict[str, int]:
+    total = db.query(BodyBattery).count()
+    charged = db.query(BodyBattery).filter(BodyBattery.body_battery_charged.isnot(None)).count()
+    return {"total": total, "filled": charged}
+
+
+def _performance_field_fill_stats(db: Session, column: str) -> Dict[str, int]:
+    total = db.query(GarminPerformanceMetric).count()
+    col = getattr(GarminPerformanceMetric, column)
+    filled = db.query(GarminPerformanceMetric).filter(col.isnot(None)).count()
+    return {"total": total, "filled": filled}
+
+
 def _stored_metric_availability(
     key: str,
     definition: Dict[str, Any],
     table_counts: Dict[Any, int],
+    db: Optional[Session] = None,
 ) -> Dict[str, str]:
     if key in UNSUPPORTED_METRICS:
         return {"availability": "unsupported", "availability_reason": UNSUPPORTED_METRICS[key]}
@@ -347,6 +504,140 @@ def _stored_metric_availability(
             "availability": "empty_source",
             "availability_reason": f"Kildetabellen `{model.__tablename__}` er tom i denne databasen.",
         }
+
+    if key in ACTIVITY_BODY_BATTERY_METRICS and db is not None:
+        stats = _activity_body_battery_fill_stats(db)
+        column = ACTIVITY_BODY_BATTERY_METRICS[key]
+        filled = stats["start_filled"] if column == "body_battery_start" else stats["delta_filled"]
+        if filled == 0:
+            return {
+                "availability": "empty_source",
+                "availability_reason": (
+                    "Ingen aktiviteter har lagret Body Battery ennå. "
+                    "Garmin activity summary mangler ofte differenceBodyBattery; "
+                    "kjør training_effect-sync eller wellness-backfill for å utlede fra daglig tidsserie."
+                ),
+            }
+        return {
+            "availability": "supported",
+            "availability_reason": (
+                f"Data for {filled}/{stats['total']} aktiviteter. "
+                "Verdier kan komme fra Garmin summary eller utledes fra daglig wellness-tidsserie."
+            ),
+        }
+
+    if key == GRADE_ADJUSTED_PACE_METRIC and db is not None:
+        stats = _grade_adjusted_pace_fill_stats(db)
+        if stats["filled"] == 0:
+            return {
+                "availability": "empty_source",
+                "availability_reason": (
+                    f"{GRADE_ADJUSTED_PACE_EMPTY_REASON} "
+                    f"0/{stats['total']} aktiviteter har verdi i denne databasen."
+                ),
+            }
+        return {
+            "availability": "supported",
+            "availability_reason": (
+                f"Grade Adjusted Pace lagret for {stats['filled']}/{stats['total']} aktiviteter "
+                "(Garmin avgGradeAdjustedSpeed når tilgjengelig, ellers FIT/Minetti; eksponert som M:SS/km)."
+            ),
+        }
+
+    if key.startswith("body_battery.") and key in NOT_INGESTED_METRICS:
+        if db is not None:
+            stats = _body_battery_charge_fill_stats(db)
+            if stats["filled"] == 0:
+                return {
+                    "availability": "not_ingested",
+                    "availability_reason": body_battery_not_ingested_reason(db, key),
+                }
+        return {
+            "availability": "not_ingested",
+            "availability_reason": NOT_INGESTED_METRICS[key],
+        }
+
+    if key == "activity.training_readiness_score" and db is not None:
+        stats = _activity_column_fill_stats(db, "training_readiness_score")
+        if stats["filled"] == 0:
+            return {
+                "availability": "computed",
+                "availability_reason": (
+                    "Ikke lagret på aktiviteter ennå, men kan beregnes lokalt via "
+                    "TrainingReadinessService (søvn/HRV/form). Kjør health backfill --readiness-only."
+                ),
+            }
+        return {
+            "availability": "supported",
+            "availability_reason": (
+                f"Training readiness lagret for {stats['filled']}/{stats['total']} aktiviteter "
+                "(beregnet lokalt eller fra Garmin)."
+            ),
+        }
+
+    stamina_columns = {
+        "activity.begin_potential_stamina": ("begin_potential_stamina", "beginPotentialStamina"),
+        "activity.end_potential_stamina": ("end_potential_stamina", "endPotentialStamina"),
+        "activity.min_available_stamina": ("min_available_stamina", "minAvailableStamina"),
+    }
+    if key in stamina_columns and db is not None:
+        column, garmin_field = stamina_columns[key]
+        stats = _activity_column_fill_stats(db, column)
+        if stats["filled"] == 0:
+            return {
+                "availability": "not_ingested",
+                "availability_reason": activity_summary_not_ingested_reason(db, key, garmin_field),
+            }
+
+    if key == "activity.recovery_time" and db is not None:
+        stats = _activity_column_fill_stats(db, "recovery_time")
+        if stats["filled"] == 0:
+            return {
+                "availability": "not_ingested",
+                "availability_reason": activity_summary_not_ingested_reason(
+                    db, key, "recoveryTime/timeToRecover"
+                ),
+            }
+
+    performance_columns = {
+        "performance.fitness_age": "fitness_age",
+        "performance.endurance_score": "endurance_score",
+        "performance.endurance_classification": "endurance_classification",
+        "performance.hill_score": "hill_score",
+        "performance.hill_endurance_score": "hill_endurance_score",
+        "performance.hill_strength_score": "hill_strength_score",
+    }
+    if key in performance_columns and db is not None:
+        stats = _performance_field_fill_stats(db, performance_columns[key])
+        if stats["filled"] == 0 and key in NOT_INGESTED_METRICS and db is not None:
+            return {
+                "availability": "not_ingested",
+                "availability_reason": performance_not_ingested_reason(db, key),
+            }
+
+    sleep_detail_keys = {
+        "sleep.average_spo2",
+        "sleep.lowest_spo2",
+        "sleep.average_heart_rate",
+        "sleep.lowest_heart_rate",
+        "sleep.highest_heart_rate",
+        "sleep.heart_rate_variability",
+        "sleep.recovery_score",
+        "sleep.movement_score",
+        "sleep.restless_moments",
+        "sleep.sleep_latency",
+    }
+    if key in sleep_detail_keys and db is not None:
+        fill_availability = _stored_column_fill_availability(definition, db)
+        if fill_availability is not None and fill_availability["availability"] == "empty_source":
+            fill_availability["availability_reason"] = sleep_vital_empty_source_reason(db, key)
+        if fill_availability is not None:
+            return fill_availability
+
+    if db is not None:
+        fill_availability = _stored_column_fill_availability(definition, db)
+        if fill_availability is not None:
+            return fill_availability
 
     return {
         "availability": "supported",
@@ -423,13 +714,7 @@ def athlete_profile() -> Dict[str, Any]:
                 "runs": len(runs),
                 "route_groups": route_groups,
             },
-            "latest_threshold": {
-                "observed_at": threshold.observed_at.isoformat() if threshold else None,
-                "lt2_heart_rate_bpm": threshold.lactate_threshold_heart_rate if threshold else None,
-                "lt2_speed_mps": threshold.lactate_threshold_speed if threshold else None,
-                "lt2_pace_sec_per_km": _pace_from_speed(threshold.lactate_threshold_speed) if threshold else None,
-                "source": threshold.source if threshold else None,
-            },
+            "latest_threshold": enrich_athlete_threshold_payload(threshold),
             "latest_garmin_performance": _garmin_performance_payload(latest_perf),
             "latest_hrv": {
                 **hrv_mcp_recovery_payload(latest_hrv_row),
@@ -578,13 +863,16 @@ def route_comparison(activity_id: Optional[str] = None, limit: int = 10) -> Dict
             if matched is None:
                 continue
             enriched.append(
-                {
-                    **match,
-                    "pace_sec_per_km": _activity_pace(matched),
-                    "average_heart_rate": matched.average_heart_rate,
-                    "training_effect": matched.total_training_effect,
-                    "vo2_max": matched.vo2_max,
-                }
+                enrich_dict_pace_fields(
+                    {
+                        **match,
+                        "pace_sec_per_km": _activity_pace(matched),
+                        "average_heart_rate": matched.average_heart_rate,
+                        "training_effect": matched.total_training_effect,
+                        "vo2_max": matched.vo2_max,
+                    },
+                    user_key="average_pace",
+                )
             )
         return {
             "status": "ok",
@@ -693,6 +981,7 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, A
 def metric_catalog() -> Dict[str, Any]:
     with training_context() as (db, _storage):
         table_counts = _model_table_counts(db)
+        db_for_availability = db
 
     metrics = []
     alias_index = _metric_alias_index()
@@ -705,7 +994,7 @@ def metric_catalog() -> Dict[str, Any]:
             "source": definition["model"].__tablename__,
             "scope": "stored",
             "summary": gloss.get("definition"),
-            **_stored_metric_availability(key, definition, table_counts),
+            **_stored_metric_availability(key, definition, table_counts, db_for_availability),
         }
         if key in alias_index:
             entry["aliases"] = sorted(alias_index[key])
@@ -751,6 +1040,13 @@ def metric_catalog() -> Dict[str, Any]:
             "readiness_snapshot": "Kompositter + recovery_context + metric_links.",
             "activity_deep_dive": "Recovery_context knyttet til én aktivitet.",
         },
+        "speed_pace_audit": {
+            "user_facing_mps_metrics": audit_user_facing_speed_units(metrics),
+            "display_policy": (
+                "Speed metrics expose km/h; pace metrics expose M:SS/km with pace_sec_per_km "
+                "as numeric side field; m/s only as speed_mps_internal."
+            ),
+        },
     }
 
 
@@ -783,6 +1079,15 @@ def query_metric_timeseries(
         if alias_of:
             result["requested_metric_key"] = requested_key
             result["canonical_key"] = metric_key
+        if result.get("status") == "ok":
+            result["points"] = [
+                enrich_derived_metric_point(metric_key, point)
+                for point in result.get("points", [])
+            ]
+            display_unit = mcp_display_unit(metric_key)
+            if display_unit:
+                result["unit"] = display_unit
+                result["display_unit"] = display_unit
         return result
 
     if metric_key not in METRIC_CATALOG:
@@ -816,13 +1121,15 @@ def query_metric_timeseries(
         if column:
             query = query.filter(getattr(model, column).isnot(None))
         rows = query.order_by(date_field.desc()).limit(limit).all()
-        points = [_metric_point(row, definition) for row in reversed(rows)]
+        points = [_metric_point(row, definition, metric_key) for row in reversed(rows)]
         points = [point for point in points if point["value"] is not None]
+        display_unit = mcp_display_unit(metric_key, definition.get("column")) or definition["unit"]
         result = {
             "status": "ok",
             "metric_key": metric_key,
             "category": definition["category"],
-            "unit": definition["unit"],
+            "unit": display_unit,
+            "display_unit": display_unit,
             "points": points,
             "count": len(points),
         }
@@ -890,7 +1197,7 @@ def _resolve_activity(
     return activities[0] if activities else None
 
 
-def _metric_point(row: Any, definition: Dict[str, Any]) -> Dict[str, Any]:
+def _metric_point(row: Any, definition: Dict[str, Any], metric_key: str) -> Dict[str, Any]:
     date_value = getattr(row, definition["date_field"])
     if isinstance(date_value, datetime):
         date_iso = date_value.date().isoformat()
@@ -904,6 +1211,8 @@ def _metric_point(row: Any, definition: Dict[str, Any]) -> Dict[str, Any]:
 
     if definition.get("derived") == "activity_pace":
         value = _activity_pace(row)
+    elif definition.get("derived") == "grade_adjusted_pace":
+        value = _grade_adjusted_pace(row)
     else:
         value = getattr(row, definition["column"])
 
@@ -920,11 +1229,11 @@ def _metric_point(row: Any, definition: Dict[str, Any]) -> Dict[str, Any]:
                 "activity_type": row.activity_type.type_key if row.activity_type else None,
             }
         )
-    return point
+    return enrich_stored_metric_point(metric_key, point, row, definition)
 
 
 def _activity_summary(activity: Activity) -> Dict[str, Any]:
-    return {
+    summary = {
         "activity_id": activity.activity_id,
         "name": activity.activity_name,
         "start_time": activity.start_time.isoformat() if activity.start_time else None,
@@ -942,6 +1251,9 @@ def _activity_summary(activity: Activity) -> Dict[str, Any]:
         "epoc": activity.epoc,
         "recovery": _activity_recovery_fields(activity),
     }
+    if summary["pace_sec_per_km"] is not None:
+        enrich_dict_pace_fields(summary, user_key="average_pace")
+    return enrich_activity_summary_speed_fields(summary)
 
 
 def _stored_body_battery_start(activity: Activity) -> Dict[str, Any]:
@@ -958,13 +1270,13 @@ def _stored_body_battery_start(activity: Activity) -> Dict[str, Any]:
             "value": round(float(value), 1),
             "availability": "estimated",
             "source": "activity_db",
-            "reason": "Lagret estimat; Garmin leverer ikke Body Battery ved aktivitetsstart direkte.",
+            "reason": "Lagret per aktivitet (wellness-tidsserie eller estimat).",
         }
     return {
         "value": None,
         "availability": "missing",
         "source": "none",
-        "reason": "Ikke beregnet eller lagret for aktiviteten.",
+        "reason": "Ikke lagret for aktiviteten ennå.",
     }
 
 
@@ -975,13 +1287,13 @@ def _stored_body_battery_delta(activity: Activity) -> Dict[str, Any]:
             "value": round(float(value), 1),
             "availability": "supported",
             "source": "garmin_activity_summary",
-            "reason": "Synket fra Garmin summaryDTO.differenceBodyBattery.",
+            "reason": "Lagret per aktivitet (Garmin summary eller wellness-tidsserie).",
         }
     return {
         "value": None,
         "availability": "missing",
         "source": "none",
-        "reason": "Ikke synket fra Garmin activity summary.",
+        "reason": "Ikke lagret for aktiviteten ennå.",
     }
 
 
@@ -1020,11 +1332,19 @@ def _resolve_activity_training_readiness(activity: Activity, db: Session, activi
         return stored
 
     try:
-        from ..services.training_readiness_service import TrainingReadinessService
+        from ..services.training_readiness_service import (
+            TrainingReadinessService,
+            is_robust_training_readiness,
+        )
 
         service = TrainingReadinessService(db)
         computed = service.calculate_training_readiness(activity_day)
-        if computed and computed.get("total_score") is not None and "error" not in computed:
+        if (
+            computed
+            and computed.get("total_score") is not None
+            and "error" not in computed
+            and is_robust_training_readiness(computed)
+        ):
             return {
                 "value": round(float(computed["total_score"]), 1),
                 "readiness_status": computed.get("readiness_status"),
@@ -1040,7 +1360,7 @@ def _resolve_activity_training_readiness(activity: Activity, db: Session, activi
         "value": None,
         "availability": "missing",
         "source": "none",
-        "reason": "Ingen lagret eller beregnbar readiness for aktivitetsdagen.",
+        "reason": "Ingen robust lagret eller beregnbar readiness for aktivitetsdagen.",
     }
 
 
@@ -1304,16 +1624,18 @@ def _kilometer_splits(activity: Activity, storage: DataStorage, db: Session) -> 
         .all()
     )
     return [
-        {
-            "split": lap.lap_number,
-            "distance_m": lap.distance,
-            "duration_s": lap.duration,
-            "pace_sec_per_km": round(lap.duration / (lap.distance / 1000), 1)
-            if lap.distance and lap.duration
-            else None,
-            "average_heart_rate": lap.average_heart_rate,
-            "source": "lap",
-        }
+        enrich_dict_pace_fields(
+            {
+                "split": lap.lap_number,
+                "distance_m": lap.distance,
+                "duration_s": lap.duration,
+                "pace_sec_per_km": round(lap.duration / (lap.distance / 1000), 1)
+                if lap.distance and lap.duration
+                else None,
+                "average_heart_rate": lap.average_heart_rate,
+                "source": "lap",
+            }
+        )
         for lap in laps
         if lap.distance and lap.distance >= 100
     ]
@@ -1359,16 +1681,18 @@ def _splits_from_details(activity: Activity, storage: DataStorage) -> List[Dict[
         duration_s = (row["timestamp"] - previous_time).total_seconds()
         segment = df[(df["distance_m"] > previous_distance) & (df["distance_m"] <= target)]
         splits.append(
-            {
-                "split": km,
-                "distance_m": 1000,
-                "duration_s": round(duration_s, 1),
-                "pace_sec_per_km": round(duration_s, 1),
-                "average_heart_rate": round(float(segment["heart_rate"].mean()), 1)
-                if "heart_rate" in segment and not segment["heart_rate"].isna().all()
-                else None,
-                "source": "details",
-            }
+            enrich_dict_pace_fields(
+                {
+                    "split": km,
+                    "distance_m": 1000,
+                    "duration_s": round(duration_s, 1),
+                    "pace_sec_per_km": round(duration_s, 1),
+                    "average_heart_rate": round(float(segment["heart_rate"].mean()), 1)
+                    if "heart_rate" in segment and not segment["heart_rate"].isna().all()
+                    else None,
+                    "source": "details",
+                }
+            )
         )
         previous_time = row["timestamp"]
         previous_distance = target
@@ -1383,10 +1707,12 @@ def _activity_pace(activity: Activity) -> Optional[float]:
     return None
 
 
+def _grade_adjusted_pace(activity: Activity) -> Optional[float]:
+    return _pace_from_speed(activity.avg_grade_adjusted_speed)
+
+
 def _pace_from_speed(speed_mps: Optional[float]) -> Optional[float]:
-    if speed_mps and speed_mps > 0:
-        return round(1000 / speed_mps, 1)
-    return None
+    return mps_to_pace_sec_per_km(speed_mps)
 
 
 def _readable_date(value: Optional[datetime]) -> Optional[str]:

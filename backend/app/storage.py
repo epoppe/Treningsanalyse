@@ -285,8 +285,61 @@ class DataStorage:
     def save_activities(self, activities_data: List[Dict[str, Any]]):
         self._save_data_internal(activities_data, 'activities_df', self.activities_file, self.activities_columns, 'activity_id', 'Aktiviteter')
 
-    def save_activity_details(self, details_data: List[Dict[str, Any]]):
-        """Lagrer aktivitetsdetaljer med spesiell duplikatsjekk basert på activity_id og timestamp."""
+    def _activity_details_as_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return df.copy()
+        if df.index.name == "timestamp":
+            return df.reset_index()
+        return df.copy()
+
+    def remove_activity_details(self, activity_ids: List[int]) -> int:
+        """Fjerner alle parquet-rader for gitte aktivitets-ID-er."""
+        if not activity_ids:
+            return 0
+        replace_set = {int(activity_id) for activity_id in activity_ids}
+        current_df = self._activity_details_as_columns(self.activity_details_df)
+        if current_df.empty or "activity_id" not in current_df.columns:
+            return 0
+
+        mask = current_df["activity_id"].isin(replace_set)
+        removed_count = int(mask.sum())
+        if removed_count == 0:
+            return 0
+
+        remaining_df = current_df.loc[~mask].copy()
+        if remaining_df.empty:
+            self.activity_details_df = pd.DataFrame(
+                {col: pd.Series(dtype=dt) for col, dt in self.activity_details_columns.items()}
+            )
+        else:
+            remaining_df["timestamp"] = pd.to_datetime(
+                remaining_df["timestamp"],
+                errors="coerce",
+                utc=True,
+            ).dt.tz_convert(None)
+            remaining_df.set_index("timestamp", inplace=True)
+            remaining_df.sort_index(inplace=True)
+            self.activity_details_df = remaining_df
+
+        self._save_dataframe(self.activity_details_df, self.activity_details_file, "Aktivitetsdetaljer")
+        logger.info(
+            "Fjernet %s parquet-rader for aktivitet(er) %s",
+            removed_count,
+            sorted(replace_set),
+        )
+        return removed_count
+
+    def save_activity_details(
+        self,
+        details_data: List[Dict[str, Any]],
+        replace_activity_ids: Optional[List[int]] = None,
+    ):
+        """Lagrer aktivitetsdetaljer.
+
+        Ved force refresh / re-download: sett ``replace_activity_ids`` slik at alle
+        eksisterende rader for disse aktivitetene erstattes i stedet for å appendes.
+        Uten replace dedupliseres på (activity_id, timestamp).
+        """
         if not details_data:
             return
         
@@ -301,18 +354,25 @@ class DataStorage:
                 utc=True,
             ).dt.tz_convert(None)
 
-        current_df = self.activity_details_df
+        current_df = self._activity_details_as_columns(self.activity_details_df)
+
+        if replace_activity_ids:
+            replace_set = {int(activity_id) for activity_id in replace_activity_ids}
+            if not current_df.empty and "activity_id" in current_df.columns:
+                removed_count = int(current_df["activity_id"].isin(replace_set).sum())
+                current_df = current_df.loc[~current_df["activity_id"].isin(replace_set)].copy()
+                if removed_count:
+                    logger.info(
+                        "Erstatter parquet-detaljer for %s aktivitet(er): fjernet %s gamle rader",
+                        len(replace_set),
+                        removed_count,
+                    )
         
         if not current_df.empty:
             # For activity_details bruker vi kombinasjon av activity_id og timestamp for duplikatsjekk
-            if current_df.index.name == 'timestamp':
-                current_df_reset = current_df.reset_index()
-            else:
-                current_df_reset = current_df.copy()
-            
             # Opprett kombinert nøkkel for duplikatsjekk
-            if 'activity_id' in current_df_reset.columns and 'timestamp' in current_df_reset.columns and 'activity_id' in new_df.columns and 'timestamp' in new_df.columns:
-                existing_keys = set(zip(current_df_reset['activity_id'], current_df_reset['timestamp']))
+            if 'activity_id' in current_df.columns and 'timestamp' in current_df.columns and 'activity_id' in new_df.columns and 'timestamp' in new_df.columns:
+                existing_keys = set(zip(current_df['activity_id'], current_df['timestamp']))
                 new_keys = list(zip(new_df['activity_id'], new_df['timestamp']))
                 
                 # Behold kun nye kombinasjoner av (activity_id, timestamp)
@@ -320,16 +380,29 @@ class DataStorage:
                 new_df = new_df[mask]
             else:
                 # Fallback til timestamp-only hvis kolonner mangler
-                new_df = new_df[~new_df['timestamp'].isin(current_df_reset['timestamp'])]
+                new_df = new_df[~new_df['timestamp'].isin(current_df['timestamp'])]
 
         if new_df.empty:
-            logger.info("Ingen nye data å legge til for Aktivitetsdetaljer.")
+            if replace_activity_ids:
+                if current_df.empty:
+                    self.activity_details_df = pd.DataFrame(
+                        {col: pd.Series(dtype=dt) for col, dt in self.activity_details_columns.items()}
+                    )
+                else:
+                    current_df["timestamp"] = pd.to_datetime(
+                        current_df["timestamp"],
+                        errors="coerce",
+                        utc=True,
+                    ).dt.tz_convert(None)
+                    current_df.set_index("timestamp", inplace=True)
+                    current_df.sort_index(inplace=True)
+                    self.activity_details_df = current_df
+                self._save_dataframe(self.activity_details_df, self.activity_details_file, "Aktivitetsdetaljer")
+            else:
+                logger.info("Ingen nye data å legge til for Aktivitetsdetaljer.")
             return
 
         # Kombiner data
-        if not current_df.empty and current_df.index.name == 'timestamp':
-            current_df = current_df.reset_index()
-        
         combined_df = pd.concat([current_df, new_df], ignore_index=True)
         combined_df['timestamp'] = pd.to_datetime(
             combined_df['timestamp'],

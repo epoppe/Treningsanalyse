@@ -10,6 +10,8 @@ from sqlalchemy import func, extract, and_
 from app.database.session import SessionLocal
 from app.database.models.activity import Activity, ActivityType
 from app.database.models.summaries import DailySummary, WeeklySummary, MonthlySummary, YearlySummary, PersonalRecord
+from app.services.activity_metric_backfill import derive_average_pace_sec_per_km
+from app.utils.speed_pace import aggregate_speed_pace_from_totals
 import calendar
 import json
 
@@ -55,6 +57,54 @@ class SummaryService:
     def _commit_if_requested(self, commit: bool) -> None:
         if commit:
             self.db.commit()
+
+    @staticmethod
+    def _aggregate_speed_pace(
+        activities: List[Activity],
+        total_distance: float,
+        total_duration: float,
+    ) -> tuple[Optional[float], Optional[float], Dict[str, Optional[float]]]:
+        """
+        Vektet avg_speed/avg_pace fra total distanse og varighet (ikke aritmetisk snitt per aktivitet).
+        """
+        avg_speed, avg_pace = aggregate_speed_pace_from_totals(total_distance, total_duration)
+        moving_total = sum(a.moving_duration or 0 for a in activities)
+        elapsed_total = sum(a.elapsed_duration or a.duration or 0 for a in activities)
+        time_basis = {
+            "total_duration_s": total_duration if total_duration > 0 else None,
+            "moving_duration_s": moving_total if moving_total > 0 else None,
+            "elapsed_duration_s": elapsed_total if elapsed_total > 0 else None,
+        }
+        return avg_speed, avg_pace, time_basis
+
+    @staticmethod
+    def _activity_pace_sec_per_km(activity: Activity) -> Optional[float]:
+        """Utled pace (s/km) fra lagrede eller avledbare aktivitetsfelter."""
+        return derive_average_pace_sec_per_km(
+            average_pace=activity.average_pace,
+            average_speed=activity.average_speed,
+            distance_m=activity.distance,
+            duration_s=activity.duration,
+        )
+
+    @staticmethod
+    def _best_performance_fields(activities: List[Activity]) -> Dict[str, Optional[float]]:
+        """Beste distanse, varighet, fart og pace i en aktivitetsliste."""
+        best_distance = max(a.distance or 0 for a in activities)
+        best_duration = max(a.duration or 0 for a in activities)
+        best_speed = max(a.average_speed or 0 for a in activities)
+        pace_values = [
+            pace
+            for activity in activities
+            if (pace := SummaryService._activity_pace_sec_per_km(activity)) is not None
+        ]
+        best_pace = min(pace_values) if pace_values else None
+        return {
+            "best_distance": best_distance,
+            "best_duration": best_duration,
+            "best_speed": best_speed,
+            "best_pace": best_pace if best_pace != float("inf") else None,
+        }
     
     def calculate_daily_summary(self, target_date: date, commit: bool = True) -> DailySummary:
         """Beregn daglig sammendrag for en spesifikk dato."""
@@ -82,25 +132,16 @@ class SummaryService:
         total_ascent = sum(a.total_ascent or 0 for a in activities)
         total_descent = sum(a.total_descent or 0 for a in activities)
         
-        # Beregn gjennomsnitt
+        # Beregn gjennomsnitt — vektet fra total distanse/varighet
         heart_rates = [a.average_heart_rate for a in activities if a.average_heart_rate]
-        speeds = [a.average_speed for a in activities if a.average_speed]
-        
-        # Beregn pace - bruk eksisterende pace eller beregn fra speed
-        paces = []
-        for a in activities:
-            if a.average_pace:
-                paces.append(a.average_pace)
-            elif a.average_speed and a.average_speed > 0:
-                # Beregn pace fra speed: pace (sek/km) = 1000 / speed (m/s)
-                calculated_pace = 1000 / a.average_speed
-                paces.append(calculated_pace)
-        
         cadences = [a.average_running_cadence for a in activities if a.average_running_cadence]
-        
+
         avg_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else None
-        avg_speed = sum(speeds) / len(speeds) if speeds else None
-        avg_pace = sum(paces) / len(paces) if paces else None
+        avg_speed, avg_pace, _time_basis = self._aggregate_speed_pace(
+            activities,
+            total_distance,
+            total_duration,
+        )
         avg_cadence = sum(cadences) / len(cadences) if cadences else None
         
         # Aktivitetstype breakdown
@@ -119,12 +160,7 @@ class SummaryService:
             activity_types[type_name]['duration'] += activity.duration or 0
             activity_types[type_name]['calories'] += activity.calories or 0
         
-        # Beste prestasjoner
-        best_distance = max(a.distance or 0 for a in activities)
-        best_duration = max(a.duration or 0 for a in activities)
-        best_speed = max(a.average_speed or 0 for a in activities)
-        pace_values = [a.average_pace for a in activities if a.average_pace]
-        best_pace = min(pace_values) if pace_values else None
+        best_fields = self._best_performance_fields(activities)
         
         # Sjekk om det allerede finnes et sammendrag for denne dagen
         existing_summary = self.db.query(DailySummary).filter(
@@ -144,10 +180,10 @@ class SummaryService:
             existing_summary.avg_pace = avg_pace
             existing_summary.avg_cadence = avg_cadence
             existing_summary.activity_types_breakdown = json.dumps(activity_types)
-            existing_summary.best_distance = best_distance
-            existing_summary.best_duration = best_duration
-            existing_summary.best_speed = best_speed
-            existing_summary.best_pace = best_pace if best_pace != float('inf') else None
+            existing_summary.best_distance = best_fields["best_distance"]
+            existing_summary.best_duration = best_fields["best_duration"]
+            existing_summary.best_speed = best_fields["best_speed"]
+            existing_summary.best_pace = best_fields["best_pace"]
             existing_summary.updated_at = datetime.now()
             
             summary = existing_summary
@@ -166,10 +202,10 @@ class SummaryService:
                 avg_pace=avg_pace,
                 avg_cadence=avg_cadence,
                 activity_types_breakdown=json.dumps(activity_types),
-                best_distance=best_distance,
-                best_duration=best_duration,
-                best_speed=best_speed,
-                best_pace=best_pace if best_pace != float('inf') else None,
+                best_distance=best_fields["best_distance"],
+                best_duration=best_fields["best_duration"],
+                best_speed=best_fields["best_speed"],
+                best_pace=best_fields["best_pace"],
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
@@ -211,25 +247,16 @@ class SummaryService:
         total_ascent = sum(a.total_ascent or 0 for a in activities)
         total_descent = sum(a.total_descent or 0 for a in activities)
         
-        # Beregn gjennomsnitt
+        # Beregn gjennomsnitt — vektet fra total distanse/varighet
         heart_rates = [a.average_heart_rate for a in activities if a.average_heart_rate]
-        speeds = [a.average_speed for a in activities if a.average_speed]
-        
-        # Beregn pace - bruk eksisterende pace eller beregn fra speed
-        paces = []
-        for a in activities:
-            if a.average_pace:
-                paces.append(a.average_pace)
-            elif a.average_speed and a.average_speed > 0:
-                # Beregn pace fra speed: pace (sek/km) = 1000 / speed (m/s)
-                calculated_pace = 1000 / a.average_speed
-                paces.append(calculated_pace)
-        
         cadences = [a.average_running_cadence for a in activities if a.average_running_cadence]
-        
+
         avg_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else None
-        avg_speed = sum(speeds) / len(speeds) if speeds else None
-        avg_pace = sum(paces) / len(paces) if paces else None
+        avg_speed, avg_pace, _time_basis = self._aggregate_speed_pace(
+            activities,
+            total_distance,
+            total_duration,
+        )
         avg_cadence = sum(cadences) / len(cadences) if cadences else None
         
         # Ukentlige beregninger
@@ -253,12 +280,7 @@ class SummaryService:
             activity_types[type_name]['duration'] += activity.duration or 0
             activity_types[type_name]['calories'] += activity.calories or 0
         
-        # Beste prestasjoner
-        best_distance = max(a.distance or 0 for a in activities)
-        best_duration = max(a.duration or 0 for a in activities)
-        best_speed = max(a.average_speed or 0 for a in activities)
-        pace_values = [a.average_pace for a in activities if a.average_pace]
-        best_pace = min(pace_values) if pace_values else None
+        best_fields = self._best_performance_fields(activities)
         
         # Sjekk om det allerede finnes et sammendrag
         existing_summary = self.db.query(WeeklySummary).filter(
@@ -284,10 +306,10 @@ class SummaryService:
             existing_summary.distance_per_day = distance_per_day
             existing_summary.duration_per_day = duration_per_day
             existing_summary.activity_types_breakdown = json.dumps(activity_types)
-            existing_summary.best_distance = best_distance
-            existing_summary.best_duration = best_duration
-            existing_summary.best_speed = best_speed
-            existing_summary.best_pace = best_pace if best_pace != float('inf') else None
+            existing_summary.best_distance = best_fields["best_distance"]
+            existing_summary.best_duration = best_fields["best_duration"]
+            existing_summary.best_speed = best_fields["best_speed"]
+            existing_summary.best_pace = best_fields["best_pace"]
             existing_summary.updated_at = datetime.now()
             
             summary = existing_summary
@@ -312,10 +334,10 @@ class SummaryService:
                 distance_per_day=distance_per_day,
                 duration_per_day=duration_per_day,
                 activity_types_breakdown=json.dumps(activity_types),
-                best_distance=best_distance,
-                best_duration=best_duration,
-                best_speed=best_speed,
-                best_pace=best_pace if best_pace != float('inf') else None,
+                best_distance=best_fields["best_distance"],
+                best_duration=best_fields["best_duration"],
+                best_speed=best_fields["best_speed"],
+                best_pace=best_fields["best_pace"],
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
@@ -356,25 +378,16 @@ class SummaryService:
         total_ascent = sum(a.total_ascent or 0 for a in activities)
         total_descent = sum(a.total_descent or 0 for a in activities)
         
-        # Beregn gjennomsnitt
+        # Beregn gjennomsnitt — vektet fra total distanse/varighet
         heart_rates = [a.average_heart_rate for a in activities if a.average_heart_rate]
-        speeds = [a.average_speed for a in activities if a.average_speed]
-        
-        # Beregn pace - bruk eksisterende pace eller beregn fra speed
-        paces = []
-        for a in activities:
-            if a.average_pace:
-                paces.append(a.average_pace)
-            elif a.average_speed and a.average_speed > 0:
-                # Beregn pace fra speed: pace (sek/km) = 1000 / speed (m/s)
-                calculated_pace = 1000 / a.average_speed
-                paces.append(calculated_pace)
-        
         cadences = [a.average_running_cadence for a in activities if a.average_running_cadence]
-        
+
         avg_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else None
-        avg_speed = sum(speeds) / len(speeds) if speeds else None
-        avg_pace = sum(paces) / len(paces) if paces else None
+        avg_speed, avg_pace, _time_basis = self._aggregate_speed_pace(
+            activities,
+            total_distance,
+            total_duration,
+        )
         avg_cadence = sum(cadences) / len(cadences) if cadences else None
         
         # Beregn månedsdatoer
@@ -442,6 +455,8 @@ class SummaryService:
                 duration_trend = ((total_duration - prev_summary.total_duration) / prev_summary.total_duration) * 100
             if prev_summary.total_activities > 0:
                 activities_trend = ((len(activities) - prev_summary.total_activities) / prev_summary.total_activities) * 100
+
+        best_fields = self._best_performance_fields(activities)
         
         # Sjekk om det allerede finnes et sammendrag
         existing_summary = self.db.query(MonthlySummary).filter(
@@ -476,6 +491,10 @@ class SummaryService:
             existing_summary.distance_trend = distance_trend
             existing_summary.duration_trend = duration_trend
             existing_summary.activities_trend = activities_trend
+            existing_summary.best_distance = best_fields["best_distance"]
+            existing_summary.best_duration = best_fields["best_duration"]
+            existing_summary.best_speed = best_fields["best_speed"]
+            existing_summary.best_pace = best_fields["best_pace"]
             existing_summary.updated_at = datetime.now()
             
             summary = existing_summary
@@ -507,6 +526,10 @@ class SummaryService:
                 distance_trend=distance_trend,
                 duration_trend=duration_trend,
                 activities_trend=activities_trend,
+                best_distance=best_fields["best_distance"],
+                best_duration=best_fields["best_duration"],
+                best_speed=best_fields["best_speed"],
+                best_pace=best_fields["best_pace"],
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
@@ -540,18 +563,14 @@ class SummaryService:
         total_descent = sum(a.total_descent or 0 for a in activities)
 
         heart_rates = [a.average_heart_rate for a in activities if a.average_heart_rate]
-        speeds = [a.average_speed for a in activities if a.average_speed]
-        paces = []
-        for activity in activities:
-            if activity.average_pace:
-                paces.append(activity.average_pace)
-            elif activity.average_speed and activity.average_speed > 0:
-                paces.append(1000 / activity.average_speed)
         cadences = [a.average_running_cadence for a in activities if a.average_running_cadence]
 
         avg_heart_rate = sum(heart_rates) / len(heart_rates) if heart_rates else None
-        avg_speed = sum(speeds) / len(speeds) if speeds else None
-        avg_pace = sum(paces) / len(paces) if paces else None
+        avg_speed, avg_pace, _time_basis = self._aggregate_speed_pace(
+            activities,
+            total_distance,
+            total_duration,
+        )
         avg_cadence = sum(cadences) / len(cadences) if cadences else None
 
         days_in_year = 366 if calendar.isleap(year) else 365
@@ -614,11 +633,7 @@ class SummaryService:
             if prev_summary.total_activities > 0:
                 activities_trend = ((len(activities) - prev_summary.total_activities) / prev_summary.total_activities) * 100
 
-        best_distance = max(a.distance or 0 for a in activities)
-        best_duration = max(a.duration or 0 for a in activities)
-        best_speed = max(a.average_speed or 0 for a in activities)
-        pace_values = [a.average_pace for a in activities if a.average_pace]
-        best_pace = min(pace_values) if pace_values else None
+        best_fields = self._best_performance_fields(activities)
 
         existing_summary = self.db.query(YearlySummary).filter(YearlySummary.year == year).first()
         summary_fields = {
@@ -643,10 +658,10 @@ class SummaryService:
             "duration_per_month": duration_per_month,
             "activity_types_breakdown": json.dumps(activity_types),
             "monthly_breakdown": monthly_breakdown or None,
-            "best_distance": best_distance,
-            "best_duration": best_duration,
-            "best_speed": best_speed,
-            "best_pace": best_pace if best_pace != float("inf") else None,
+            "best_distance": best_fields["best_distance"],
+            "best_duration": best_fields["best_duration"],
+            "best_speed": best_fields["best_speed"],
+            "best_pace": best_fields["best_pace"],
             "distance_trend": distance_trend,
             "duration_trend": duration_trend,
             "activities_trend": activities_trend,
@@ -817,6 +832,17 @@ class SummaryService:
                 if summary:
                     count += 1
         
+        return count
+
+    def calculate_yearly_summaries(self) -> int:
+        """Beregn alle årlige sammendrag (nødvendig for year-over-year-trender)."""
+        count = 0
+        years = self.db.query(extract("year", Activity.start_time).label("year")).distinct().all()
+        for (year,) in years:
+            if year:
+                summary = self.calculate_yearly_summary(int(year))
+                if summary:
+                    count += 1
         return count
     
     def get_daily_summaries(self, start_date: Optional[date] = None, end_date: Optional[date] = None, limit: int = 30) -> List[DailySummary]:

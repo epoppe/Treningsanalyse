@@ -96,7 +96,7 @@ const indeterminateMove = keyframes`
   }
 `;
 
-const DeterminateProgress = styled.div`
+const DeterminateProgress = styled.div<{ $percent: number }>`
   width: 100%;
   height: 8px;
   background-color: #ecf0f1;
@@ -108,7 +108,7 @@ const DeterminateProgress = styled.div`
     content: '';
     display: block;
     height: 100%;
-    width: ${(p: { $percent: number }) => `${Math.min(100, Math.max(0, p.$percent))}%`};
+    width: ${(p) => `${Math.min(100, Math.max(0, p.$percent))}%`};
     background: linear-gradient(90deg, #3498db, #2980b9);
     transition: width 0.4s ease;
   }

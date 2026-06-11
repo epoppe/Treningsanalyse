@@ -8,6 +8,7 @@ from typing import Any, List, Optional
 import logging
 
 from ..database.models.activity import Activity
+from .activity_metric_backfill import apply_activity_field_backfill
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +170,11 @@ def validate_and_repair_activity(
         activity.max_heart_rate = None
         result.changed = True
         result.fixes.append("max_heart_rate nullstilt (utenfor intervall)")
+
+    backfill = apply_activity_field_backfill(activity, storage=storage)
+    if backfill.changed:
+        result.changed = True
+        result.fixes.extend(backfill.fixes)
 
     return result
 

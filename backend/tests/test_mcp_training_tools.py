@@ -183,6 +183,7 @@ class McpTrainingToolsTests(unittest.TestCase):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         self.assertEqual(profile["latest_threshold"]["lt2_heart_rate_bpm"], 166)
+        self.assertAlmostEqual(profile["latest_threshold"]["lt2_speed_kmh"], 10.8, places=1)
         self.assertEqual(profile["athlete"]["pace_unit"], "min_per_km")
         self.assertEqual(deep_dive["status"], "ok")
         self.assertEqual(deep_dive["activity"]["activity_id"], "2301")
@@ -211,6 +212,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         recovery = deep_dive["activity"]["recovery"]
         self.assertEqual(recovery["body_battery_start"]["value"], 72.0)
         self.assertEqual(recovery["activity_body_battery_delta"]["value"], -18.0)
+        self.assertIn("wellness", recovery["body_battery_start"]["reason"])
 
     def test_mcp_hrv_recovery_context_uses_shared_contract(self):
         with patch.object(training_tools, "training_context", self._context):
@@ -354,27 +356,43 @@ class McpTrainingToolsTests(unittest.TestCase):
             catalog = training_tools.metric_catalog()
         by_key = {metric["key"]: metric for metric in catalog["metrics"]}
         self.assertEqual(by_key["activity.training_stress_score"]["availability"], "supported")
-        self.assertEqual(by_key["activity.average_pace"]["availability"], "supported")
-        self.assertEqual(by_key["activity.avg_grade_adjusted_speed"]["availability"], "supported")
-        self.assertEqual(by_key["activity.grade_adjusted_speed_mps"]["availability"], "supported")
-        self.assertEqual(by_key["activity.begin_potential_stamina"]["availability"], "supported")
-        self.assertEqual(by_key["activity.end_potential_stamina"]["availability"], "supported")
-        self.assertEqual(by_key["activity.min_available_stamina"]["availability"], "supported")
+        for key, column in (
+            ("activity.average_pace", "average_pace"),
+            ("activity.elapsed_duration", "elapsed_duration"),
+            ("activity.max_elevation", "max_elevation"),
+            ("activity.min_elevation", "min_elevation"),
+            ("activity.moving_duration", "moving_duration"),
+            ("activity.total_steps", "total_steps"),
+            ("activity.max_running_cadence", "max_running_cadence"),
+            ("activity.vo2_max_precise", "vo2_max_precise"),
+        ):
+            metric = by_key[key]
+            self.assertEqual(metric["availability"], "empty_source", key)
+            self.assertIn(column, metric["availability_reason"], key)
+        gap = by_key["activity.grade_adjusted_pace_sec_per_km"]
+        self.assertEqual(gap["availability"], "empty_source")
+        self.assertIn("avgGradeAdjustedSpeed", gap["availability_reason"])
+        self.assertEqual(
+            sorted(gap["aliases"]),
+            ["activity.avg_grade_adjusted_speed", "activity.grade_adjusted_speed_mps"],
+        )
+        self.assertEqual(by_key["activity.begin_potential_stamina"]["availability"], "not_ingested")
+        self.assertIn("beginPotentialStamina", by_key["activity.begin_potential_stamina"]["availability_reason"])
+        self.assertEqual(by_key["activity.end_potential_stamina"]["availability"], "not_ingested")
+        self.assertEqual(by_key["activity.min_available_stamina"]["availability"], "not_ingested")
         self.assertEqual(by_key["activity.activity_body_battery_delta"]["availability"], "supported")
         self.assertEqual(by_key["activity.body_battery_start"]["availability"], "supported")
-        self.assertEqual(by_key["activity.training_readiness_score"]["availability"], "supported")
-        self.assertEqual(by_key["activity.elapsed_duration"]["availability"], "supported")
-        self.assertEqual(by_key["activity.max_elevation"]["availability"], "supported")
-        self.assertEqual(by_key["activity.min_elevation"]["availability"], "supported")
-        self.assertEqual(by_key["activity.moving_duration"]["availability"], "supported")
-        self.assertEqual(by_key["activity.total_steps"]["availability"], "supported")
-        self.assertEqual(by_key["activity.vo2_max_precise"]["availability"], "supported")
-        self.assertEqual(by_key["performance.fitness_age"]["availability"], "supported")
-        self.assertEqual(by_key["performance.endurance_score"]["availability"], "supported")
-        self.assertEqual(by_key["performance.endurance_classification"]["availability"], "supported")
-        self.assertEqual(by_key["performance.hill_score"]["availability"], "supported")
-        self.assertEqual(by_key["performance.hill_endurance_score"]["availability"], "supported")
-        self.assertEqual(by_key["performance.hill_strength_score"]["availability"], "supported")
+        self.assertEqual(by_key["activity.training_readiness_score"]["availability"], "computed")
+        self.assertIn("TrainingReadinessService", by_key["activity.training_readiness_score"]["availability_reason"])
+        self.assertEqual(by_key["performance.fitness_age"]["availability"], "not_ingested")
+        self.assertIn("raw_maxmet", by_key["performance.fitness_age"]["availability_reason"])
+        self.assertEqual(by_key["performance.endurance_score"]["availability"], "not_ingested")
+        self.assertEqual(by_key["performance.endurance_classification"]["availability"], "not_ingested")
+        self.assertEqual(by_key["performance.hill_score"]["availability"], "not_ingested")
+        self.assertEqual(by_key["performance.hill_endurance_score"]["availability"], "not_ingested")
+        self.assertEqual(by_key["performance.hill_strength_score"]["availability"], "not_ingested")
+        self.assertEqual(by_key["body_battery.net_charge"]["availability"], "not_ingested")
+        self.assertIn("max/min", by_key["body_battery.net_charge"]["availability_reason"])
         self.assertEqual(by_key["sleep.sleep_score"]["availability"], "supported")
         self.assertEqual(by_key["sleep.sleep_efficiency"]["availability"], "supported")
         self.assertEqual(by_key["sleep.sleep_latency"]["availability"], "supported")
@@ -392,6 +410,9 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(by_key["activity.weather_condition"]["availability"], "supported")
         self.assertEqual(by_key["running.speed_5m_hist"]["availability"], "computed")
         self.assertEqual(by_key["health.resting_heart_rate"]["availability"], "supported")
+        self.assertEqual(by_key["resting_heart_rate.confidence_level"]["availability"], "not_ingested")
+        self.assertIn("dailyHeartRate", by_key["resting_heart_rate.confidence_level"]["availability_reason"])
+        self.assertEqual(by_key["resting_heart_rate.measurement_quality"]["availability"], "not_ingested")
         self.assertIn("availability_states", catalog)
 
     def test_eight_training_classes_and_recovery_hours(self):

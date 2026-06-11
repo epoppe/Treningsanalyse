@@ -106,6 +106,7 @@ test_*.py
 !backend/tests/test_metric_quality_report.py
 !backend/tests/test_activity_data_validation.py
 !backend/tests/test_metric_catalog_units.py
+!backend/tests/test_analysis_atomicity.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
@@ -134,3 +135,18 @@ yarn-error.log*
 
 # Autoresearch working state
 .autoresearch/
+
+# Generated MCP metric exports (local snapshots, not source)
+/MCP_FRESH_VALUES*
+/MCP_FRESH_VALUES_COMPLETE_*.csv
+
+# Agent workspace runtime state
+.openclaw/
+
+# Local SQLite databases
+*.sqlite
+*.sqlite3
+backend/*.db
+
+# Explicit backend virtualenv path
+backend/.venv/

@@ -22,34 +22,29 @@ router = APIRouter(
     tags=["Analysis"]
 )
 
+def _aggregate_breakdown_for_types(breakdown: dict, activity_types: List[str]) -> tuple[dict, dict]:
+    """Summerer faktiske verdier per valgt aktivitetstype fra breakdown."""
+    filtered_breakdown = {}
+    totals = {"count": 0, "distance": 0.0, "duration": 0.0, "calories": 0.0, "ascent": 0.0}
+
+    for activity_type in activity_types:
+        entry = breakdown.get(activity_type)
+        if not entry:
+            continue
+        filtered_breakdown[activity_type] = entry
+        totals["count"] += int(entry.get("count") or 0)
+        totals["distance"] += float(entry.get("distance") or 0)
+        totals["duration"] += float(entry.get("duration") or 0)
+        totals["calories"] += float(entry.get("calories") or 0)
+        totals["ascent"] += float(entry.get("ascent") or 0)
+
+    return filtered_breakdown, totals
+
+
 def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
     """Filtrer sammendrag basert på aktivitetstyper"""
     if not activity_types:
         return summaries
-    
-    # Mapping mellom engelsk typeKey og norske aktivitetstyper
-    activity_type_mapping = {
-        'running': 'Løping',
-        'treadmill_running': 'Løping',
-        'cycling': 'Sykling',
-        'indoor_cycling': 'Sykling',
-        'gravel_cycling': 'Sykling',
-        'mountain_biking': 'Sykling',
-        'walking': 'Fotturer',
-        'hiking': 'Fotturer',
-        'trail_running': 'Løping',
-        'lap_swimming': 'Svømming',
-        'open_water_swimming': 'Svømming',
-        'resort_skiing': 'Alpint',
-        'resort_skiing_snowboarding_ws': 'Alpint',
-        'cross_country_skiing_ws': 'Langrenn',
-        'indoor_cardio': 'Innendørs trening',
-        'multi_sport': 'Multisport',
-        'other': 'Annet'
-    }
-    
-    # Breakdown i database bruker engelske typeKeys, ikke norske navn
-    # Så vi må bruke activity_types direkte (engelsk)
     
     filtered_summaries = []
     for summary in summaries:
@@ -59,30 +54,31 @@ def filter_summaries_by_activity_types(summaries, activity_types: List[str]):
         # Parse JSON
         try:
             breakdown = json.loads(summary.activity_types_breakdown) if isinstance(summary.activity_types_breakdown, str) else summary.activity_types_breakdown
-        except:
+        except Exception:
             continue
         
-        # Sjekk om noen av de ønskede aktivitetstypene finnes (bruk engelske typeKeys)
-        if any(activity_type in breakdown for activity_type in activity_types):
-            # Beregn andeler for valgte aktivitetstyper
-            total_selected = sum(breakdown.get(activity_type, {}).get('count', 0) for activity_type in activity_types)
-            total_all = sum(data.get('count', 0) for data in breakdown.values())
-            
-            if total_selected > 0 and total_all > 0:
-                ratio = total_selected / total_all
-                
-                # Juster verdier basert på andel - men bevar alle andre felt
-                summary.total_activities = int(summary.total_activities * ratio)
-                summary.total_distance = summary.total_distance * ratio
-                summary.total_duration = summary.total_duration * ratio
-                summary.total_calories = summary.total_calories * ratio if summary.total_calories else 0
-                summary.total_ascent = summary.total_ascent * ratio if summary.total_ascent else 0
-                
-                # Oppdater activity_types_breakdown til å bare inkludere valgte typer
-                filtered_breakdown = {k: v for k, v in breakdown.items() if k in activity_types}
-                summary.activity_types_breakdown = json.dumps(filtered_breakdown)
-                
-                filtered_summaries.append(summary)
+        if not any(activity_type in breakdown for activity_type in activity_types):
+            continue
+
+        filtered_breakdown, totals = _aggregate_breakdown_for_types(breakdown, activity_types)
+        if totals["count"] <= 0:
+            continue
+
+        summary.total_activities = totals["count"]
+        summary.total_distance = totals["distance"]
+        summary.total_duration = totals["duration"]
+        summary.total_calories = totals["calories"]
+        if totals["ascent"] > 0:
+            summary.total_ascent = totals["ascent"]
+        elif summary.total_ascent and breakdown:
+            total_distance_all = sum(float(data.get("distance") or 0) for data in breakdown.values())
+            if total_distance_all > 0:
+                summary.total_ascent = summary.total_ascent * (totals["distance"] / total_distance_all)
+            else:
+                summary.total_ascent = 0
+
+        summary.activity_types_breakdown = json.dumps(filtered_breakdown)
+        filtered_summaries.append(summary)
     
     return filtered_summaries
 

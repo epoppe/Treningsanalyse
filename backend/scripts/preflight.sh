@@ -48,10 +48,17 @@ python3 -m py_compile \
   "$BACKEND_DIR/app/services/sync_service.py" \
   "$BACKEND_DIR/app/services/sync_modules/"*.py
 
-echo "Kjører fokus-tester..."
-PYTHONPATH="$ROOT_DIR" "$PY" -m unittest \
-  backend.tests.test_sync_jobs \
-  backend.tests.test_paths_and_fit -v >/dev/null
+echo "Kjører guardrail-tester..."
+export PYTHONPATH="$BACKEND_DIR"
+"$PY" -m unittest \
+  tests.test_sync_jobs \
+  tests.test_sync_job_acquire_guardrail \
+  tests.test_paths_and_fit \
+  tests.test_force_refresh_parquet \
+  tests.test_summary_activity_type_filter \
+  tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_sleep_sync_retries_previously_missing_date_on_force_refresh \
+  tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_hrv_sync_retries_previously_missing_date_on_force_refresh \
+  -v
 
 echo "Starter API i testmodus (SKIP_GARMIN_INIT=true) for smoke..."
 export SKIP_GARMIN_INIT=true

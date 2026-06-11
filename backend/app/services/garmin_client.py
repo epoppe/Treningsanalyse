@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.services.activity_field_extraction import extract_activity_summary_fields
 from app.services.hrv_fetch import HrvLiveResult, is_garth_not_found, normalize_garmin_hrv_raw
+from app.utils.body_battery_timeseries import enrich_body_battery_day_data
 
 # Sett opp logging tidlig så den er tilgjengelig
 logging.basicConfig(level=logging.INFO)
@@ -193,9 +194,40 @@ def _garmin_sleep_quality(overall_score: Optional[float], sleep_score: Optional[
     return "poor"
 
 
+def _extract_sleep_scores_nested(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Hent score/prosent fra garth DailySleepDTO sleep_scores."""
+    scores = data.get("sleep_scores") or data.get("sleepScores")
+    if not isinstance(scores, dict):
+        return {}
+
+    def block_value(key: str) -> Optional[float]:
+        block = scores.get(key)
+        if not isinstance(block, dict):
+            return None
+        value = block.get("value")
+        if isinstance(value, (int, float)):
+            return float(value)
+        return None
+
+    result: Dict[str, Any] = {}
+    overall = block_value("overall")
+    if overall is not None:
+        result["overall_score"] = overall
+    for score_key, attr in (
+        ("deep_percentage", "deep_sleep_percent"),
+        ("light_percentage", "light_sleep_percent"),
+        ("rem_percentage", "rem_sleep_percent"),
+    ):
+        value = block_value(score_key)
+        if value is not None:
+            result[attr] = value
+    return result
+
+
 def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
-    overall_score = _garmin_first_float(data, ["overall_score", "overallScore"])
-    sleep_score = _garmin_first_float(data, ["sleep_score", "sleepScore", "score"])
+    nested_scores = _extract_sleep_scores_nested(data)
+    overall_score = _garmin_first_float(data, ["overall_score", "overallScore"]) or nested_scores.get("overall_score")
+    sleep_score = _garmin_first_float(data, ["sleep_score", "sleepScore", "score"]) or overall_score
     sleep_latency = _garmin_first_float(
         data,
         [
@@ -207,7 +239,9 @@ def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
             "timeToFallAsleep",
         ],
     )
-    return {
+    result = {
+        "overall_score": overall_score,
+        "sleep_score": sleep_score,
         "bedtime": _garmin_first_datetime(
             data,
             [
@@ -217,6 +251,8 @@ def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
                 "sleepStartTimeGMT",
                 "sleepStartTimestampLocal",
                 "sleepStartTimeLocal",
+                "sleep_start_timestamp_gmt",
+                "sleep_start_timestamp_local",
             ],
         ),
         "wake_time": _garmin_first_datetime(
@@ -228,33 +264,78 @@ def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
                 "sleepEndTimeGMT",
                 "sleepEndTimestampLocal",
                 "sleepEndTimeLocal",
+                "sleep_end_timestamp_gmt",
+                "sleep_end_timestamp_local",
             ],
         ),
         "sleep_efficiency": _garmin_first_float(data, ["sleep_efficiency", "sleepEfficiency", "efficiency"]),
         "sleep_latency": sleep_latency,
-        "wake_episodes": _garmin_first_int(data, ["wake_episodes", "wakeEpisodes", "numberOfWakeEvents"]),
-        "average_heart_rate": _garmin_first_float(data, ["average_heart_rate", "averageHeartRate", "avgHeartRate"]),
+        "wake_episodes": _garmin_first_int(
+            data,
+            ["wake_episodes", "wakeEpisodes", "numberOfWakeEvents", "awake_count", "awakeCount"],
+        ),
+        "average_heart_rate": _garmin_first_float(
+            data,
+            [
+                "average_heart_rate",
+                "averageHeartRate",
+                "avgHeartRate",
+                "average_sp_o2_hr_sleep",
+                "averageSpO2HrSleep",
+            ],
+        ),
         "lowest_heart_rate": _garmin_first_float(data, ["lowest_heart_rate", "lowestHeartRate", "minHeartRate"]),
         "highest_heart_rate": _garmin_first_float(data, ["highest_heart_rate", "highestHeartRate", "maxHeartRate"]),
-        "heart_rate_variability": _garmin_first_float(data, ["heart_rate_variability", "heartRateVariability", "averageHrv"]),
-        "average_spo2": _garmin_first_float(data, ["average_spo2", "averageSpo2", "avgSpo2"]),
-        "lowest_spo2": _garmin_first_float(data, ["lowest_spo2", "lowestSpo2", "minSpo2"]),
+        "heart_rate_variability": _garmin_first_float(
+            data,
+            ["heart_rate_variability", "heartRateVariability", "averageHrv", "average_hrv"],
+        ),
+        "average_spo2": _garmin_first_float(
+            data,
+            ["average_spo2", "averageSpo2", "avgSpo2", "average_sp_o2_value", "averageSpo2Value"],
+        ),
+        "lowest_spo2": _garmin_first_float(
+            data,
+            ["lowest_spo2", "lowestSpo2", "minSpo2", "lowest_sp_o2_value", "lowestSpo2Value"],
+        ),
         "average_respiration_rate": _garmin_first_float(
             data,
-            ["average_respiration_rate", "averageRespirationRate", "averageRespiration", "avgRespirationRate"],
+            [
+                "average_respiration_rate",
+                "averageRespirationRate",
+                "averageRespiration",
+                "avgRespirationRate",
+                "average_respiration_value",
+                "averageRespirationValue",
+            ],
         ),
-        "stress_score": _garmin_first_float(data, ["stress_score", "stressScore"]),
+        "stress_score": _garmin_first_float(data, ["stress_score", "stressScore", "avg_sleep_stress", "avgSleepStress"]),
         "recovery_score": _garmin_first_float(data, ["recovery_score", "recoveryScore"]),
         "movement_score": _garmin_first_float(data, ["movement_score", "movementScore"]),
         "restless_moments": _garmin_first_int(data, ["restless_moments", "restlessMoments", "restlessMomentCount"]),
-        "deep_sleep_percent": _garmin_first_float(data, ["deep_sleep_percent", "deepSleepPercent", "deepSleepPercentage"]),
-        "light_sleep_percent": _garmin_first_float(data, ["light_sleep_percent", "lightSleepPercent", "lightSleepPercentage"]),
-        "rem_sleep_percent": _garmin_first_float(data, ["rem_sleep_percent", "remSleepPercent", "remSleepPercentage"]),
+        "deep_sleep_percent": _garmin_first_float(data, ["deep_sleep_percent", "deepSleepPercent", "deepSleepPercentage"])
+        or nested_scores.get("deep_sleep_percent"),
+        "light_sleep_percent": _garmin_first_float(data, ["light_sleep_percent", "lightSleepPercent", "lightSleepPercentage"])
+        or nested_scores.get("light_sleep_percent"),
+        "rem_sleep_percent": _garmin_first_float(data, ["rem_sleep_percent", "remSleepPercent", "remSleepPercentage"])
+        or nested_scores.get("rem_sleep_percent"),
         "awake_percent": _garmin_first_float(data, ["awake_percent", "awakePercent", "awakePercentage"]),
         "sleep_quality": _garmin_first_value(data, ["sleep_quality", "sleepQuality"]) or _garmin_sleep_quality(overall_score, sleep_score),
         "device_name": _garmin_first_value(data, ["device_name", "deviceName"]),
         "detailed_sleep_data": _garmin_to_serializable(data),
     }
+
+    sleep_seconds = _garmin_first_float(data, ["sleep_time_seconds", "sleepTimeSeconds"])
+    awake_seconds = _garmin_first_float(data, ["awake_sleep_seconds", "awakeSleepSeconds"])
+    if result["sleep_efficiency"] is None and sleep_seconds is not None and awake_seconds is not None:
+        time_in_bed = sleep_seconds + awake_seconds
+        if time_in_bed > 0:
+            result["sleep_efficiency"] = round(sleep_seconds / time_in_bed * 100.0, 1)
+
+    if result["overall_score"] is None and nested_scores.get("overall_score") is not None:
+        result["overall_score"] = nested_scores["overall_score"]
+
+    return result
 
 
 class GarminClient:
@@ -781,6 +862,60 @@ class GarminClient:
             logger.error(traceback.format_exc())
             return None
 
+    @staticmethod
+    def _extract_grade_adjusted_speed_mps(activity_data: Dict[str, Any], summary: Dict[str, Any]) -> Optional[float]:
+        """Hent avgGradeAdjustedSpeed fra summaryDTO, rot-nivå eller alternative Garmin-nøkler."""
+        candidate_keys = (
+            "avgGradeAdjustedSpeed",
+            "averageGradeAdjustedSpeed",
+            "gradeAdjustedSpeed",
+            "avgGradeAdjustedSpeedMps",
+        )
+        for source in (summary, activity_data):
+            if not isinstance(source, dict):
+                continue
+            for key in candidate_keys:
+                value = source.get(key)
+                if value is not None:
+                    try:
+                        numeric = float(value)
+                    except (TypeError, ValueError):
+                        continue
+                    if numeric > 0:
+                        return numeric
+        return None
+
+    @staticmethod
+    def _extract_activity_recovery_time_minutes(
+        activity_data: Dict[str, Any],
+        summary: Dict[str, Any],
+    ) -> Optional[int]:
+        """
+        Hent anbefalt recovery time fra activity-service (minutter).
+
+        Garmin bruker varierende nøkler; feltet finnes sjelden i activitylist.
+        """
+        candidate_keys = (
+            "recoveryTime",
+            "timeToRecover",
+            "recommendedRecoveryTime",
+            "postActivityRecoveryTime",
+        )
+        for source in (summary, activity_data):
+            if not isinstance(source, dict):
+                continue
+            for key in candidate_keys:
+                value = source.get(key)
+                if value is None:
+                    continue
+                try:
+                    minutes = int(round(float(value)))
+                except (TypeError, ValueError):
+                    continue
+                if minutes > 0:
+                    return minutes
+        return None
+
     def _extract_activity_summary_metrics(self, activity_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Normaliserer nyttige summaryDTO-felter fra activity-service."""
         if not isinstance(activity_data, dict):
@@ -798,7 +933,7 @@ class GarminClient:
             "max_heart_rate": summary.get("maxHR"),
             "min_heart_rate": summary.get("minHR"),
             "average_moving_speed": summary.get("averageMovingSpeed"),
-            "avg_grade_adjusted_speed": summary.get("avgGradeAdjustedSpeed"),
+            "avg_grade_adjusted_speed": self._extract_grade_adjusted_speed_mps(activity_data, summary),
             "ground_contact_time": summary.get("groundContactTime"),
             "stride_length": summary.get("strideLength"),
             "vertical_oscillation": summary.get("verticalOscillation"),
@@ -806,6 +941,7 @@ class GarminClient:
             "begin_potential_stamina": summary.get("beginPotentialStamina"),
             "end_potential_stamina": summary.get("endPotentialStamina"),
             "min_available_stamina": summary.get("minAvailableStamina"),
+            "recovery_time": self._extract_activity_recovery_time_minutes(activity_data, summary),
             "activity_body_battery_delta": summary.get("differenceBodyBattery"),
             "training_load": summary.get("activityTrainingLoad"),
             "aerobic_training_effect": summary.get("aerobicTrainingEffect") or summary.get("trainingEffect"),
@@ -815,6 +951,8 @@ class GarminClient:
             "anaerobic_training_effect_message": summary.get("anaerobicTrainingEffectMessage"),
             "elevation_gain": summary.get("elevationGain") or summary.get("totalElevationGain"),
             "elevation_loss": summary.get("elevationLoss") or summary.get("totalElevationLoss"),
+            "total_steps": summary_fields["total_steps"],
+            "max_running_cadence": summary_fields["max_running_cadence"],
             **summary_fields,
         }
 
@@ -1073,12 +1211,12 @@ class GarminClient:
                             "body_battery_drained_start": bb_data.get('body_battery_drained_start'),
                             "max_body_battery": max_bb,
                             "min_body_battery": min_bb,
+                            "body_battery_values_array": values_array,
                             "net_charge": None,
                         }
 
                         # Forsøk kalkulert net_charge hvis mulig
-                        if result_from_obj["body_battery_charged"] is not None and result_from_obj["body_battery_drained"] is not None:
-                            result_from_obj["net_charge"] = (result_from_obj["body_battery_charged"] or 0) - (result_from_obj["body_battery_drained"] or 0)
+                        result_from_obj = enrich_body_battery_day_data(result_from_obj)
 
                         logger.info(f"Hentet body battery via garth.DailyBodyBatteryStress for {date_str}: {result_from_obj}")
                         return result_from_obj
@@ -1124,10 +1262,10 @@ class GarminClient:
                                 ),
                             }
                             logger.info(f"Hentet body battery data fra allMetrics for {date_str}: {result}")
-                            body_battery_data = result
+                            body_battery_data = enrich_body_battery_day_data(result)
                             break
                         elif 'bodyBattery' in data:
-                            result = data['bodyBattery']
+                            result = enrich_body_battery_day_data(data['bodyBattery'])
                             logger.info(f"Hentet body battery data fra bodyBattery for {date_str}: {result}")
                             body_battery_data = result
                             break

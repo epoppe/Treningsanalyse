@@ -7,6 +7,10 @@ import logging
 from sqlalchemy.sql import func
 
 from ...database.models.health_data_missing import HealthDataMissing
+from ...services.health_data_missing_helpers import (
+    clear_health_data_missing,
+    should_retry_health_data_missing,
+)
 from ...database.models.sleep import Sleep
 from ...database.models.sync_state import SyncState
 from ..sleep_data_mapping import apply_sleep_data_to_row
@@ -61,12 +65,23 @@ class SleepSyncService:
             processed_successfully = False
             is_recent = current_date >= recent_cutoff
             should_skip = current_date.date() in existing_sleep_dates and not (force_refresh_recent and is_recent)
-            if should_skip or current_date.date() in sleep_missing_dates:
+            if should_skip:
                 processed_successfully = True
                 if not sync_state_blocked:
                     last_synced_candidate = current_date.date()
                 current_date += timedelta(days=1)
                 continue
+            if current_date.date() in sleep_missing_dates:
+                if not should_retry_health_data_missing(is_recent, force_refresh_recent):
+                    processed_successfully = True
+                    if not sync_state_blocked:
+                        last_synced_candidate = current_date.date()
+                    current_date += timedelta(days=1)
+                    continue
+                logger.debug(
+                    "Prøver søvn på nytt for %s (force_refresh_recent=True).",
+                    current_date.date(),
+                )
             try:
                 data = await self.sync_service.garmin_client.get_sleep_data(current_date)
                 if data and any(
@@ -80,6 +95,9 @@ class SleepSyncService:
                     apply_sleep_data_to_row(row, data)
                     row.updated_at = func.now()
                     existing_sleep_dates.add(sleep_date)
+                    clear_health_data_missing(self.sync_service.db, "sleep", sleep_date)
+                    sleep_missing_dates.discard(sleep_date)
+                    pending_missing_dates.discard(sleep_date)
                     saved += 1
                 else:
                     try:

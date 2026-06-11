@@ -114,7 +114,11 @@ class CacheCalculationService:
         # 4. Negative Split (fra FIT-data hvis tilgjengelig, kun løp)
         if is_running_activity(activity) and (force_recalculate or activity.negative_split_percent is None):
             try:
-                negative_split = self.analysis_service.calculate_negative_split(int(activity_id), self.db)
+                negative_split = self.analysis_service.calculate_negative_split(
+                    int(activity_id),
+                    self.db,
+                    persist=False,
+                )
                 if negative_split and 'negative_split_percent' in negative_split:
                     activity.negative_split_percent = negative_split['negative_split_percent']
                     results["calculations"]["negative_split"] = {
@@ -141,7 +145,10 @@ class CacheCalculationService:
         if needs_efficiency:
             try:
                 efficiency = self.analysis_service.calculate_efficiency_metrics(
-                    int(activity_id), self.db, force_recalculate=force_recalculate
+                    int(activity_id),
+                    self.db,
+                    force_recalculate=force_recalculate,
+                    persist=False,
                 )
                 if efficiency:
                     results["calculations"]["efficiency"] = {

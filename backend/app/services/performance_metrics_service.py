@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..database.models.activity import Activity, AnalyticsSnapshot
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .power_service import PowerService
 
 
 class PerformanceMetricsService:
@@ -20,10 +21,10 @@ class PerformanceMetricsService:
 
     # Maks plausible snittfart (m/s) per vinduslengde — filtrerer GPS-spikes i effort/CS.
     _MAX_AVG_SPEED_MPS: Dict[int, float] = {
-        30: 10.0,
-        60: 9.5,
-        180: 8.0,
-        360: 7.8,
+        30: 8.5,
+        60: 8.0,
+        180: 7.8,
+        360: 7.5,
         300: 7.5,
         600: 7.2,
         720: 7.0,
@@ -33,10 +34,22 @@ class PerformanceMetricsService:
         3600: 6.2,
     }
     _ABSOLUTE_SAMPLE_SPEED_CAP_MPS = 8.5
+    _ABSOLUTE_SAMPLE_POWER_CAP_W = 1200.0
+    _MAX_AVG_POWER_WATTS: Dict[int, float] = {
+        30: 900.0,
+        60: 850.0,
+        180: 750.0,
+        300: 700.0,
+        600: 650.0,
+        1200: 600.0,
+        2400: 550.0,
+        3600: 500.0,
+    }
 
     def __init__(self, db: Session, storage: DataStorage):
         self.db = db
         self.storage = storage
+        self._power_service = PowerService(storage)
 
     @property
     def _speed_duration_seconds(self) -> List[int]:
@@ -66,6 +79,24 @@ class PerformanceMetricsService:
         if median > 8:
             return numeric / 3.6
         return numeric
+
+    def _max_plausible_avg_power(self, duration_s: int) -> float:
+        if duration_s in self._MAX_AVG_POWER_WATTS:
+            return self._MAX_AVG_POWER_WATTS[duration_s]
+        keys = sorted(self._MAX_AVG_POWER_WATTS)
+        if duration_s <= keys[0]:
+            return self._MAX_AVG_POWER_WATTS[keys[0]]
+        if duration_s >= keys[-1]:
+            return self._MAX_AVG_POWER_WATTS[keys[-1]]
+        for lo, hi in zip(keys, keys[1:]):
+            if lo <= duration_s <= hi:
+                span = hi - lo
+                weight = (duration_s - lo) / span if span else 0.0
+                return (
+                    self._MAX_AVG_POWER_WATTS[lo] * (1 - weight)
+                    + self._MAX_AVG_POWER_WATTS[hi] * weight
+                )
+        return self._ABSOLUTE_SAMPLE_POWER_CAP_W
 
     def _max_plausible_avg_speed(self, duration_s: int) -> float:
         if duration_s in self._MAX_AVG_SPEED_MPS:
@@ -103,6 +134,13 @@ class PerformanceMetricsService:
         if duration_s <= 0 or speed_mps is None:
             return False
         return float(speed_mps) <= self._max_plausible_avg_speed(duration_s)
+
+    def _is_plausible_power_effort(self, effort: Dict[str, Any]) -> bool:
+        duration_s = int(effort.get("duration_seconds") or 0)
+        power_watts = effort.get("power_watts", effort.get("value"))
+        if duration_s <= 0 or power_watts is None:
+            return False
+        return float(power_watts) <= self._max_plausible_avg_power(duration_s)
 
     def _details_for_activity(self, activity: Activity) -> Optional[pd.DataFrame]:
         try:
@@ -161,7 +199,63 @@ class PerformanceMetricsService:
         df["dt_s"] = dt.fillna(fallback_dt).clip(lower=0.1, upper=10)
         df["distance_delta_m"] = df["speed_mps"] * df["dt_s"]
         df["cum_distance_m"] = df["distance_delta_m"].cumsum()
+        if df["power"].isna().all():
+            df["power"] = self._estimate_power_series(df)
         return df
+
+    def _grade_percent_series(self, samples: pd.DataFrame) -> pd.Series:
+        """Stigning i prosent for power-estimat (FIT grade eller høyde+fart)."""
+        if "grade" in samples.columns:
+            grade = pd.to_numeric(samples["grade"], errors="coerce").fillna(0.0)
+            if float(grade.abs().median()) <= 0.5:
+                return grade * 100.0
+            return grade
+        if "altitude" not in samples.columns:
+            return pd.Series(0.0, index=samples.index)
+        delta_alt = pd.to_numeric(samples["altitude"], errors="coerce").diff().fillna(0.0)
+        horizontal = samples["speed_mps"] * samples["dt_s"]
+        grade_fraction = np.where(horizontal > 0.5, delta_alt / horizontal, 0.0)
+        return pd.Series(grade_fraction, index=samples.index).clip(-0.45, 0.45) * 100.0
+
+    def _estimate_power_series(self, samples: pd.DataFrame) -> pd.Series:
+        """Estimer løpeeffekt per sample når rå power-kolonne mangler."""
+        if samples.empty:
+            return pd.Series(dtype=float)
+        grade_pct = self._grade_percent_series(samples)
+        vo_col = (
+            "vertical_oscillation"
+            if "vertical_oscillation" in samples.columns
+            else None
+        )
+        gct_col = None
+        for candidate in ("stance_time", "ground_contact_time"):
+            if candidate in samples.columns:
+                gct_col = candidate
+                break
+
+        mass_kg = self._power_service.MASS
+        powers: List[float] = []
+        prev_speed = float(samples["speed_mps"].iloc[0])
+        for idx, row in samples.iterrows():
+            speed = float(row["speed_mps"])
+            grade = float(grade_pct.loc[idx]) if idx in grade_pct.index else 0.0
+            vo = float(row[vo_col]) if vo_col and pd.notna(row.get(vo_col)) else 0.0
+            gct = float(row[gct_col]) if gct_col and pd.notna(row.get(gct_col)) else 0.0
+            powers.append(
+                self._power_service.running_power(
+                    mass_kg,
+                    speed,
+                    prev_speed,
+                    grade,
+                    vo,
+                    gct,
+                )
+            )
+            prev_speed = speed
+        return (
+            pd.Series(powers, index=samples.index, dtype=float)
+            .clip(upper=self._ABSOLUTE_SAMPLE_POWER_CAP_W)
+        )
 
     def _best_average_for_duration(
         self,
@@ -245,7 +339,13 @@ class PerformanceMetricsService:
                 efforts.append(speed_effort)
 
             power_effort = self._best_average_for_duration(samples, duration_s, "power")
-            if power_effort and power_effort["value"] > 0:
+            if (
+                power_effort
+                and power_effort["value"] > 0
+                and self._is_plausible_power_effort(
+                    {"duration_seconds": duration_s, "power_watts": power_effort["value"]}
+                )
+            ):
                 power_effort.update({
                     "metric_type": "power",
                     "activity_id": activity.activity_id,
@@ -450,6 +550,10 @@ class PerformanceMetricsService:
                     continue
                 if metric_type == "speed":
                     candidates = [e for e in candidates if self._is_plausible_speed_effort(e)]
+                    if not candidates:
+                        continue
+                elif metric_type == "power":
+                    candidates = [e for e in candidates if self._is_plausible_power_effort(e)]
                     if not candidates:
                         continue
                 best = max(candidates, key=lambda e: e["value"])

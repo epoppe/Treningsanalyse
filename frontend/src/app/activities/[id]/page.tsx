@@ -3,108 +3,101 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { Card, Title, Text } from '@tremor/react';
-import dynamic from 'next/dynamic';
 import ActivityAnalytics from '@/components/ActivityAnalytics';
-import TrainingReadiness from '@/components/TrainingReadiness';
-
-const PlotlyChart = dynamic(() => import('@/components/PlotlyChart'), {
-    ssr: false,
-    loading: () => <Text>Laster graf...</Text>
-});
+import ActivityDetailsCharts from '@/components/ActivityDetailsCharts';
+import type { AsyncLoadState } from '@/utils/metricState';
 
 const ActivityDetailPage = () => {
     const params = useParams();
     const id = Number(params.id);
-    const [detailsReady, setDetailsReady] = useState(false);
-    const [detailsData, setDetailsData] = useState<any[]>([]);
+    const [detailsState, setDetailsState] = useState<AsyncLoadState>('loading');
+    const [detailsData, setDetailsData] = useState<Record<string, unknown>[]>([]);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!id) return;
+        if (!id || Number.isNaN(id)) return;
+
+        const controller = new AbortController();
 
         const fetchDetails = async () => {
+            setDetailsState('loading');
+            setError(null);
+
             try {
-                const response = await fetch(`/api/activities/${id}/details`);
-                if (!response.ok) {
-                    throw new Error(`Klarte ikke hente detaljer: ${response.statusText}`);
+                const response = await fetch(`/api/activities/${id}/details`, {
+                    signal: controller.signal,
+                });
+
+                if (response.status === 404) {
+                    setDetailsData([]);
+                    setDetailsState('missing');
+                    return;
                 }
+
+                if (!response.ok) {
+                    throw new Error(`API-feil (${response.status}): ${response.statusText}`);
+                }
+
                 const data = await response.json();
+                if (!Array.isArray(data) || data.length === 0) {
+                    setDetailsData([]);
+                    setDetailsState('missing');
+                    return;
+                }
+
                 setDetailsData(data);
-                // Dataene er nå hentet og lagret på serveren. Vi kan nå laste grafene.
-                setDetailsReady(true);
+                setDetailsState('ready');
             } catch (err) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+                setDetailsState('error');
                 if (err instanceof Error) {
                     setError(err.message);
                 } else {
-                    setError('En ukjent feil oppstod');
+                    setError('En ukjent feil oppstod ved henting av aktivitetsdetaljer');
                 }
             }
         };
 
-        fetchDetails();
+        void fetchDetails();
+
+        return () => controller.abort();
     }, [id]);
 
-    if (isNaN(id)) {
+    if (Number.isNaN(id)) {
         return <Text>Ugyldig aktivitets-ID.</Text>;
     }
 
-    if (error) {
-        return <Text>Feil: {error}</Text>;
-    }
-
-    if (!detailsReady) {
+    if (detailsState === 'loading') {
         return <Text>Laster aktivitetsdetaljer...</Text>;
     }
-    
+
+    if (detailsState === 'error') {
+        return (
+            <main className="p-4 md:p-10 mx-auto max-w-7xl">
+                <Title>Aktivitetsdetaljer</Title>
+                <Card className="mt-6">
+                    <Text className="text-red-600">Feil ved henting av aktivitetsdetaljer: {error}</Text>
+                </Card>
+                <div className="mt-6">
+                    <ActivityAnalytics activityId={id} />
+                </div>
+            </main>
+        );
+    }
+
     return (
         <main className="p-4 md:p-10 mx-auto max-w-7xl">
             <Title>Aktivitetsdetaljer</Title>
 
             <div className="mt-6">
-                <TrainingReadiness showDetails={true} />
-            </div>
-
-            <div className="mt-6">
                 <ActivityAnalytics activityId={id} />
             </div>
 
-            <Card className="mt-6">
-                <div className="h-96">
-                    <PlotlyChart
-                        data={detailsData}
-                        xKey="timestamp"
-                        yKeys={['heart_rate']}
-                        title="Puls over tid"
-                        yAxisTitle="Puls (bpm)"
-                    />
-                </div>
-            </Card>
-
-            <Card className="mt-6">
-                 <div className="h-96">
-                    <PlotlyChart
-                        data={detailsData}
-                        xKey="elapsed_time"
-                        yKeys={['speed']}
-                        title="Fart over tid"
-                        yAxisTitle="Fart (km/t)"
-                    />
-                </div>
-            </Card>
-
-            <Card className="mt-6">
-                <div className="h-96">
-                    <PlotlyChart
-                        data={detailsData}
-                        xKey="timestamp"
-                        yKeys={['altitude']}
-                        title="Høydeprofil"
-                        yAxisTitle="Høydemeter (moh)"
-                    />
-                </div>
-            </Card>
+            <ActivityDetailsCharts detailsState={detailsState} detailsData={detailsData} />
         </main>
     );
 };
 
-export default ActivityDetailPage; 
+export default ActivityDetailPage;

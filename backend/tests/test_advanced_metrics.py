@@ -264,6 +264,48 @@ class AdvancedMetricsTests(unittest.TestCase):
         result = service.calculate_negative_split(9002, self.db)
         self.assertIsNotNone(result)
         self.assertIn("negative_split_percent", result)
+        self.assertIn(result.get("split_method"), {"distance", "time"})
+
+    def test_negative_split_uses_time_not_sample_count(self):
+        """Ujevn sample-tetthet skal ikke gi falsk split når farten er jevn."""
+        start = datetime(2024, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+        self.db.add(
+            Activity(
+                activity_id="9101",
+                activity_name="Uneven samples",
+                start_time=start,
+                distance=7200,
+                duration=2400,
+                average_speed=3.0,
+                average_heart_rate=145,
+                activity_type_id=self.running_type_id,
+            )
+        )
+        self.db.commit()
+
+        records = []
+        speed_mps = 3.0
+        for second in range(0, 2401):
+            if second <= 1200 and second % 20 != 0:
+                continue
+            if second > 1200 and second % 4 != 0:
+                continue
+            records.append(
+                {
+                    "activity_id": 9101,
+                    "timestamp": start + timedelta(seconds=second),
+                    "distance": speed_mps * second,
+                    "speed": speed_mps,
+                    "heart_rate": 145,
+                }
+            )
+        self.storage.save_activity_details(records)
+
+        service = AnalysisService(self.storage)
+        result = service.calculate_negative_split(9101, self.db)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.get("split_method"), "distance")
+        self.assertAlmostEqual(result["negative_split_percent"], 0.0, delta=1.0)
 
 
 if __name__ == "__main__":
