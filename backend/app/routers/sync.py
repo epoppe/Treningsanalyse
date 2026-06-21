@@ -86,6 +86,7 @@ class SyncRequest(BaseModel):
     end_date: date
     ignore_sync_state: Optional[bool] = False
     fit_download_mode: Optional[str] = "chunked"  # "auto" | "chunked"
+    list_only: Optional[bool] = False  # Kun aktivitetsliste, uten FIT/helsedata
 
 async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100, ignore_sync_state: bool = False, fit_download_mode: str = "chunked"):
     """Kjører aktivitetssynkronisering i bakgrunnen med automatisk FIT-data nedlasting."""
@@ -110,14 +111,28 @@ async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClie
         if db_session:
             db_session.close()
 
-async def run_activity_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime):
+async def run_activity_sync(
+    job_id: str,
+    garmin_client: GarminClient,
+    storage: DataStorage,
+    start_date: datetime,
+    end_date: datetime,
+    ignore_sync_state: bool = False,
+    skip_fit_download: bool = False,
+):
     """Kjører aktivitetssynkronisering i bakgrunnen."""
     db_session = None
     try:
-        _mark_job_processing(job_id, "Synkroniserer aktiviteter...")
+        label = "Synkroniserer aktivitetsliste..." if skip_fit_download else "Synkroniserer aktiviteter..."
+        _mark_job_processing(job_id, label)
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
-        result = await sync_service.sync_activities(start_date, end_date)
+        result = await sync_service.sync_activities(
+            start_date,
+            end_date,
+            ignore_sync_state=ignore_sync_state,
+            skip_fit_download=skip_fit_download,
+        )
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
         logger.critical(f"Feil i aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
@@ -347,6 +362,21 @@ async def trigger_activity_sync(
             "Aktivitetssynk er allerede i gang. Returnerer eksisterende jobb.",
             job_id,
             job,
+        )
+    if request.list_only:
+        background_tasks.add_task(
+            run_activity_sync,
+            job_id,
+            garmin_client,
+            storage,
+            start_datetime,
+            end_datetime,
+            request.ignore_sync_state,
+            True,
+        )
+        return _completed_job_response(
+            "Synkronisering av aktivitetsliste startet (uten FIT-nedlasting).",
+            job_id,
         )
     # Bruk force_refresh_recent=True for å sikre at nylige aktiviteter oppdateres
     background_tasks.add_task(

@@ -34,7 +34,7 @@ from .activity_metric_backfill import (
     normalize_garmin_average_pace,
 )
 from .body_battery_service import BodyBatteryService
-from ..utils.activity_filters import is_running_activity
+from ..utils.activity_filters import is_indoor_type_key, is_running_activity
 
 logger = logging.getLogger(__name__)
 
@@ -483,9 +483,19 @@ class SyncService:
         logger.info(f"Utvidet synkronisering fullført: {combined_result['summary']}")
         return combined_result
 
-    async def sync_activities(self, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, ignore_sync_state: bool = False) -> dict:
+    async def sync_activities(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        force_refresh_recent: bool = False,
+        ignore_sync_state: bool = False,
+        skip_fit_download: bool = False,
+    ) -> dict:
         """
         Orkestrerer synkronisering av aktiviteter for en gitt tidsperiode og lagrer dem i databasen.
+
+        Med skip_fit_download=True hentes kun aktivitetslisten fra Garmin (metadata),
+        uten FIT-nedlasting eller metrics-beregning — raskere for historisk backfill.
         """
         summary = {"total_fetched": 0, "periods_synced": 0, "status": "Startet"}
         
@@ -591,29 +601,35 @@ class SyncService:
                 if should_skip:
                     continue
 
-                # Hent detaljerte data (FIT-fil) for perioden vi synker.
-                # FIT-data er nødvendig for historisk backfill, så vi bruker den også på eldre aktiviteter.
-                details_json = None
-                fit_data = await self.garmin_client.get_activity_details(activity_id)
-                if fit_data:
-                    details_json = self._parse_fit_data(fit_data)
-                    
-                    # Lagre FIT-data også i parquet-format for decoupling-beregninger
-                    if details_json and 'records' in details_json:
-                        parquet_records = self.fit_sync._to_parquet_records(int(activity_id), details_json)
-                        
-                        if parquet_records:
-                            buffered_parquet_records.extend(parquet_records)
-                        else:
-                            logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
-                    else:
-                        logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
-                else:
-                    logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
-
-                # Håndter ActivityType
                 act_type_block = act_data.get("activityType") or {}
                 activity_type_key = act_type_block.get("typeKey")
+
+                details_json = None
+                if not skip_fit_download and not is_indoor_type_key(activity_type_key):
+                    # Hent detaljerte data (FIT-fil) for utendørsaktiviteter.
+                    fit_data = await self.garmin_client.get_activity_details(activity_id)
+                    if fit_data:
+                        details_json = self._parse_fit_data(fit_data)
+
+                        if details_json and 'records' in details_json:
+                            parquet_records = self.fit_sync._to_parquet_records(int(activity_id), details_json)
+
+                            if parquet_records:
+                                buffered_parquet_records.extend(parquet_records)
+                            else:
+                                logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
+                        else:
+                            logger.warning(f"Ingen FIT-records tilgjengelig for aktivitet {activity_id}")
+                    else:
+                        logger.warning(f"Ingen FIT-data tilgjengelig for aktivitet {activity_id}")
+                elif not skip_fit_download and is_indoor_type_key(activity_type_key):
+                    logger.debug(
+                        "Hopper over FIT-nedlasting for innendørs aktivitet %s (%s)",
+                        activity_id,
+                        activity_type_key,
+                    )
+
+                # Håndter ActivityType
                 activity_type_obj = None
                 if activity_type_key:
                     if activity_type_key in activity_type_cache:
@@ -777,48 +793,48 @@ class SyncService:
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             
-            # Beregn ALLE metrics for aktiviteter som faktisk ble lagt inn i denne kjøringen
-            logger.info("Starter beregning av alle metrics for nye aktiviteter...")
-            metrics_results = []
-            self.metrics_service.begin_batch()
-            try:
-                for aid in inserted_activity_ids:
-                    metrics_result = self._calculate_metrics_for_new_activity(aid)
-                    metrics_results.append(metrics_result)
-            finally:
-                self.metrics_service.end_batch()
-            
-            # Logg resultater
-            successful_tss = sum(1 for r in metrics_results if r["tss_calculated"])
-            successful_power = sum(1 for r in metrics_results if r["power_calculated"])
-            successful_running_economy = sum(1 for r in metrics_results if r["running_economy_calculated"])
-            successful_negative_splits = sum(1 for r in metrics_results if r["negative_split_calculated"])
-            successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
-            successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
-            
-            logger.info(
-                "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
-                "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s",
-                len(metrics_results),
-                successful_tss,
-                successful_power,
-                successful_running_economy,
-                successful_negative_splits,
-                successful_decouplings,
-                successful_hrv,
-            )
-            
             summary["total_fetched"] = added_count
             summary["activity_ids"] = inserted_activity_ids
-            summary["metrics_calculated"] = {
-                "tss": successful_tss,
-                "power": successful_power,
-                "running_economy": successful_running_economy,
-                "negative_split": successful_negative_splits,
-                "decoupling": successful_decouplings,
-                "hrv_available": successful_hrv,
-                "total_activities": len(metrics_results)
-            }
+            if skip_fit_download:
+                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(inserted_activity_ids)}
+            else:
+                logger.info("Starter beregning av alle metrics for nye aktiviteter...")
+                metrics_results = []
+                self.metrics_service.begin_batch()
+                try:
+                    for aid in inserted_activity_ids:
+                        metrics_result = self._calculate_metrics_for_new_activity(aid)
+                        metrics_results.append(metrics_result)
+                finally:
+                    self.metrics_service.end_batch()
+
+                successful_tss = sum(1 for r in metrics_results if r["tss_calculated"])
+                successful_power = sum(1 for r in metrics_results if r["power_calculated"])
+                successful_running_economy = sum(1 for r in metrics_results if r["running_economy_calculated"])
+                successful_negative_splits = sum(1 for r in metrics_results if r["negative_split_calculated"])
+                successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
+                successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
+
+                logger.info(
+                    "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
+                    "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s",
+                    len(metrics_results),
+                    successful_tss,
+                    successful_power,
+                    successful_running_economy,
+                    successful_negative_splits,
+                    successful_decouplings,
+                    successful_hrv,
+                )
+                summary["metrics_calculated"] = {
+                    "tss": successful_tss,
+                    "power": successful_power,
+                    "running_economy": successful_running_economy,
+                    "negative_split": successful_negative_splits,
+                    "decoupling": successful_decouplings,
+                    "hrv_available": successful_hrv,
+                    "total_activities": len(metrics_results),
+                }
             summary["status"] = "Fullført"
             logger.info(f"Synkronisering fra Garmin fullført. La til {added_count} nye aktiviteter i databasen.")
 
@@ -923,7 +939,6 @@ class SyncService:
 
     def _get_activity_details_frame(self, activity_id: str) -> Optional[pd.DataFrame]:
         try:
-            self.storage.reload_activity_details()
             try:
                 details = self.storage.get_activity_details(int(activity_id))
             except (TypeError, ValueError):

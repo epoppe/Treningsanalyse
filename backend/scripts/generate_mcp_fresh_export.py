@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -16,7 +16,12 @@ sys.path.insert(0, str(BACKEND))
 
 from app.mcp import training_tools  # noqa: E402
 from app.mcp.speed_metric_format import mcp_export_display_value  # noqa: E402
-from app.services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG  # noqa: E402
+from app.services.mcp_derived_metrics_service import (  # noqa: E402
+    DERIVED_METRIC_CATALOG,
+    McpDerivedMetricsService,
+)
+
+_DAILY_DERIVED_LOOKBACK_DAYS = 14
 JSON_OUTPUT = ROOT / "MCP_FRESH_VALUES.json"
 CSV_OUTPUT = ROOT / "MCP_FRESH_VALUES.csv"
 
@@ -92,13 +97,46 @@ def _catalog_by_key(catalog: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     return {metric["key"]: metric for metric in catalog["metrics"]}
 
 
-def _latest_metric_value(metric_key: str) -> tuple[Any, Optional[str], Optional[str]]:
+def _latest_daily_derived_value(
+    derived: McpDerivedMetricsService,
+    metric_key: str,
+    *,
+    rolling_daily: bool = False,
+) -> tuple[Any, Optional[str], Optional[str]]:
+    """Finn siste ikke-null daglig avledet verdi uten full timeseries (raskere export)."""
+    today = date.today()
+    for offset in range(_DAILY_DERIVED_LOOKBACK_DAYS):
+        day = today - timedelta(days=offset)
+        if rolling_daily:
+            value = derived._ppap.get_rolling_duration_curve_value(metric_key, day)
+        else:
+            value = derived._daily_metric_value(metric_key, day)
+        if value is not None:
+            display_unit = training_tools.mcp_display_unit(metric_key) or DERIVED_METRIC_CATALOG.get(
+                metric_key, {}
+            ).get("unit")
+            return value, day.isoformat(), display_unit
+    return None, None, None
+
+
+def _latest_metric_value(
+    metric_key: str,
+    *,
+    derived: Optional[McpDerivedMetricsService] = None,
+) -> tuple[Any, Optional[str], Optional[str]]:
     """Fetch latest user-facing MCP value using the same display logic as query_metric_timeseries."""
     canonical_key, _ = training_tools._resolve_metric_key(metric_key)
     definition = DERIVED_METRIC_CATALOG.get(canonical_key, {})
-    # Activity-scope derived metrics need a wide lookback: limit=1 only queries today and
-    # misses the latest activity that actually has a value.
-    query_limit = 365 if definition.get("scope") == "activity" else 1
+    scope = definition.get("scope")
+
+    if derived is not None and scope in {"daily", "rolling_daily"}:
+        return _latest_daily_derived_value(
+            derived,
+            canonical_key,
+            rolling_daily=scope == "rolling_daily",
+        )
+
+    query_limit = 365 if scope == "activity" else 1
     result = training_tools.query_metric_timeseries(metric_key=metric_key, limit=query_limit)
     if result.get("status") != "ok":
         return None, None, None
@@ -121,44 +159,49 @@ def _build_export_rows(
     by_key = _catalog_by_key(catalog)
     rows: List[Dict[str, Any]] = []
 
-    for metric in catalog["metrics"]:
-        key = metric["key"]
-        value, as_of, display_unit = _latest_metric_value(key)
-        metric_meta = {**metric}
-        if display_unit:
-            metric_meta["unit"] = display_unit
-        rows.append(
-            _metric_entry(
-                key,
-                metric_meta,
-                value,
-                as_of,
-                canonical_key=metric.get("canonical_key"),
-                preformatted=True,
-            )
-        )
+    with training_tools.training_context() as (db, storage):
+        derived = McpDerivedMetricsService(db, storage)
 
-    for alias, canonical in sorted(training_tools.METRIC_KEY_ALIASES.items()):
-        canonical_meta = by_key.get(canonical)
-        if canonical_meta is None:
-            continue
-        value, as_of, display_unit = _latest_metric_value(alias)
-        alias_meta = {
-            **canonical_meta,
-            "key": alias,
-        }
-        if display_unit:
-            alias_meta["unit"] = display_unit
-        rows.append(
-            _metric_entry(
-                alias,
-                alias_meta,
-                value,
-                as_of,
-                canonical_key=canonical,
-                preformatted=True,
+        for index, metric in enumerate(catalog["metrics"], start=1):
+            key = metric["key"]
+            value, as_of, display_unit = _latest_metric_value(key, derived=derived)
+            metric_meta = {**metric}
+            if display_unit:
+                metric_meta["unit"] = display_unit
+            rows.append(
+                _metric_entry(
+                    key,
+                    metric_meta,
+                    value,
+                    as_of,
+                    canonical_key=metric.get("canonical_key"),
+                    preformatted=True,
+                )
             )
-        )
+            if index % 50 == 0:
+                print(f"  [{index}/{catalog['count']}] export...", flush=True)
+
+        for alias, canonical in sorted(training_tools.METRIC_KEY_ALIASES.items()):
+            canonical_meta = by_key.get(canonical)
+            if canonical_meta is None:
+                continue
+            value, as_of, display_unit = _latest_metric_value(alias, derived=derived)
+            alias_meta = {
+                **canonical_meta,
+                "key": alias,
+            }
+            if display_unit:
+                alias_meta["unit"] = display_unit
+            rows.append(
+                _metric_entry(
+                    alias,
+                    alias_meta,
+                    value,
+                    as_of,
+                    canonical_key=canonical,
+                    preformatted=True,
+                )
+            )
 
     rows.sort(key=lambda row: row["key"])
     return rows

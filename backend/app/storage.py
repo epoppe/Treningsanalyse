@@ -1,4 +1,5 @@
 import os
+import gc
 import importlib.util
 import pandas as pd
 import numpy as np
@@ -58,13 +59,31 @@ class DataStorage:
             'baseline_balanced_upper': 'float64', 'status': 'object'
         }
         
-        # Last inn data ved initialisering
+        # Last inn data ved initialisering (activity_details lazy — unngår 1M+ rader i minnet)
         self.activities_df = self._load_or_initialize_dataframe(self.activities_file, self.activities_columns, 'activity_id')
-        self.activity_details_df = self._load_or_initialize_dataframe(self.activity_details_file, self.activity_details_columns)
+        self._activity_details_df: Optional[pd.DataFrame] = None
 
         self.heart_rate_df = self._load_or_initialize_dataframe(self.heart_rate_file, self.heart_rate_columns, 'timestamp')
         self.resting_heart_rate_df = self._load_or_initialize_dataframe(self.resting_heart_rate_file, self.resting_heart_rate_columns, 'date')
         self.hrv_df = self._load_or_initialize_dataframe(self.hrv_file, self.hrv_columns, 'date')
+
+    @property
+    def activity_details_df(self) -> pd.DataFrame:
+        if self._activity_details_df is None:
+            self._activity_details_df = self._load_or_initialize_dataframe(
+                self.activity_details_file,
+                self.activity_details_columns,
+            )
+        return self._activity_details_df
+
+    @activity_details_df.setter
+    def activity_details_df(self, value: pd.DataFrame) -> None:
+        self._activity_details_df = value
+
+    def invalidate_activity_details_cache(self) -> None:
+        """Frigjør in-memory FIT-cache (fil på disk er fortsatt gyldig)."""
+        self._activity_details_df = None
+        gc.collect()
 
     def _ensure_data_directory(self):
         """Sikrer at datalagringskatalogen eksisterer."""
@@ -217,24 +236,51 @@ class DataStorage:
     
     def reload_activity_details(self):
         """Laster aktivitetsdetaljene på nytt fra parquet-filen."""
-        self.activity_details_df = self._load_or_initialize_dataframe(
-            self.activity_details_file, 
-            self.activity_details_columns
+        self._activity_details_df = self._load_or_initialize_dataframe(
+            self.activity_details_file,
+            self.activity_details_columns,
         )
-        logger.info(f"Lastet aktivitetsdetaljer på nytt: {len(self.activity_details_df)} rader")
+        logger.info(f"Lastet aktivitetsdetaljer på nytt: {len(self._activity_details_df)} rader")
 
     def get_activity_details(self, activity_id: int, force_reload: bool = False) -> Optional[pd.DataFrame]:
-        """Henter aktivitetsdetaljer fra cache, med valgfri reload fra parquet ved behov."""
+        """Henter FIT-rader for én aktivitet uten å laste hele parquet-filen."""
         if force_reload:
-            self.reload_activity_details()
+            self.invalidate_activity_details_cache()
 
-        activity_data = self.activity_details_df[self.activity_details_df['activity_id'] == activity_id]
+        if not os.path.exists(self.activity_details_file):
+            return None
+
+        try:
+            import pyarrow.parquet as pq
+
+            table = pq.read_table(
+                self.activity_details_file,
+                filters=[("activity_id", "==", int(activity_id))],
+            )
+            if table.num_rows == 0:
+                return None
+            activity_data = table.to_pandas()
+            if "timestamp" in activity_data.columns:
+                activity_data["timestamp"] = pd.to_datetime(
+                    activity_data["timestamp"],
+                    errors="coerce",
+                    utc=True,
+                ).dt.tz_convert(None)
+            return activity_data.reset_index(drop=True)
+        except Exception as exc:
+            logger.debug(
+                "PyArrow filtered read feilet for aktivitet %s, faller tilbake til cache: %s",
+                activity_id,
+                exc,
+            )
+
+        activity_data = self.activity_details_df
+        if "activity_id" not in activity_data.columns:
+            activity_data = activity_data.reset_index()
+        activity_data = activity_data[activity_data["activity_id"] == int(activity_id)]
         if activity_data.empty:
             return None
-        
-        # Reset index for å få timestamp som kolonne
-        activity_data = activity_data.reset_index()
-        return activity_data
+        return activity_data.reset_index(drop=True)
 
 
 
@@ -292,36 +338,112 @@ class DataStorage:
             return df.reset_index()
         return df.copy()
 
+    def _activity_details_polars_schema(self) -> Dict[str, Any]:
+        import polars as pl
+
+        return {
+            "activity_id": pl.Int64,
+            "timestamp": pl.Datetime(time_unit="ns"),
+            "latitude": pl.Float64,
+            "longitude": pl.Float64,
+            "distance": pl.Float64,
+            "speed": pl.Float64,
+            "heart_rate": pl.Float64,
+            "cadence": pl.Float64,
+            "temperature": pl.Float64,
+            "altitude": pl.Float64,
+        }
+
+    def _details_dicts_to_polars(self, details_data: List[Dict[str, Any]]):
+        import polars as pl
+
+        columns = list(self.activity_details_columns.keys())
+        df = pl.DataFrame(details_data)
+        if df.is_empty():
+            return df
+
+        if "timestamp" in df.columns:
+            df = df.with_columns(
+                pl.col("timestamp").cast(pl.Datetime(time_zone="UTC"), strict=False).dt.replace_time_zone(None)
+            )
+
+        schema = self._activity_details_polars_schema()
+        for col in columns:
+            if col not in df.columns:
+                df = df.with_columns(pl.lit(None).alias(col))
+            if col in schema:
+                df = df.with_columns(pl.col(col).cast(schema[col], strict=False))
+        return df.select(columns)
+
+    def _save_activity_details_polars(
+        self,
+        new_df,
+        *,
+        replace_activity_ids: Optional[List[int]] = None,
+    ) -> None:
+        import polars as pl
+
+        columns = list(self.activity_details_columns.keys())
+        path = self.activity_details_file
+        if os.path.exists(path):
+            existing = pl.read_parquet(path)
+            for col in columns:
+                if col not in existing.columns:
+                    existing = existing.with_columns(pl.lit(None).alias(col))
+            existing = existing.select(columns)
+            new_df = new_df.select(columns)
+            schema = self._activity_details_polars_schema()
+            for col, dtype in schema.items():
+                if col in columns:
+                    existing = existing.with_columns(pl.col(col).cast(dtype, strict=False))
+                    new_df = new_df.with_columns(pl.col(col).cast(dtype, strict=False))
+
+            if replace_activity_ids:
+                replace_set = [int(activity_id) for activity_id in replace_activity_ids]
+                removed_count = existing.filter(pl.col("activity_id").is_in(replace_set)).height
+                if removed_count:
+                    logger.info(
+                        "Erstatter parquet-detaljer for %s aktivitet(er): fjernet %s gamle rader",
+                        len(replace_set),
+                        removed_count,
+                    )
+                existing = existing.filter(~pl.col("activity_id").is_in(replace_set))
+                combined = pl.concat([existing, new_df], how="vertical")
+            else:
+                deduped = new_df.join(
+                    existing.select(["activity_id", "timestamp"]),
+                    on=["activity_id", "timestamp"],
+                    how="anti",
+                )
+                combined = pl.concat([existing, deduped], how="vertical")
+        else:
+            combined = new_df.select(columns)
+
+        combined = combined.sort("timestamp")
+        combined.write_parquet(path)
+        logger.info("Lagret Aktivitetsdetaljer-data til %s (%s rader).", path, combined.height)
+        self.invalidate_activity_details_cache()
+
     def remove_activity_details(self, activity_ids: List[int]) -> int:
         """Fjerner alle parquet-rader for gitte aktivitets-ID-er."""
-        if not activity_ids:
-            return 0
-        replace_set = {int(activity_id) for activity_id in activity_ids}
-        current_df = self._activity_details_as_columns(self.activity_details_df)
-        if current_df.empty or "activity_id" not in current_df.columns:
+        if not activity_ids or not os.path.exists(self.activity_details_file):
             return 0
 
-        mask = current_df["activity_id"].isin(replace_set)
-        removed_count = int(mask.sum())
+        import polars as pl
+
+        replace_set = [int(activity_id) for activity_id in activity_ids]
+        existing = pl.read_parquet(self.activity_details_file)
+        removed_count = existing.filter(pl.col("activity_id").is_in(replace_set)).height
         if removed_count == 0:
             return 0
 
-        remaining_df = current_df.loc[~mask].copy()
-        if remaining_df.empty:
-            self.activity_details_df = pd.DataFrame(
-                {col: pd.Series(dtype=dt) for col, dt in self.activity_details_columns.items()}
-            )
+        remaining = existing.filter(~pl.col("activity_id").is_in(replace_set))
+        if remaining.is_empty():
+            remaining.write_parquet(self.activity_details_file)
         else:
-            remaining_df["timestamp"] = pd.to_datetime(
-                remaining_df["timestamp"],
-                errors="coerce",
-                utc=True,
-            ).dt.tz_convert(None)
-            remaining_df.set_index("timestamp", inplace=True)
-            remaining_df.sort_index(inplace=True)
-            self.activity_details_df = remaining_df
+            remaining.sort("timestamp").write_parquet(self.activity_details_file)
 
-        self._save_dataframe(self.activity_details_df, self.activity_details_file, "Aktivitetsdetaljer")
+        self.invalidate_activity_details_cache()
         logger.info(
             "Fjernet %s parquet-rader for aktivitet(er) %s",
             removed_count,
@@ -342,7 +464,18 @@ class DataStorage:
         """
         if not details_data:
             return
-        
+
+        # FIT-batch: skriv via Polars direkte til fil uten å holde 1M+ rader i pandas.
+        if replace_activity_ids or not os.path.exists(self.activity_details_file):
+            try:
+                new_pl = self._details_dicts_to_polars(details_data)
+                if new_pl.is_empty():
+                    return
+                self._save_activity_details_polars(new_pl, replace_activity_ids=replace_activity_ids)
+                return
+            except Exception as exc:
+                logger.warning("Polars-lagring feilet, faller tilbake til pandas: %s", exc)
+
         new_df = pd.DataFrame(details_data)
         for col, dtype in self.activity_details_columns.items():
             if col in new_df.columns:
@@ -369,17 +502,12 @@ class DataStorage:
                     )
         
         if not current_df.empty:
-            # For activity_details bruker vi kombinasjon av activity_id og timestamp for duplikatsjekk
-            # Opprett kombinert nøkkel for duplikatsjekk
             if 'activity_id' in current_df.columns and 'timestamp' in current_df.columns and 'activity_id' in new_df.columns and 'timestamp' in new_df.columns:
                 existing_keys = set(zip(current_df['activity_id'], current_df['timestamp']))
                 new_keys = list(zip(new_df['activity_id'], new_df['timestamp']))
-                
-                # Behold kun nye kombinasjoner av (activity_id, timestamp)
                 mask = [key not in existing_keys for key in new_keys]
                 new_df = new_df[mask]
             else:
-                # Fallback til timestamp-only hvis kolonner mangler
                 new_df = new_df[~new_df['timestamp'].isin(current_df['timestamp'])]
 
         if new_df.empty:
@@ -398,11 +526,11 @@ class DataStorage:
                     current_df.sort_index(inplace=True)
                     self.activity_details_df = current_df
                 self._save_dataframe(self.activity_details_df, self.activity_details_file, "Aktivitetsdetaljer")
+                self.invalidate_activity_details_cache()
             else:
                 logger.info("Ingen nye data å legge til for Aktivitetsdetaljer.")
             return
 
-        # Kombiner data
         combined_df = pd.concat([current_df, new_df], ignore_index=True)
         combined_df['timestamp'] = pd.to_datetime(
             combined_df['timestamp'],
@@ -414,6 +542,7 @@ class DataStorage:
 
         self.activity_details_df = combined_df
         self._save_dataframe(combined_df, self.activity_details_file, 'Aktivitetsdetaljer')
+        self.invalidate_activity_details_cache()
 
 
     

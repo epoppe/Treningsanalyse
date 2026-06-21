@@ -13,6 +13,7 @@ import polars as pl
 from dateutil import parser as date_parser
 from fitparse import FitFile
 from sqlalchemy import and_
+from sqlalchemy.orm import joinedload
 
 from ...database.models.activity import Activity
 from ...services.route_analysis_service import RouteAnalysisService
@@ -20,6 +21,7 @@ from ...services.activity_data_validation import (
     max_hr_from_fit_records,
     validate_and_repair_activity,
 )
+from ...utils.activity_filters import should_download_fit
 from ...config import data_path
 
 logger = logging.getLogger(__name__)
@@ -304,8 +306,13 @@ class FitSyncService:
     def get_existing_fit_ids(self) -> set[int]:
         try:
             path = data_path("activity_details.parquet")
-            existing_parquet_df = pl.read_parquet(str(path))
-            return set(existing_parquet_df["activity_id"].unique())
+            ids = (
+                pl.scan_parquet(str(path))
+                .select("activity_id")
+                .unique()
+                .collect()["activity_id"]
+            )
+            return set(ids.to_list())
         except Exception:
             return set()
 
@@ -316,14 +323,20 @@ class FitSyncService:
         try:
             if activity_ids is None:
                 existing_fit_activity_ids = self.get_existing_fit_ids()
-                query = self.sync_service.db.query(Activity.activity_id, Activity.detailed_metrics).order_by(
-                    Activity.activity_id.desc()
+                query = (
+                    self.sync_service.db.query(Activity)
+                    .options(joinedload(Activity.activity_type))
+                    .order_by(Activity.activity_id.desc())
                 )
                 if limit:
                     query = query.limit(limit * 3)
                 all_activities = query.all()
                 activity_ids = []
+                skipped_indoor = 0
                 for activity in all_activities:
+                    if not should_download_fit(activity):
+                        skipped_indoor += 1
+                        continue
                     has_parquet_data = activity.activity_id in existing_fit_activity_ids
                     has_db_details = (
                         activity.detailed_metrics is not None
@@ -335,7 +348,8 @@ class FitSyncService:
                         if limit and len(activity_ids) >= limit:
                             break
                 logger.info(
-                    f"Fant {len(activity_ids)} aktiviteter som mangler FIT-data (av totalt {len(all_activities)} sjekket)"
+                    f"Fant {len(activity_ids)} aktiviteter som mangler FIT-data "
+                    f"(hoppet over {skipped_indoor} innendørs)"
                 )
                 logger.info(f"Første 10 aktiviteter som mangler data: {activity_ids[:10]}")
 
@@ -380,7 +394,8 @@ class FitSyncService:
         try:
             existing_fit_activity_ids = self.get_existing_fit_ids()
             activities_in_period = (
-                self.sync_service.db.query(Activity.activity_id, Activity.start_time, Activity.activity_name)
+                self.sync_service.db.query(Activity)
+                .options(joinedload(Activity.activity_type))
                 .filter(and_(Activity.start_time >= start_date, Activity.start_time <= end_date))
                 .order_by(Activity.start_time.desc())
                 .all()
@@ -389,21 +404,24 @@ class FitSyncService:
                 f"Fant {len(activities_in_period)} aktiviteter i perioden {start_date.date()} til {end_date.date()}"
             )
             missing_fit_activities = []
+            skipped_indoor = 0
             for activity in activities_in_period:
+                if not should_download_fit(activity):
+                    skipped_indoor += 1
+                    continue
                 has_parquet_data = activity.activity_id in existing_fit_activity_ids
-                db_activity = self.sync_service.db.query(Activity.detailed_metrics).filter_by(
-                    activity_id=activity.activity_id
-                ).first()
                 has_db_details = (
-                    db_activity
-                    and db_activity.detailed_metrics is not None
-                    and db_activity.detailed_metrics != {}
-                    and "records" in str(db_activity.detailed_metrics)
+                    activity.detailed_metrics is not None
+                    and activity.detailed_metrics != {}
+                    and "records" in str(activity.detailed_metrics)
                 )
                 if not (has_parquet_data and has_db_details):
                     missing_fit_activities.append(activity)
 
-            logger.info(f"Av disse mangler {len(missing_fit_activities)} aktiviteter FIT-data")
+            logger.info(
+                f"Av disse mangler {len(missing_fit_activities)} aktiviteter FIT-data "
+                f"(hoppet over {skipped_indoor} innendørs)"
+            )
             if not missing_fit_activities:
                 return {"status": "Fullført", "message": "Alle aktiviteter i perioden har allerede FIT-data"}
 

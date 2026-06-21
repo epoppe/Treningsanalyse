@@ -305,13 +305,13 @@ def main() -> None:
         after = summary.get("after", before)
         print("\nFør/etter (blant kandidater):")
         print(
-            f"  negative_split: {before['negative_split_percent']} → {after['negative_split_percent']}"
+            f"  negative_split: {before['negative_split_percent']} -> {after['negative_split_percent']}"
         )
         print(
-            f"  decoupling:     {before['decoupling_percent']} → {after['decoupling_percent']}"
+            f"  decoupling:     {before['decoupling_percent']} -> {after['decoupling_percent']}"
         )
         print(
-            f"  running_economy:{before['running_economy']} → {after['running_economy']}"
+            f"  running_economy:{before['running_economy']} -> {after['running_economy']}"
         )
         print(f"  alle tre felt:  {before['all_three']} → {after['all_three']}")
         if not args.dry_run:

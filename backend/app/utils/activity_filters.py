@@ -24,6 +24,35 @@ TREADMILL_TYPE_KEYS: FrozenSet[str] = frozenset(
     }
 )
 
+# Aktivitetstyper der FIT ikke skal lastes ned (innendørs / tredemølle).
+INDOOR_ACTIVITY_TYPE_KEYS: FrozenSet[str] = frozenset(
+    {
+        *TREADMILL_TYPE_KEYS,
+        "indoor_cycling",
+        "indoor_cardio",
+    }
+)
+
+
+def is_indoor_type_key(type_key: Optional[str]) -> bool:
+    if not type_key:
+        return False
+    key = type_key.lower()
+    if key in INDOOR_ACTIVITY_TYPE_KEYS:
+        return True
+    return key.startswith("indoor_")
+
+
+def is_indoor_activity(activity: Optional[Activity]) -> bool:
+    if activity is None or activity.activity_type is None:
+        return False
+    return is_indoor_type_key(activity.activity_type.type_key)
+
+
+def should_download_fit(activity: Optional[Activity]) -> bool:
+    """FIT-nedlasting er kun relevant for utendørsaktiviteter med GPS/rute."""
+    return not is_indoor_activity(activity)
+
 
 def is_running_activity(
     activity: Optional[Activity],
