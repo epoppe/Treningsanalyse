@@ -57,6 +57,8 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 def patch_garth():
     """Applierer patch til garth-biblioteket for å bruke en nyere User-Agent."""
     garth.client.USER_AGENT = USER_AGENT
+    # Ikke auto-retry på 429 — hver retry teller mot Garmin rate limit.
+    garth.client.configure(retries=0, status_forcelist=(408, 500, 502, 503, 504))
 
 patch_garth()
 
@@ -338,6 +340,19 @@ def _extract_sleep_detail_metrics(data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
+def _is_rate_limited_error(exc: Exception) -> bool:
+    """Sjekk om feilen skyldes Garmin rate limiting (429)."""
+    msg = str(exc).lower()
+    if "429" in msg or "too many requests" in msg:
+        return True
+    if isinstance(exc, GarthHTTPError):
+        response = getattr(exc, "error", None)
+        response = getattr(response, "response", None) if response is not None else None
+        if response is not None and getattr(response, "status_code", None) == 429:
+            return True
+    return False
+
+
 class GarminClient:
     _instance = None
     _lock = asyncio.Lock()
@@ -354,6 +369,32 @@ class GarminClient:
         self.client_id = str(uuid.uuid4())
         self._initialized = False
         logger.info(f"GarminClient instance {self.client_id} __init__. Token directory: {self.token_dir}. Patches ensured.")
+
+    async def _ensure_valid_session(self, max_attempts: int = 6) -> bool:
+        """Forny utløpt OAuth2 fra lagrede tokens og verifiser sesjonen."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                await asyncio.to_thread(garth.client.refresh_oauth2)
+                await asyncio.to_thread(garth.save, str(self.token_dir))
+                await asyncio.to_thread(lambda: garth.client.username)
+                logger.info("Sesjon bekreftet som gyldig.")
+                return True
+            except Exception as exc:
+                if _is_rate_limited_error(exc) and attempt < max_attempts:
+                    wait_seconds = min(60 * attempt, 300)
+                    logger.warning(
+                        "Garmin rate limit under token-fornyelse (forsøk %s/%s), venter %ss...",
+                        attempt,
+                        max_attempts,
+                        wait_seconds,
+                    )
+                    await asyncio.sleep(wait_seconds)
+                    continue
+                if _is_rate_limited_error(exc):
+                    logger.error("Garmin rate limit etter %s forsøk på token-fornyelse", max_attempts)
+                    return False
+                raise
+        return False
         
     async def initialize(self):
         """Initialiserer Garmin-klienten.
@@ -363,38 +404,48 @@ class GarminClient:
         """
         logger.info(f"GarminClient instance {self.client_id} initialize. Initialiserer Garmin Client for {self.email}...")
         try:
-            # Prøv først å gjenopprette eksisterende sesjon
             await asyncio.to_thread(garth.resume, str(self.token_dir))
             logger.info("Vellykket gjenoppretting av eksisterende Garmin-sesjon.")
-            
-            # Test at sesjonen fungerer
-            try:
-                await asyncio.to_thread(lambda: garth.client.username)
-                logger.info("Sesjon bekreftet som gyldig.")
+            if await self._ensure_valid_session():
                 self._initialized = True
                 return True
-            except GarthException:
-                logger.info("Eksisterende sesjon er utløpt, utfører ny pålogging...")
-                raise  # Trigger ny pålogging nedenfor
-                
-        except (GarthException, FileNotFoundError, Exception) as e:
-            logger.info(f"Kunne ikke gjenopprette sesjon ({e}), utfører ny pålogging...")
-            try:
-                # Utfør ny pålogging
-                await asyncio.to_thread(garth.login, self.email, self.password)
-                # Lagre sesjonsinformasjon for fremtidig bruk
-                await asyncio.to_thread(garth.save, str(self.token_dir))
-                logger.info("Vellykket ny pålogging og lagring av sesjon.")
-                self._initialized = True
-                return True
-            except GarthException as login_error:
+            self._initialized = False
+            return False
+        except FileNotFoundError:
+            logger.info("Ingen lagrede tokens funnet, utfører ny pålogging...")
+        except GarthException as exc:
+            if _is_rate_limited_error(exc):
+                logger.error("Kan ikke gjenopprette sesjon pga. Garmin rate limit: %s", exc)
+                self._initialized = False
+                return False
+            logger.info("Kunne ikke gjenopprette sesjon (%s), utfører ny pålogging...", exc)
+        except Exception as exc:
+            if _is_rate_limited_error(exc):
+                logger.error("Kan ikke gjenopprette sesjon pga. Garmin rate limit: %s", exc)
+                self._initialized = False
+                return False
+            logger.info("Kunne ikke gjenopprette sesjon (%s), utfører ny pålogging...", exc)
+
+        try:
+            await asyncio.to_thread(garth.login, self.email, self.password)
+            await asyncio.to_thread(garth.save, str(self.token_dir))
+            logger.info("Vellykket ny pålogging og lagring av sesjon.")
+            self._initialized = True
+            return True
+        except GarthException as login_error:
+            if _is_rate_limited_error(login_error):
+                logger.error("Pålogging blokkert av Garmin rate limit. Bruk lagrede tokens og prøv igjen senere.")
+            else:
                 logger.error(f"Pålogging feilet: {login_error}")
-                self._initialized = False
-                return False
-            except Exception as login_error:
+            self._initialized = False
+            return False
+        except Exception as login_error:
+            if _is_rate_limited_error(login_error):
+                logger.error("Pålogging blokkert av Garmin rate limit. Bruk lagrede tokens og prøv igjen senere.")
+            else:
                 logger.error(f"Pålogging feilet med uventet feil: {login_error}")
-                self._initialized = False
-                return False
+            self._initialized = False
+            return False
 
     def is_authenticated(self) -> bool:
         """Sjekker om en token-fil finnes i katalogen uten å gjøre et nettverkskall."""
