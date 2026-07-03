@@ -29,6 +29,10 @@ RACE_DISTANCES_M = {
     "predicted_marathon_time": 42195.0,
 }
 
+# Metrikker som leser den delte CTL/ATL/TSB-load-serien; disse primes én gang per
+# tidsserie-vindu i stedet for å bygges på nytt per dag.
+LOAD_SERIES_METRICS = {"fitness.ctl", "fitness.atl", "fitness.tsb", "fitness.form"}
+
 
 class McpDerivedMetricsService:
     """Computed metrics for MCP that are not stored as simple DB columns."""
@@ -133,6 +137,11 @@ class McpDerivedMetricsService:
             dates.append(current)
             current -= timedelta(days=1)
         dates.reverse()
+
+        # For CTL/ATL/TSB-serier: bygg load-serien én gang for hele vinduet slik at
+        # per-dag-oppslag gjenbruker samme serie (unngår O(vindu × oppvarming)).
+        if dates and metric_key in LOAD_SERIES_METRICS:
+            self._ppap.prime_load_series(dates[0], dates[-1])
 
         points = []
         for day in dates:
