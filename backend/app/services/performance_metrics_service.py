@@ -360,6 +360,8 @@ class PerformanceMetricsService:
         self,
         activity: Activity,
         force_recalculate: bool = False,
+        *,
+        commit: bool = True,
     ) -> Optional[Dict[str, Any]]:
         if not is_running_activity(activity):
             return None
@@ -445,7 +447,10 @@ class PerformanceMetricsService:
         activity.hr_drift_pct = round(hr_drift_pct, 2) if hr_drift_pct is not None else None
         activity.cadence_drop_pct = round(cadence_drop_pct, 2) if cadence_drop_pct is not None else None
         activity.ef_drop_pct = round(ef_drop_pct, 2) if ef_drop_pct is not None else None
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
 
         return {
             "activity_id": activity.activity_id,
@@ -812,6 +817,8 @@ class PerformanceMetricsService:
         payload: Dict[str, Any],
         data_quality_score: Optional[float] = None,
         model_quality: Optional[str] = None,
+        *,
+        commit: bool = True,
     ) -> AnalyticsSnapshot:
         snapshot = self.db.query(AnalyticsSnapshot).filter_by(metric_key=metric_key).first()
         if snapshot is None:
@@ -821,10 +828,13 @@ class PerformanceMetricsService:
         snapshot.calculated_at = datetime.now(timezone.utc)
         snapshot.data_quality_score = data_quality_score
         snapshot.model_quality = model_quality
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         return snapshot
 
-    def recalculate_performance_snapshots(self) -> Dict[str, Any]:
+    def recalculate_performance_snapshots(self, *, commit: bool = True) -> Dict[str, Any]:
         critical_speed = {
             "outdoor": self.calculate_critical_speed(
                 days=self.CRITICAL_SPEED_LOOKBACK_DAYS,
@@ -861,12 +871,14 @@ class PerformanceMetricsService:
             critical_speed,
             data_quality_score=100.0 if outdoor_cs.get("critical_speed_mps") else 0.0,
             model_quality=outdoor_cs.get("model_quality"),
+            commit=commit,
         )
         self._upsert_snapshot(
             "duration_curve",
             duration_curve,
             data_quality_score=100.0 if curve_all["effort_count"] else 0.0,
             model_quality="available" if curve_all["effort_count"] else "insufficient_data",
+            commit=commit,
         )
         return {
             "critical_speed": critical_speed,

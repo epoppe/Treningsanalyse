@@ -92,7 +92,7 @@ class PowerService:
         # Garmin lar verdien falle lavere på nedoverbakker
         return max(total_power, 60.0)  # Redusert minimum fra 80W til 60W
 
-    def calculate_activity_power(self, activity_id: int, db: Session, mass_kg: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    def calculate_activity_power(self, activity_id: int, db: Session, mass_kg: Optional[float] = None, *, commit: bool = True) -> Optional[Dict[str, Any]]:
         """
         Beregner power for en løpeaktivitet basert på FIT-data.
         
@@ -195,11 +195,15 @@ class PowerService:
                 activity.average_power = round(avg_power, 1)
                 activity.max_power = round(max_power, 1)
                 activity.normalized_power = round(avg_power, 1)  # For løping er normalized power ofte lik average power
-                db.commit()
-                logger.info(f"Lagret power-verdier i database for aktivitet {activity_id}")
+                if commit:
+                    db.commit()
+                    logger.info(f"Lagret power-verdier i database for aktivitet {activity_id}")
+                else:
+                    db.flush()
             except Exception as e:
                 logger.error(f"Kunne ikke lagre power-verdier i database for aktivitet {activity_id}: {e}")
-                db.rollback()
+                if commit:
+                    db.rollback()
             
             logger.info(f"Beregnet power for aktivitet {activity_id}: avg={avg_power:.1f}W, max={max_power:.1f}W")
             
