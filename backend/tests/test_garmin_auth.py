@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from garminconnect.exceptions import (
     GarminConnectAuthenticationError,
@@ -109,12 +110,13 @@ class RecordingNotifier:
         return True
 
 
-def build_manager(tmpdir, fake, notifier=None):
+def build_manager(tmpdir, fake, notifier=None, max_rate_limit_retries=3):
     mgr = GarminAuthManager(
         email="user@example.com",
         password="secret",
         token_dir=tmpdir,
         notifier=notifier,
+        max_rate_limit_retries=max_rate_limit_retries,
     )
     # Injiser fake garminconnect.Garmin
     mgr._build_garmin = lambda: fake
@@ -196,11 +198,36 @@ class GarminAuthManagerTests(unittest.TestCase):
         fake = FakeGarmin()
         fake.login_exc = GarminConnectTooManyRequestsError("429")
         notifier = RecordingNotifier()
-        mgr = build_manager(self.tmpdir, fake, notifier)
+        # retries=1 => feiler umiddelbart uten backoff-sleep
+        mgr = build_manager(self.tmpdir, fake, notifier, max_rate_limit_retries=1)
 
         with self.assertRaises(GarminRateLimitError):
             mgr.authenticate()
         self.assertEqual(notifier.reauth_reasons, [])
+
+    def test_authenticate_retries_on_rate_limit_then_succeeds(self):
+        """429 skal gi backoff-retry (uten ekte venting i test) og så lykkes."""
+        fake = FakeGarmin()
+        # Første forsøk: 429, deretter OK
+        state = {"calls": 0}
+
+        original_login = fake.login
+
+        def flaky_login(tokenstore=None):
+            state["calls"] += 1
+            if state["calls"] == 1:
+                raise GarminConnectTooManyRequestsError("429")
+            return original_login(tokenstore)
+
+        fake.login = flaky_login
+        mgr = build_manager(self.tmpdir, fake, max_rate_limit_retries=3)
+        # rebuild returnerer samme fake slik at flaky_login beholdes
+        mgr._build_garmin = lambda: fake
+
+        with patch("app.services.garmin_auth.time.sleep") as sleep_mock:
+            self.assertTrue(mgr.authenticate())
+        self.assertGreaterEqual(state["calls"], 2)
+        sleep_mock.assert_called_once()  # ventet én gang mellom forsøkene
 
     def test_authenticate_connection_error_maps_to_api_error(self):
         fake = FakeGarmin()

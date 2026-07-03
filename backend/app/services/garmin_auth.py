@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -89,6 +90,7 @@ class GarminAuthManager:
         token_file: Optional[str] = None,
         notifier: Any = None,
         is_cn: bool = False,
+        max_rate_limit_retries: int = 3,
     ) -> None:
         self.email = email
         self.password = password
@@ -96,8 +98,15 @@ class GarminAuthManager:
         self._token_file = token_file
         self.notifier = notifier
         self.is_cn = is_cn
+        # Antall forsøk med backoff når Garmin svarer 429 under innlogging.
+        self.max_rate_limit_retries = max(1, int(max_rate_limit_retries))
         self._garmin: Optional[Garmin] = None
         self._authenticated = False
+
+    @staticmethod
+    def _rate_limit_wait_seconds(attempt: int) -> int:
+        """Backoff (sekunder) ved 429 under innlogging – øker med forsøk, cap 300s."""
+        return min(60 * attempt, 300)
 
     # ------------------------------------------------------------------ #
     #  Stier                                                             #
@@ -227,47 +236,64 @@ class GarminAuthManager:
         # Bootstrap fra legacy garth-token hvis native cache mangler.
         self._maybe_migrate_legacy_garth_token()
 
-        try:
-            # login(tokenstore=...) laster lagret token og auto-refresher DI-token
-            # proaktivt før bruk. Uten lagret token gjøres credential-innlogging,
-            # og tokens skrives til `tokenstore` for neste kjøring.
-            result = self.client.login(self.token_path)
-            mfa_status = result[0] if isinstance(result, tuple) else None
+        # Ved 429 (rate limit) forsøker vi på nytt med økende backoff i stedet for
+        # å feile umiddelbart – re-login/refresh mot Garmin er rate limit-følsomt.
+        for attempt in range(1, self.max_rate_limit_retries + 1):
+            try:
+                # login(tokenstore=...) laster lagret token og auto-refresher DI-token
+                # proaktivt før bruk. Uten lagret token gjøres credential-innlogging,
+                # og tokens skrives til `tokenstore` for neste kjøring.
+                result = self.client.login(self.token_path)
+                mfa_status = result[0] if isinstance(result, tuple) else None
 
-            if mfa_status == "needs_mfa":
+                if mfa_status == "needs_mfa":
+                    self._authenticated = False
+                    reason = "Garmin krever MFA/2FA-kode for innlogging."
+                    self._notify_reauth(reason)
+                    raise GarminMFARequiredError(reason)
+
+                self._authenticated = bool(self.client.client.is_authenticated)
+                if not self._authenticated:
+                    reason = "Innlogging returnerte ingen gyldig token."
+                    self._notify_reauth(reason)
+                    raise GarminReauthRequiredError(reason)
+
+                # Ved fersk credential-login i return_on_mfa-modus hopper garminconnect
+                # over token-lagring og profil-lasting. Vi gjør begge eksplisitt her slik
+                # at (a) token-cachen persisteres for gjenbruk neste kjøring, og
+                # (b) display_name er tilgjengelig for endepunkter som trenger det.
+                self._finalize_after_login()
+
+                logger.info("Garmin-innlogging OK (display_name=%s).", self.display_name)
+                return True
+
+            except GarminMFARequiredError:
+                raise
+            except GarminConnectAuthenticationError as exc:
                 self._authenticated = False
-                reason = "Garmin krever MFA/2FA-kode for innlogging."
+                reason = f"Autentisering feilet (401/ugyldige tokens eller endret pålogging): {exc}"
                 self._notify_reauth(reason)
-                raise GarminMFARequiredError(reason)
+                raise GarminReauthRequiredError(reason) from exc
+            except GarminConnectTooManyRequestsError as exc:
+                self._authenticated = False
+                if attempt < self.max_rate_limit_retries:
+                    wait_s = self._rate_limit_wait_seconds(attempt)
+                    logger.warning(
+                        "Garmin rate limit (429) under innlogging (forsøk %s/%s), venter %ss...",
+                        attempt, self.max_rate_limit_retries, wait_s,
+                    )
+                    time.sleep(wait_s)
+                    # Bygg klienten på nytt for et rent forsøk.
+                    self._garmin = self._build_garmin()
+                    continue
+                logger.error("Garmin rate limit etter %s forsøk på innlogging.", self.max_rate_limit_retries)
+                raise GarminRateLimitError(f"Garmin rate limit ved innlogging: {exc}") from exc
+            except GarminConnectConnectionError as exc:
+                self._authenticated = False
+                raise GarminApiError(f"Kunne ikke koble til Garmin ved innlogging: {exc}") from exc
 
-            self._authenticated = bool(self.client.client.is_authenticated)
-            if not self._authenticated:
-                reason = "Innlogging returnerte ingen gyldig token."
-                self._notify_reauth(reason)
-                raise GarminReauthRequiredError(reason)
-
-            # Ved fersk credential-login i return_on_mfa-modus hopper garminconnect
-            # over token-lagring og profil-lasting. Vi gjør begge eksplisitt her slik
-            # at (a) token-cachen persisteres for gjenbruk neste kjøring, og
-            # (b) display_name er tilgjengelig for endepunkter som trenger det.
-            self._finalize_after_login()
-
-            logger.info("Garmin-innlogging OK (display_name=%s).", self.display_name)
-            return True
-
-        except GarminMFARequiredError:
-            raise
-        except GarminConnectAuthenticationError as exc:
-            self._authenticated = False
-            reason = f"Autentisering feilet (401/ugyldige tokens eller endret pålogging): {exc}"
-            self._notify_reauth(reason)
-            raise GarminReauthRequiredError(reason) from exc
-        except GarminConnectTooManyRequestsError as exc:
-            self._authenticated = False
-            raise GarminRateLimitError(f"Garmin rate limit ved innlogging: {exc}") from exc
-        except GarminConnectConnectionError as exc:
-            self._authenticated = False
-            raise GarminApiError(f"Kunne ikke koble til Garmin ved innlogging: {exc}") from exc
+        # Uendelig-løkke-vern (skal ikke nås; løkka returnerer eller kaster).
+        raise GarminRateLimitError("Garmin rate limit ved innlogging.")
 
     def _finalize_after_login(self) -> None:
         """Persister token-cache og last profil (display_name) etter vellykket login.
