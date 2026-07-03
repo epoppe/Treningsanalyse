@@ -1050,32 +1050,40 @@ def metric_catalog() -> Dict[str, Any]:
     }
 
 
-def query_metric_timeseries(
+def _run_query_metric_timeseries(
     metric_key: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    limit: int = 365,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    limit: int,
+    *,
+    db: Session,
+    storage: DataStorage,
+    service: McpDerivedMetricsService,
 ) -> Dict[str, Any]:
+    """Kjerne for query_metric_timeseries mot en gitt db/storage/service.
+
+    Lar kallere (f.eks. metric_quality_report) gjenbruke én session + én
+    McpDerivedMetricsService på tvers av mange metrikker, slik at instans-cacher
+    (load-serie, coaching, duration-curve) beholdes.
+    """
     requested_key = metric_key
     metric_key, alias_of = _resolve_metric_key(metric_key)
 
     if metric_key in DERIVED_METRIC_CATALOG:
         limit = max(1, min(int(limit), 5000))
-        with training_context() as (db, storage):
-            service = McpDerivedMetricsService(db, storage)
-            try:
-                result = service.query_timeseries(
-                    metric_key,
-                    start_date=_parse_date(start_date) if start_date else None,
-                    end_date=_parse_date(end_date) if end_date else None,
-                    limit=limit,
-                )
-            except Exception as exc:
-                result = {
-                    "status": "error",
-                    "metric_key": metric_key,
-                    "message": str(exc),
-                }
+        try:
+            result = service.query_timeseries(
+                metric_key,
+                start_date=_parse_date(start_date) if start_date else None,
+                end_date=_parse_date(end_date) if end_date else None,
+                limit=limit,
+            )
+        except Exception as exc:
+            result = {
+                "status": "error",
+                "metric_key": metric_key,
+                "message": str(exc),
+            }
         if alias_of:
             result["requested_metric_key"] = requested_key
             result["canonical_key"] = metric_key
@@ -1103,40 +1111,53 @@ def query_metric_timeseries(
     start = _parse_date(start_date) if start_date else None
     end = _parse_date(end_date) if end_date else None
 
-    with training_context() as (db, _storage):
-        query = db.query(model)
-        if model is Activity:
-            query = query.options(selectinload(Activity.activity_type))
-        if definition["date_field"] == "year":
-            if start:
-                query = query.filter(date_field >= start.year)
-            if end:
-                query = query.filter(date_field <= end.year)
-        else:
-            if start:
-                query = query.filter(date_field >= start)
-            if end:
-                query = query.filter(date_field <= end)
-        column = definition.get("column")
-        if column:
-            query = query.filter(getattr(model, column).isnot(None))
-        rows = query.order_by(date_field.desc()).limit(limit).all()
-        points = [_metric_point(row, definition, metric_key) for row in reversed(rows)]
-        points = [point for point in points if point["value"] is not None]
-        display_unit = mcp_display_unit(metric_key, definition.get("column")) or definition["unit"]
-        result = {
-            "status": "ok",
-            "metric_key": metric_key,
-            "category": definition["category"],
-            "unit": display_unit,
-            "display_unit": display_unit,
-            "points": points,
-            "count": len(points),
-        }
-        if alias_of:
-            result["requested_metric_key"] = requested_key
-            result["canonical_key"] = metric_key
-        return result
+    query = db.query(model)
+    if model is Activity:
+        query = query.options(selectinload(Activity.activity_type))
+    if definition["date_field"] == "year":
+        if start:
+            query = query.filter(date_field >= start.year)
+        if end:
+            query = query.filter(date_field <= end.year)
+    else:
+        if start:
+            query = query.filter(date_field >= start)
+        if end:
+            query = query.filter(date_field <= end)
+    column = definition.get("column")
+    if column:
+        query = query.filter(getattr(model, column).isnot(None))
+    rows = query.order_by(date_field.desc()).limit(limit).all()
+    points = [_metric_point(row, definition, metric_key) for row in reversed(rows)]
+    points = [point for point in points if point["value"] is not None]
+    display_unit = mcp_display_unit(metric_key, definition.get("column")) or definition["unit"]
+    result = {
+        "status": "ok",
+        "metric_key": metric_key,
+        "category": definition["category"],
+        "unit": display_unit,
+        "display_unit": display_unit,
+        "points": points,
+        "count": len(points),
+    }
+    if alias_of:
+        result["requested_metric_key"] = requested_key
+        result["canonical_key"] = metric_key
+    return result
+
+
+def query_metric_timeseries(
+    metric_key: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 365,
+) -> Dict[str, Any]:
+    with training_context() as (db, storage):
+        service = McpDerivedMetricsService(db, storage)
+        return _run_query_metric_timeseries(
+            metric_key, start_date, end_date, limit,
+            db=db, storage=storage, service=service,
+        )
 
 
 def _latest_derived_metric_value(
@@ -1165,12 +1186,24 @@ def metric_quality_report(
     lookback_days = max(1, min(int(lookback_days), 90))
     ref = _parse_date(target_date) if target_date else date.today()
     catalog = metric_catalog()
-    report = build_metric_quality_report(
-        catalog_metrics=catalog["metrics"],
-        query_timeseries_fn=query_metric_timeseries,
-        reference_date=ref,
-        lookback_days=lookback_days,
-    )
+    # Gjenbruk én DB-session + én McpDerivedMetricsService for HELE rapporten, slik at
+    # tunge beregninger (CTL/ATL/TSB-serie, coaching/Banister, duration-curves) caches
+    # på tvers av alle metrikkene i stedet for å bygges på nytt per metrikk.
+    with training_context() as (db, storage):
+        service = McpDerivedMetricsService(db, storage)
+
+        def query_fn(key, start_date=None, end_date=None, limit=365):
+            return _run_query_metric_timeseries(
+                key, start_date, end_date, limit,
+                db=db, storage=storage, service=service,
+            )
+
+        report = build_metric_quality_report(
+            catalog_metrics=catalog["metrics"],
+            query_timeseries_fn=query_fn,
+            reference_date=ref,
+            lookback_days=lookback_days,
+        )
     if markdown:
         report["markdown"] = format_metric_quality_markdown(report)
     report["semantic_links"] = METRIC_SEMANTIC_LINKS
