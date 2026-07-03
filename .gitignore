@@ -107,6 +107,9 @@ test_*.py
 !backend/tests/test_activity_data_validation.py
 !backend/tests/test_metric_catalog_units.py
 !backend/tests/test_analysis_atomicity.py
+!backend/tests/test_garmin_auth.py
+!backend/tests/test_telegram_notifier.py
+!backend/tests/test_garmin_client_sync.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md

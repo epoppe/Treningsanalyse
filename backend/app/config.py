@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "")
     GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "")
     TOKEN_DIR: str = os.getenv("TOKEN_DIR", token_dir_str)
+    # Valgfri eksplisitt sti til garminconnect sin token-cache (garmin_tokens.json).
+    # Tom => <TOKEN_DIR>/garmin_tokens.json.
+    GARMIN_TOKEN_FILE: Optional[str] = os.getenv("GARMIN_TOKEN_FILE") or None
+    # Kinesisk Garmin-konto (garmin.cn) hvis satt.
+    GARMIN_IS_CN: bool = os.getenv("GARMIN_IS_CN", "false").lower() in ("1", "true", "yes")
     
     # Lactate threshold speed konfigurasjon (i m/s)
     # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API
@@ -64,6 +69,12 @@ class Settings(BaseSettings):
     # Frost API (historisk vær) — https://frost.met.no
     FROST_CLIENT_ID: str = os.getenv("FROST_CLIENT_ID", "")
     FROST_CLIENT_SECRET: str = os.getenv("FROST_CLIENT_SECRET", "")
+
+    # Telegram-varsling (brukes til å varsle når Garmin krever re-innlogging/MFA)
+    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    TELEGRAM_ENABLED: bool = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("1", "true", "yes")
+    TELEGRAM_REAUTH_COOLDOWN_SECONDS: int = int(os.getenv("TELEGRAM_REAUTH_COOLDOWN_SECONDS", "1800"))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
