@@ -246,6 +246,12 @@ class GarminAuthManager:
                 self._notify_reauth(reason)
                 raise GarminReauthRequiredError(reason)
 
+            # Ved fersk credential-login i return_on_mfa-modus hopper garminconnect
+            # over token-lagring og profil-lasting. Vi gjør begge eksplisitt her slik
+            # at (a) token-cachen persisteres for gjenbruk neste kjøring, og
+            # (b) display_name er tilgjengelig for endepunkter som trenger det.
+            self._finalize_after_login()
+
             logger.info("Garmin-innlogging OK (display_name=%s).", self.display_name)
             return True
 
@@ -262,6 +268,35 @@ class GarminAuthManager:
         except GarminConnectConnectionError as exc:
             self._authenticated = False
             raise GarminApiError(f"Kunne ikke koble til Garmin ved innlogging: {exc}") from exc
+
+    def _finalize_after_login(self) -> None:
+        """Persister token-cache og last profil (display_name) etter vellykket login.
+
+        Nødvendig fordi garminconnect i return_on_mfa-modus returnerer tidlig etter
+        credential-login uten å lagre tokens eller laste brukerprofil.
+        """
+        inner = getattr(self._garmin, "client", None)
+        if inner is not None:
+            # Sørg for at fremtidige token-refresher lagres til samme cache.
+            try:
+                inner._tokenstore_path = self.token_path
+            except Exception:
+                pass
+            # Lagre token-cache nå (di_token/di_refresh_token) for gjenbruk.
+            try:
+                inner.dump(self.token_path)
+                logger.info("Lagret Garmin token-cache til %s", self.token_path)
+            except Exception as exc:
+                logger.warning("Kunne ikke lagre Garmin token-cache: %s", exc)
+
+        # Last profil/innstillinger slik at display_name settes (brukes i enkelte URL-er).
+        if not self.display_name:
+            loader = getattr(self._garmin, "_load_profile_and_settings", None)
+            if callable(loader):
+                try:
+                    loader()
+                except Exception as exc:
+                    logger.warning("Kunne ikke laste Garmin-profil (display_name): %s", exc)
 
     def ensure_session(self) -> None:
         """Sikrer gyldig session og auto-refresher token før API-kall.

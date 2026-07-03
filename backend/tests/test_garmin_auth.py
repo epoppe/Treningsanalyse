@@ -31,6 +31,8 @@ class FakeInnerClient:
         self.is_authenticated = False
         self.expires_soon = False
         self.refresh_count = 0
+        self._tokenstore_path = None
+        self.dump_count = 0
 
     def _token_expires_soon(self):
         return self.expires_soon
@@ -38,6 +40,17 @@ class FakeInnerClient:
     def _refresh_session(self):
         self.refresh_count += 1
         self.expires_soon = False
+
+    def dump(self, path):
+        self.dump_count += 1
+        p = Path(path)
+        if p.is_dir() or not p.name.endswith(".json"):
+            p = p / "garmin_tokens.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Ekte dump skriver gjeldende (allerede lastede) tokens. For testene bevarer
+        # vi eksisterende cache-innhold og skriver kun ny fil ved fersk login.
+        if not p.is_file():
+            p.write_text(json.dumps({"di_token": "fresh", "di_refresh_token": "fresh-r", "di_client_id": None}))
 
 
 class FakeGarmin:
@@ -65,8 +78,16 @@ class FakeGarmin:
             return self.login_result
         if self.authed_after_login:
             self.client.is_authenticated = True
-            self.display_name = "fake-display-name"
+            # Speiler garminconnect: profil (display_name) lastes kun når tokens
+            # lastes fra cache. Ved fersk credential-login (return_on_mfa) forblir
+            # display_name None inntil GarminAuthManager._finalize_after_login kaller
+            # _load_profile_and_settings().
+            if tokenstore and Path(tokenstore).is_file():
+                self.display_name = "fake-display-name"
         return self.login_result
+
+    def _load_profile_and_settings(self):
+        self.display_name = "fake-display-name"
 
     def connectapi(self, path, **kwargs):
         if self.connectapi_hook is not None:
@@ -132,6 +153,19 @@ class GarminAuthManagerTests(unittest.TestCase):
         mgr = build_manager(self.tmpdir, fake)
         self.assertTrue(mgr.authenticate())
         self.assertTrue(mgr.is_authenticated)
+
+    def test_fresh_login_persists_token_cache_and_loads_profile(self):
+        """Fersk credential-login skal lagre token-cache og sette display_name."""
+        fake = FakeGarmin()
+        mgr = build_manager(self.tmpdir, fake)
+        self.assertTrue(mgr.authenticate())
+        # Token-cache skal være skrevet for gjenbruk neste kjøring
+        self.assertTrue(Path(mgr.token_path).is_file())
+        self.assertGreaterEqual(fake.client.dump_count, 1)
+        # display_name skal være lastet via _load_profile_and_settings
+        self.assertEqual(mgr.display_name, "fake-display-name")
+        # Fremtidige refresher skal peke på samme cache
+        self.assertEqual(fake.client._tokenstore_path, mgr.token_path)
 
     # 3) Kontrollert feiling ved MFA
     def test_authenticate_mfa_raises_and_notifies(self):
