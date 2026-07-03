@@ -79,16 +79,23 @@ class PpapMetricsService:
         self.storage = storage
         self._tss_service = TrainingStressService(db)
         self._load_by_date: Optional[Dict[str, Dict[str, float]]] = None
+        self._load_series_start: Optional[date] = None
         self._load_series_end: Optional[date] = None
         self._duration_curve_cache: Optional[Dict[str, Any]] = None
         self._polarized_cache: Dict[Tuple[date, int], Dict[str, Any]] = {}
         self._readiness_cache: Dict[date, Dict[str, Any]] = {}
+        # Delt PerformanceMetricsService + per-dag duration-curve cache for
+        # rullerende *_hist-metrikker (deles på tvers av de 16 rolling-metrikkene).
+        self._perf_service_instance: Optional[PerformanceMetricsService] = None
+        self._rolling_curve_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
 
-    def ensure_load_series(self, end_date: date) -> None:
-        if self._load_by_date is not None and self._load_series_end == end_date:
-            return
+    def _build_load_series(self, start_date: date, end_date: date) -> None:
+        """Bygger CTL/ATL/TSB-serie over [start_date, end_date] og cacher den.
 
-        start_date = end_date - timedelta(days=self.LOAD_WARMUP_DAYS)
+        CTL/ATL er kausale EMA-er, så én serie som dekker [start_date, end_date]
+        gir korrekt verdi for hvilken som helst dag i intervallet – vi trenger
+        derfor ikke bygge på nytt per dag.
+        """
         daily_tss: Dict[str, float] = {}
         activities = (
             self.db.query(Activity)
@@ -135,7 +142,42 @@ class PpapMetricsService:
             current += timedelta(days=1)
 
         self._load_by_date = series
+        self._load_series_start = start_date
         self._load_series_end = end_date
+
+    def _load_series_covers(self, day: date) -> bool:
+        return (
+            self._load_by_date is not None
+            and self._load_series_start is not None
+            and self._load_series_end is not None
+            and self._load_series_start <= day <= self._load_series_end
+        )
+
+    def ensure_load_series(self, end_date: date) -> None:
+        """Sikrer at load-serien dekker `end_date` (gjenbruker eksisterende serie)."""
+        if self._load_series_covers(end_date):
+            return
+        self._build_load_series(end_date - timedelta(days=self.LOAD_WARMUP_DAYS), end_date)
+
+    def prime_load_series(self, start_day: date, end_day: date) -> None:
+        """Bygg load-serien én gang for et helt vindu [start_day, end_day].
+
+        Gir hver dag i vinduet full oppvarming (LOAD_WARMUP_DAYS) og lar
+        etterfølgende get_ctl/atl/tsb-oppslag gjenbruke samme serie (unngår
+        rebuild per dag i tidsserie-spørringer).
+        """
+        if start_day > end_day:
+            start_day, end_day = end_day, start_day
+        needed_start = start_day - timedelta(days=self.LOAD_WARMUP_DAYS)
+        if (
+            self._load_by_date is not None
+            and self._load_series_start is not None
+            and self._load_series_end is not None
+            and self._load_series_start <= needed_start
+            and self._load_series_end >= end_day
+        ):
+            return
+        self._build_load_series(needed_start, end_day)
 
     def get_load_metrics(self, day: date) -> Dict[str, Optional[float]]:
         self.ensure_load_series(day)
@@ -320,6 +362,30 @@ class PpapMetricsService:
             hours += 10.0
         return round(max(6.0, min(120.0, hours)), 1)
 
+    def _perf_service(self) -> PerformanceMetricsService:
+        """Delt PerformanceMetricsService (unngår ny instans per kall)."""
+        if self._perf_service_instance is None:
+            self._perf_service_instance = PerformanceMetricsService(self.db, self.storage)
+        return self._perf_service_instance
+
+    def _rolling_duration_curve(self, day: date, lookback_days: int) -> Dict[str, Any]:
+        """Bygger (og cacher per dag) en rullerende duration-curve.
+
+        De 16 *_hist-metrikkene for samme dag deler samme curve, så vi bygger den
+        kun én gang per (dag, lookback).
+        """
+        cache_key = (day, lookback_days)
+        cached = self._rolling_curve_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        curve = self._perf_service().build_duration_curve(
+            days=lookback_days,
+            include_treadmill=False,
+            end_date=day,
+        )
+        self._rolling_curve_cache[cache_key] = curve
+        return curve
+
     def get_rolling_duration_curve_value(
         self,
         metric_key: str,
@@ -331,12 +397,7 @@ class PpapMetricsService:
         if base_key not in DURATION_CURVE_METRICS or self.storage is None:
             return None
         metric_type, duration_s = DURATION_CURVE_METRICS[base_key]
-        service = PerformanceMetricsService(self.db, self.storage)
-        curve = service.build_duration_curve(
-            days=lookback_days,
-            include_treadmill=False,
-            end_date=day,
-        )
+        curve = self._rolling_duration_curve(day, lookback_days)
         for point in curve.get("curves", {}).get(metric_type, []):
             if int(point.get("duration_seconds", 0)) != duration_s:
                 continue
