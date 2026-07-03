@@ -484,8 +484,41 @@ class GarminClient:
         live_result = await self.fetch_hrv_live(date)
         return live_result.data
 
+    @staticmethod
+    def _map_hrv_summary(summary: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Mapper Garmin sitt camelCase hrvSummary til normalisert (snake_case) payload."""
+        if not isinstance(summary, dict):
+            return None
+        last_night_avg = summary.get("lastNightAvg", summary.get("last_night_avg"))
+        if not last_night_avg:
+            return None
+        baseline = summary.get("baseline") or {}
+        if not isinstance(baseline, dict):
+            baseline = {}
+        return {
+            "hrv_summary": {
+                "last_night_avg": last_night_avg,
+                "last_night_5_min_high": summary.get(
+                    "lastNight5MinHigh", summary.get("last_night_5_min_high")
+                ),
+                "weekly_avg": summary.get("weeklyAvg", summary.get("weekly_avg")),
+                "status": summary.get("status"),
+                "baseline_low_upper": baseline.get("lowUpper", baseline.get("low_upper")),
+                "baseline_balanced_lower": baseline.get(
+                    "balancedLow", baseline.get("balanced_low", baseline.get("balanced_lower"))
+                ),
+                "baseline_balanced_upper": baseline.get(
+                    "balancedUpper", baseline.get("balanced_upper")
+                ),
+            }
+        }
+
     async def fetch_hrv_live(self, date: datetime) -> HrvLiveResult:
-        """Henter HRV direkte fra Garmin med eksplisitt live-status."""
+        """Henter HRV direkte fra Garmin med eksplisitt live-status.
+
+        Bruker garminconnect-endepunktet /hrv-service/hrv/{dato} som returnerer
+        hrvSummary (camelCase). Faller tilbake til eldre endepunkter ved behov.
+        """
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente HRV-data.")
             return HrvLiveResult(
@@ -497,97 +530,51 @@ class GarminClient:
         date_str = date.strftime("%Y-%m-%d")
         logger.debug(f"Henter live HRV-data for {date_str}")
 
-        saw_not_found = False
-        raw_hrv: Any = None
-
         try:
-            try:
-                raw_hrv = await self._connect_api(f"/hrv-service/hrv/daily/{date_str}")
-            except GarminReauthRequiredError:
-                raise
-            except GarminNotFoundError:
-                saw_not_found = True
-                raw_hrv, alt_not_found = await self._fetch_hrv_from_alternative_endpoints(date_str)
-                saw_not_found = saw_not_found or alt_not_found
-                if raw_hrv is None and saw_not_found:
-                    return HrvLiveResult(
-                        data=None,
-                        live_status="not_found",
-                        message=f"Ingen live HRV hos Garmin for {date_str}.",
-                    )
-            except (GarminRateLimitError, GarminApiError) as api_error:
-                logger.debug(
-                    "Standard HRV API feilet for %s, prøver alternative endepunkter: %s",
-                    date_str,
-                    api_error,
-                )
-                raw_hrv, alt_not_found = await self._fetch_hrv_from_alternative_endpoints(date_str)
-                saw_not_found = saw_not_found or alt_not_found
-                if raw_hrv is None and saw_not_found:
-                    return HrvLiveResult(
-                        data=None,
-                        live_status="not_found",
-                        message=f"Ingen live HRV hos Garmin for {date_str}.",
-                    )
-
-            if raw_hrv in (None, {}, []):
-                return HrvLiveResult(
-                    data=None,
-                    live_status="empty",
-                    message=f"Tomt HRV-svar fra Garmin for {date_str}.",
-                )
-
-            normalized = normalize_garmin_hrv_raw(raw_hrv, HRVData.model_validate)
-            if normalized:
-                logger.debug(f"Validerte live HRV-data for {date_str}")
-                return HrvLiveResult(data=normalized, live_status="ok")
-
-            return HrvLiveResult(
-                data=None,
-                live_status="empty",
-                message=f"Garmin returnerte HRV uten brukbar last_night_avg for {date_str}.",
-            )
+            raw_hrv = await self._connect_api(f"/hrv-service/hrv/{date_str}")
         except GarminReauthRequiredError:
             raise
+        except GarminNotFoundError:
+            return HrvLiveResult(
+                data=None,
+                live_status="not_found",
+                message=f"Ingen live HRV hos Garmin for {date_str}.",
+            )
+        except (GarminRateLimitError, GarminApiError) as api_error:
+            logger.error(f"HTTP-feil ved henting av HRV-data for {date_str}: {api_error}")
+            return HrvLiveResult(data=None, live_status="error", message=str(api_error))
         except Exception as exc:
             logger.error(f"En uventet feil oppstod under henting av HRV-data for {date_str}: {exc}")
             logger.error(traceback.format_exc())
             return HrvLiveResult(data=None, live_status="error", message=str(exc))
 
-    async def _fetch_hrv_from_alternative_endpoints(
-        self,
-        date_str: str,
-    ) -> tuple[Optional[Any], bool]:
-        saw_not_found = False
-        username = self._username()
-        alternative_endpoints = [
-            (f"/usersummary-service/stats/hrv/daily/{date_str}", {}),
-            (
-                f"/usersummary-service/usersummary/daily/{username}",
-                {"calendarDate": date_str},
-            ),
-            (
-                f"/wellness-service/wellness/dailyHRV/{username}",
-                {"date": date_str},
-            ),
-        ]
+        if raw_hrv in (None, {}, []):
+            return HrvLiveResult(
+                data=None,
+                live_status="empty",
+                message=f"Tomt HRV-svar fra Garmin for {date_str}.",
+            )
 
-        for endpoint, params in alternative_endpoints:
-            try:
-                alt_data = await self._connect_api(endpoint, params=params)
-                normalized = normalize_garmin_hrv_raw(alt_data, HRVData.model_validate)
-                if normalized:
-                    logger.debug("HRV hentet fra alternativt endepunkt for %s", date_str)
-                    return normalized, saw_not_found
-            except GarminReauthRequiredError:
-                raise
-            except GarminNotFoundError:
-                saw_not_found = True
-                logger.debug(f"Alternativt endepunkt {endpoint} ga 404")
-            except Exception as alt_error:
-                logger.debug(f"Alternativt endepunkt {endpoint} feilet: {alt_error}")
+        summary = None
+        if isinstance(raw_hrv, dict):
+            summary = raw_hrv.get("hrvSummary") or raw_hrv.get("hrv_summary")
+        payload = self._map_hrv_summary(summary)
+        if payload:
+            normalized = normalize_garmin_hrv_raw(payload, HRVData.model_validate)
+            if normalized:
+                logger.debug(f"Validerte live HRV-data for {date_str}")
+                return HrvLiveResult(data=normalized, live_status="ok")
 
-        return None, saw_not_found
+        # Fallback: prøv å normalisere råstruktur direkte (eldre formater)
+        normalized = normalize_garmin_hrv_raw(raw_hrv, HRVData.model_validate)
+        if normalized:
+            return HrvLiveResult(data=normalized, live_status="ok")
+
+        return HrvLiveResult(
+            data=None,
+            live_status="empty",
+            message=f"Garmin returnerte HRV uten brukbar last_night_avg for {date_str}.",
+        )
 
     async def get_hrv_data(self, date: datetime) -> Optional[Dict[str, Any]]:
         """Henter HRV-data for en spesifikk dato."""
@@ -1033,56 +1020,61 @@ class GarminClient:
                 date_str = date.strftime("%Y-%m-%d")
             logger.info(f"Henter body battery data for {date_str}")
 
-            username = self._username()
-            endpoints = [
-                (f"/usersummary-service/usersummary/daily/{username}", {"calendarDate": date_str}),
-                (f"/wellness-service/wellness/dailyBodyBattery/{username}", {"date": date_str}),
-            ]
-
-            body_battery_data = None
-            for endpoint, params in endpoints:
-                try:
-                    logger.info(f"Prøver body battery-endepunkt: {endpoint} med params: {params}")
-                    data = await self._connect_api(endpoint, params=params)
-                    logger.debug(f"Body battery-endepunkt {endpoint} returnerte: {data}")
-
-                    if isinstance(data, dict):
-                        if 'allMetrics' in data:
-                            metrics = data.get('allMetrics', {}).get('metricsMap', {})
-                            result = {
-                                "date": date_str,
-                                "body_battery_charged": metrics.get('BODY_BATTERY_CHARGED', {}).get('value'),
-                                "body_battery_drained": metrics.get('BODY_BATTERY_DRAINED', {}).get('value'),
-                                "body_battery_charged_start": metrics.get('BODY_BATTERY_CHARGED_START', {}).get('value'),
-                                "body_battery_drained_start": metrics.get('BODY_BATTERY_DRAINED_START', {}).get('value'),
-                                "net_charge": (
-                                    (metrics.get('BODY_BATTERY_CHARGED', {}).get('value') or 0)
-                                    - (metrics.get('BODY_BATTERY_DRAINED', {}).get('value') or 0)
-                                ),
-                            }
-                            logger.info(f"Hentet body battery data fra allMetrics for {date_str}: {result}")
-                            body_battery_data = enrich_body_battery_day_data(result)
-                            break
-                        elif 'bodyBattery' in data:
-                            result = enrich_body_battery_day_data(data['bodyBattery'])
-                            logger.info(f"Hentet body battery data fra bodyBattery for {date_str}: {result}")
-                            body_battery_data = result
-                            break
-
-                except GarminReauthRequiredError:
-                    raise
-                except Exception as e:
-                    logger.debug(f"Body battery-endepunkt {endpoint} feilet: {e}")
-                    continue
-
-            if not body_battery_data:
+            # garminconnect-endepunkt: offisiell charged/drained + intradag-tidsserie
+            data_list = await self._connect_api(
+                "/wellness-service/wellness/bodyBattery/reports/daily",
+                params={"startDate": date_str, "endDate": date_str},
+            )
+            day = None
+            if isinstance(data_list, list) and data_list:
+                day = data_list[0]
+            elif isinstance(data_list, dict):
+                day = data_list
+            if not isinstance(day, dict):
                 logger.info(f"Ingen body battery data funnet for {date_str}")
                 return None
 
-            return body_battery_data
+            raw_arr = day.get("bodyBatteryValuesArray") or []
+            # Normaliser til [ts, status, value, x] slik resten av koden forventer
+            values_array = [
+                [entry[0], "MEASURED", entry[1], 0]
+                for entry in raw_arr
+                if isinstance(entry, (list, tuple)) and len(entry) >= 2 and isinstance(entry[1], (int, float))
+            ]
+            values = [entry[2] for entry in values_array]
+
+            charged = day.get("charged")
+            drained = day.get("drained")
+            if charged is None and drained is None and not values_array:
+                logger.info(f"Ingen body battery data funnet for {date_str}")
+                return None
+
+            result = {
+                "date": date_str,
+                "body_battery_charged": charged,
+                "body_battery_drained": drained,
+                "body_battery_charged_start": None,
+                "body_battery_drained_start": None,
+                "max_body_battery": max(values) if values else None,
+                "min_body_battery": min(values) if values else None,
+                "body_battery_values_array": values_array,
+                "net_charge": (charged or 0) - (drained or 0) if (charged is not None or drained is not None) else None,
+            }
+            result = enrich_body_battery_day_data(result)
+            logger.info(
+                f"Hentet body battery for {date_str}: charged={result.get('body_battery_charged')}, "
+                f"drained={result.get('body_battery_drained')}, max={result.get('max_body_battery')}"
+            )
+            return result
 
         except GarminReauthRequiredError:
             raise
+        except GarminNotFoundError:
+            logger.info(f"Ingen body battery data funnet for {date_str}")
+            return None
+        except (GarminRateLimitError, GarminApiError) as e:
+            logger.error(f"API-feil ved henting av body battery data for {date_str}: {e}")
+            return None
         except Exception as e:
             logger.error(f"Feil ved henting av body battery data for {date_str}: {e}")
             return None
@@ -1265,8 +1257,62 @@ class GarminClient:
             logger.error(f"Feil ved henting av søvndata range: {e}")
             return []
 
+    @staticmethod
+    def _compute_stress_buckets(date_str: str, stress_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Beregner minutter per stress-sone fra Garmin sin intradag stress-tidsserie.
+
+        Garmin stress-nivåer: <0 = ikke målt, 0-25 hvile, 26-50 lav, 51-75 middels,
+        76-100 høy. Hvert punkt dekker et fast intervall (utledes fra tidsstemplene).
+        """
+        values_array = stress_data.get("stressValuesArray") or []
+        if not values_array:
+            return None
+
+        # Utled intervall (minutter) fra tidsstempler; fallback 3 min.
+        interval_min = 3.0
+        ts = [row[0] for row in values_array if isinstance(row, (list, tuple)) and len(row) >= 2 and isinstance(row[0], (int, float))]
+        if len(ts) >= 2:
+            diffs = [ (ts[i + 1] - ts[i]) / 60000.0 for i in range(len(ts) - 1) if ts[i + 1] > ts[i] ]
+            diffs = [d for d in diffs if 0 < d <= 30]
+            if diffs:
+                interval_min = min(diffs)
+
+        rest = low = medium = high = 0
+        for row in values_array:
+            if not (isinstance(row, (list, tuple)) and len(row) >= 2):
+                continue
+            level = row[1]
+            if not isinstance(level, (int, float)) or level < 0:
+                continue
+            if level <= 25:
+                rest += 1
+            elif level <= 50:
+                low += 1
+            elif level <= 75:
+                medium += 1
+            else:
+                high += 1
+
+        rest_min = round(rest * interval_min)
+        low_min = round(low * interval_min)
+        medium_min = round(medium * interval_min)
+        high_min = round(high * interval_min)
+        stress_min = low_min + medium_min + high_min
+
+        return {
+            "date": date_str,
+            "stress_level": stress_data.get("avgStressLevel"),
+            "max_stress_level": stress_data.get("maxStressLevel"),
+            "rest_time": rest_min,
+            "low_stress_time": low_min,
+            "medium_stress_time": medium_min,
+            "high_stress_time": high_min,
+            "stress_time": stress_min,
+            "total_time": rest_min + stress_min,
+        }
+
     async def get_stress_data(self, date_input) -> Optional[Dict[str, Any]]:
-        """Henter stressdata for en spesifikk dato via usersummary-endepunktet."""
+        """Henter stressdata for en spesifikk dato via dailyStress-endepunktet."""
         if not self.is_authenticated():
             logger.error("Ikke autentisert. Kan ikke hente stressdata.")
             return None
@@ -1282,32 +1328,22 @@ class GarminClient:
             date_str = date_obj.strftime("%Y-%m-%d") if hasattr(date_obj, 'strftime') else str(date_obj)
             logger.info(f"Henter stressdata for {date_str}")
 
+            # garminconnect-endepunkt: gir avg/max-nivå + intradag stress-tidsserie.
+            # Minutter i hver stress-sone beregnes fra tidsserien.
             stress_data = await self._connect_api(
-                f"/usersummary-service/usersummary/daily/{self._username()}",
-                params={"calendarDate": date_str},
+                f"/wellness-service/wellness/dailyStress/{date_str}"
             )
 
-            if isinstance(stress_data, dict) and 'allMetrics' in stress_data:
-                metrics = stress_data.get('allMetrics', {}).get('metricsMap', {})
-
-                stress_time = metrics.get('STRESS_TIME', {}).get('value')
-                rest_time = metrics.get('REST_TIME', {}).get('value')
-                low_stress_time = metrics.get('LOW_STRESS_TIME', {}).get('value')
-                medium_stress_time = metrics.get('MEDIUM_STRESS_TIME', {}).get('value')
-                high_stress_time = metrics.get('HIGH_STRESS_TIME', {}).get('value')
-
-                result = {
-                    "date": date_str,
-                    "stress_time": stress_time,
-                    "rest_time": rest_time,
-                    "low_stress_time": low_stress_time,
-                    "medium_stress_time": medium_stress_time,
-                    "high_stress_time": high_stress_time,
-                    "total_time": (stress_time or 0) + (rest_time or 0)
-                }
-
-                logger.info(f"Hentet stressdata via API for {date_str}: {result}")
-                return result
+            if isinstance(stress_data, dict) and stress_data.get("stressValuesArray"):
+                result = self._compute_stress_buckets(date_str, stress_data)
+                if result and (result.get("stress_time") or result.get("rest_time")):
+                    logger.info(
+                        f"Hentet stressdata for {date_str}: nivå={result.get('stress_level')}, "
+                        f"stress={result.get('stress_time')}min, hvile={result.get('rest_time')}min"
+                    )
+                    return result
+                logger.info(f"Ingen målbar stressdata for {date_str}")
+                return None
             else:
                 logger.info(f"Ingen stressdata funnet for {date_str}")
                 return None
