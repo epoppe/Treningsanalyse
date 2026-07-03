@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import logging
 from .database.session import SessionLocal
-import garth
 
 # Dependency for å hente en database sesjon
 def get_db():

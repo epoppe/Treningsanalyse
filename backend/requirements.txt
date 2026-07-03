@@ -5,9 +5,15 @@ SQLAlchemy>=2.0,<2.1
 pydantic>=2.10,<3
 pydantic-settings>=2.6,<3
 python-dotenv>=1.0,<2
+garminconnect>=0.3.0,<0.4
+# garth beholdes kun som legacy: appen bruker det IKKE for innlogging/token-fornyelse
+# (se app/services/garmin_auth.py). Enkelte gamle toppnivå-skript importerer det fortsatt.
 garth>=0.5,<0.6
 numpy>=1.26,<3
 pandas>=2.2,<3
+polars>=1.18,<2
+pyarrow>=16,<25
+plotly>=5.22,<7
 fitparse>=1.2,<2
 redis>=5.0,<6
 requests>=2.32,<3

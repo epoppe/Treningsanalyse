@@ -15,7 +15,11 @@ from ..services.sync_service import SyncService
 from ..dependencies import get_garmin_client, get_data_storage, get_db
 from ..database.session import SessionLocal
 from ..database.models.activity import Activity
-from garth.exc import GarthException
+from ..services.garmin_auth import (
+    GarminAuthError,
+    GarminRateLimitError,
+    GarminReauthRequiredError,
+)
 from ..config import settings
 from ..services.hrv_service import HRVService
 from ..services.body_battery_service import BodyBatteryService
@@ -751,13 +755,17 @@ async def sync_historical_data(
     except AttributeError as ae: 
         logger.error(f"Metoden sync_historical_data mangler sannsynligvis i GarminClient: {ae}", exc_info=True)
         raise HTTPException(status_code=501, detail="Funksjonalitet for historisk synkronisering er ikke korrekt implementert i klienten.")
-    except GarthException as ge:
+    except GarminRateLimitError as ge:
+        logger.error(f"Garmin rate limit under historisk synkronisering for {start_year}: {ge}", exc_info=True)
+        raise HTTPException(
+            status_code=429,
+            detail="For mange forespørsler til Garmin Connect under historisk synk. Vennligst vent og prøv igjen."
+        )
+    except GarminReauthRequiredError as ge:
+        logger.error(f"Garmin krever ny innlogging under historisk synk for {start_year}: {ge}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Garmin krever ny innlogging: {str(ge)}")
+    except GarminAuthError as ge:
         logger.error(f"Garmin API feil under historisk synkronisering for {start_year}: {ge}", exc_info=True)
-        if "429" in str(ge) or (hasattr(ge, 'response') and ge.response is not None and ge.response.status_code == 429):
-            raise HTTPException(
-                status_code=429,
-                detail="For mange forespørsler til Garmin Connect under historisk synk. Vennligst vent og prøv igjen."
-            )
         raise HTTPException(status_code=503, detail=f"Feil ved kommunikasjon med Garmin Connect under historisk synk: {str(ge)}")
     except Exception as e:
         logger.error(f"Uventet feil under historisk synkronisering for {start_year}: {e}", exc_info=True)

@@ -6,7 +6,11 @@ from ..dependencies import get_garmin_client, get_db
 from ..database.models.activity import GarminPerformanceMetric
 import asyncio
 from typing import Optional
-from garth.exc import GarthException
+from ..services.garmin_auth import (
+    GarminAuthError,
+    GarminRateLimitError,
+    GarminReauthRequiredError,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -47,14 +51,18 @@ async def get_heart_rate(date: Optional[str] = None, garmin_client: GarminClient
             "date": target_date.strftime("%Y-%m-%d"),
             "heart_rate": heart_rate_data
         }
-        
-    except GarthException as ge:
+
+    except GarminRateLimitError as ge:
+        logger.error(f"Garmin rate limit under henting av pulsdata: {ge}", exc_info=True)
+        raise HTTPException(
+            status_code=429,
+            detail="For mange forespørsler til Garmin Connect. Vennligst vent litt og prøv igjen."
+        )
+    except GarminReauthRequiredError as ge:
+        logger.error(f"Garmin krever ny innlogging under henting av pulsdata: {ge}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Garmin krever ny innlogging: {str(ge)}")
+    except GarminAuthError as ge:
         logger.error(f"Garmin API feil under henting av pulsdata: {ge}", exc_info=True)
-        if "429" in str(ge) or (hasattr(ge, 'response') and ge.response is not None and ge.response.status_code == 429):
-             raise HTTPException(
-                status_code=429,
-                detail="For mange forespørsler til Garmin Connect. Vennligst vent litt og prøv igjen."
-            )
         raise HTTPException(status_code=503, detail=f"Feil ved kommunikasjon med Garmin Connect: {str(ge)}")
     except ValueError:
         raise HTTPException(status_code=400, detail="Ugyldig datoformat. Bruk YYYY-MM-DD.")
@@ -70,13 +78,17 @@ async def get_resting_heart_rate(date: str, garmin_client: GarminClient = Depend
         return await garmin_client.get_resting_heart_rate_data(date_obj)
     except ValueError:
         raise HTTPException(status_code=400, detail="Ugyldig datoformat. Bruk YYYY-MM-DD")
-    except GarthException as ge:
+    except GarminRateLimitError as ge:
+        logger.error(f"Garmin rate limit under henting av hvilepuls: {ge}", exc_info=True)
+        raise HTTPException(
+            status_code=429,
+            detail="For mange forespørsler til Garmin Connect. Vennligst vent litt og prøv igjen."
+        )
+    except GarminReauthRequiredError as ge:
+        logger.error(f"Garmin krever ny innlogging under henting av hvilepuls: {ge}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Garmin krever ny innlogging: {str(ge)}")
+    except GarminAuthError as ge:
         logger.error(f"Garmin API feil under henting av hvilepuls: {ge}", exc_info=True)
-        if "429" in str(ge) or (hasattr(ge, 'response') and ge.response is not None and ge.response.status_code == 429):
-            raise HTTPException(
-                status_code=429,
-                detail="For mange forespørsler til Garmin Connect. Vennligst vent litt og prøv igjen."
-            )
         raise HTTPException(status_code=503, detail=f"Feil ved kommunikasjon med Garmin Connect: {str(ge)}")
     except Exception as e:
         logger.error(f"Uventet feil under henting av hvilepuls: {e}", exc_info=True)

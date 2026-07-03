@@ -2,6 +2,7 @@ from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import logging
+import os
 import sys
 from pathlib import Path
 from dotenv import load_dotenv
@@ -42,15 +43,23 @@ async def lifespan(app: FastAPI):
         password=settings.GARMIN_PASSWORD,
         token_dir=settings.TOKEN_DIR
     )
-    
-    success = await garmin_client.initialize()
-    
-    if success:
-        logger.info("Garmin-klient initialisert vellykket.")
+
+    # Hopp over innlogging ved oppstart hvis SKIP_GARMIN_INIT er satt (dev/test).
+    # Innlogging skjer da lazy ved første synk. Uten dette vil garminconnect kjøre
+    # sine (trege, anti-WAF-forsinkede) innloggingsstrategier ved hver oppstart.
+    skip_garmin_init = os.getenv("SKIP_GARMIN_INIT", "").lower() in ("1", "true", "yes")
+    if skip_garmin_init:
+        logger.info("SKIP_GARMIN_INIT satt – hopper over Garmin-innlogging ved oppstart.")
         app.state.garmin_client = garmin_client
     else:
-        logger.warning("Kunne ikke initialisere Garmin-klienten.")
-        app.state.garmin_client = garmin_client
+        success = await garmin_client.initialize()
+
+        if success:
+            logger.info("Garmin-klient initialisert vellykket.")
+            app.state.garmin_client = garmin_client
+        else:
+            logger.warning("Kunne ikke initialisere Garmin-klienten.")
+            app.state.garmin_client = garmin_client
     
     # Initialiser DataStorage
     app.state.data_storage = DataStorage(settings.DATA_DIR)
