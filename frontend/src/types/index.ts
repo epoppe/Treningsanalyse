@@ -17,6 +17,7 @@ export interface Activity {
   duration?: number;
   startTimeLocal: string;
   vO2MaxValue?: number;
+  vO2MaxPreciseValue?: number;
   negativeSplitPercent?: number;
   decouplingPercent?: number;
   trainingReadinessScore?: number;

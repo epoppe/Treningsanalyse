@@ -141,8 +141,11 @@ const ActivityList: React.FC<ActivityListProps> = ({ activities }) => {
       const typeKey = prevActivity.activityType?.typeKey?.toLowerCase() || '';
       const isRunningActivity = typeKey === 'running' || typeKey === 'treadmill_running';
       
-      if (isRunningActivity && prevActivity.vO2MaxValue != null && prevActivity.vO2MaxValue > 0) {
-        return prevActivity.vO2MaxValue;
+      if (isRunningActivity) {
+        const effectiveVo2Max = prevActivity.vO2MaxPreciseValue ?? prevActivity.vO2MaxValue;
+        if (effectiveVo2Max != null && effectiveVo2Max > 0) {
+          return effectiveVo2Max;
+        }
       }
     }
     return undefined;
