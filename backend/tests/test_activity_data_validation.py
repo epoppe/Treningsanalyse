@@ -13,7 +13,11 @@ from app.services.activity_data_validation import (
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
-from app.services.vo2_max_resolver import build_vo2_max_precise_lookup, resolve_vo2_max_precise
+from app.services.vo2_max_resolver import (
+    build_vo2_max_precise_lookup,
+    resolve_effective_vo2_max,
+    resolve_vo2_max_precise,
+)
 
 
 class NormalizeUnitsTests(unittest.TestCase):
@@ -151,6 +155,17 @@ class Vo2MaxResolverTests(unittest.TestCase):
         lookup = build_vo2_max_precise_lookup(self.db, [activity])
         self.assertEqual(lookup[datetime(2026, 7, 3).date()], 44.3)
         self.assertEqual(resolve_vo2_max_precise(activity, lookup), 44.3)
+
+    def test_resolve_effective_falls_back_to_rounded_vo2_max(self):
+        activity = Activity(
+            activity_id="4",
+            start_time=datetime(2026, 7, 4, tzinfo=timezone.utc),
+            vo2_max=45.0,
+            vo2_max_precise=None,
+            activity_type_id=self.running_type_id,
+        )
+        lookup = build_vo2_max_precise_lookup(self.db, [activity])
+        self.assertEqual(resolve_effective_vo2_max(activity, lookup), 45.0)
 
 
 if __name__ == "__main__":

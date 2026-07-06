@@ -14,6 +14,7 @@ from ..dependencies import get_analysis_service, get_db, get_data_storage, get_g
 from ..services.garmin_client import GarminClient
 import logging
 from ..database.models.activity import Activity
+from ..services.vo2_max_resolver import build_vo2_max_precise_lookup, resolve_effective_vo2_max
 import json
 
 logger = logging.getLogger(__name__)
@@ -748,21 +749,26 @@ async def get_vo2max_history(
             query = query.filter(Activity.start_time <= end_datetime)
         
         activities = query.order_by(Activity.start_time).all()
+        vo2_precise_lookup = build_vo2_max_precise_lookup(db, activities)
         
         result = []
         for act in activities:
-            if act.activity_type:
-                result.append({
-                    "date": act.start_time.date().isoformat(),
-                    "datetime": act.start_time.isoformat(),
-                    "vo2max": act.vo2_max,
-                    "activity_id": act.activity_id,
-                    "activity_name": act.activity_name,
-                    "distance": act.distance,
-                    "duration": act.duration,
-                    "average_pace": act.average_pace,
-                    "average_heart_rate": act.average_heart_rate
-                })
+            if not act.activity_type:
+                continue
+            vo2max_value = resolve_effective_vo2_max(act, vo2_precise_lookup)
+            if vo2max_value is None:
+                continue
+            result.append({
+                "date": act.start_time.date().isoformat(),
+                "datetime": act.start_time.isoformat(),
+                "vo2max": vo2max_value,
+                "activity_id": act.activity_id,
+                "activity_name": act.activity_name,
+                "distance": act.distance,
+                "duration": act.duration,
+                "average_pace": act.average_pace,
+                "average_heart_rate": act.average_heart_rate
+            })
         
         logger.info(f"Returnerer {len(result)} VO2Max-målinger for perioden")
         return {
@@ -796,11 +802,15 @@ async def get_training_overview(
             Activity.start_time >= dt.combine(start_date, dt.min.time())
         ).order_by(Activity.start_time.desc()).limit(10).all()
         
+        vo2_precise_lookup = build_vo2_max_precise_lookup(db, vo2max_activities)
         vo2max_data = []
         for act in vo2max_activities:
+            vo2max_value = resolve_effective_vo2_max(act, vo2_precise_lookup)
+            if vo2max_value is None:
+                continue
             vo2max_data.append({
                 "date": act.start_time.date().isoformat(),
-                "vo2max": act.vo2_max,
+                "vo2max": vo2max_value,
                 "activity_name": act.activity_name
             })
         

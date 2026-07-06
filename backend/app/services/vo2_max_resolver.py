@@ -49,3 +49,13 @@ def resolve_vo2_max_precise(activity: Activity, lookup: Dict[date, float]) -> Op
     if activity.start_time is not None:
         return lookup.get(activity.start_time.date())
     return None
+
+
+def resolve_effective_vo2_max(activity: Activity, lookup: Dict[date, float]) -> Optional[float]:
+    """Returnerer presis VO2 max når tilgjengelig, ellers avrundet aktivitetsverdi."""
+    precise = resolve_vo2_max_precise(activity, lookup)
+    if precise is not None and precise > 0:
+        return precise
+    if activity.vo2_max is not None and activity.vo2_max > 0:
+        return float(activity.vo2_max)
+    return None
