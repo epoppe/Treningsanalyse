@@ -35,6 +35,7 @@ class ActivityResponse(BaseModel):
     averagePace: Optional[float]
     averageRunningCadenceInStepsPerMinute: Optional[float]
     vO2MaxValue: Optional[float]
+    vO2MaxPreciseValue: Optional[float] = Field(None, description="Detailed VO2 max with decimals (ml/kg/min)")
     activityType: Optional[ActivityTypeResponse]
     avgStrideLength: Optional[float] = Field(None, description="Average stride length in meters")
     negativeSplitPercent: Optional[float] = Field(None, description="Negative split percentage")
@@ -130,6 +131,7 @@ def get_activities_by_date_range(
                 "averagePace": act.average_pace,
                 "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                 "vO2MaxValue": act.vo2_max,
+                "vO2MaxPreciseValue": act.vo2_max_precise,
                 "activityType": act_type_data,
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,
@@ -264,6 +266,7 @@ def get_activities(
                     "averagePace": act.average_pace,
                     "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                     "vO2MaxValue": act.vo2_max,
+                    "vO2MaxPreciseValue": act.vo2_max_precise,
                     "activityType": act_type_data,
                     "avgStrideLength": avg_stride_length,
                     "negativeSplitPercent": act.negative_split_percent,
@@ -365,6 +368,7 @@ def get_new_activities(
                 "averagePace": act.average_pace,
                 "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                 "vO2MaxValue": act.vo2_max,
+                "vO2MaxPreciseValue": act.vo2_max_precise,
                 "activityType": act_type_data,
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,

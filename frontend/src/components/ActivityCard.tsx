@@ -34,7 +34,18 @@ const formatRunningEconomy = (economy?: number | null, activityType?: any) => {
   return `${economy.toFixed(2)}`;
 };
 
-const formatVO2Max = (vo2Max?: number | null, activityType?: any, previousValidValue?: number) => {
+const getEffectiveVO2Max = (vo2MaxPrecise?: number | null, vo2Max?: number | null): number | null => {
+  if (vo2MaxPrecise != null && vo2MaxPrecise > 0) return vo2MaxPrecise;
+  if (vo2Max != null && vo2Max > 0) return vo2Max;
+  return null;
+};
+
+const formatVO2Max = (
+  vo2Max?: number | null,
+  vo2MaxPrecise?: number | null,
+  activityType?: any,
+  previousValidValue?: number,
+) => {
   const typeKey = activityType?.typeKey?.toLowerCase() || '';
   const isRunningActivity = typeKey === 'running' || typeKey === 'treadmill_running';
   
@@ -43,21 +54,20 @@ const formatVO2Max = (vo2Max?: number | null, activityType?: any, previousValidV
     return 'N/A';
   }
   
-  // Hvis nåværende verdi er gyldig, bruk den
-  if (vo2Max != null && vo2Max > 0) {
-    const result = Math.round(vo2Max).toString();
-    console.log('[formatVO2Max] Bruker nåværende verdi:', { vo2Max, result });
+  const currentValue = getEffectiveVO2Max(vo2MaxPrecise, vo2Max);
+  if (currentValue != null) {
+    const result = currentValue.toFixed(1);
+    console.log('[formatVO2Max] Bruker nåværende verdi:', { vo2Max, vo2MaxPrecise, result });
     return result;
   }
   
-  // Hvis ingen nåværende verdi, bruk forrige gyldige verdi hvis tilgjengelig
   if (previousValidValue != null && previousValidValue > 0) {
-    const result = Math.round(previousValidValue).toString();
+    const result = previousValidValue.toFixed(1);
     console.log('[formatVO2Max] Bruker forrige verdi:', { previousValidValue, result });
     return result;
   }
   
-  console.log('[formatVO2Max] Ingen verdi, returnerer N/A:', { vo2Max, previousValidValue });
+  console.log('[formatVO2Max] Ingen verdi, returnerer N/A:', { vo2Max, vo2MaxPrecise, previousValidValue });
   return 'N/A';
 };
 
@@ -316,8 +326,13 @@ const ActivityCard: React.FC<ActivityCardProps> = ({ activity, hrvValue, isLoadi
     {
       key: 'vo2_max',
       label: 'VO2 Max',
-      value: formatVO2Max(activity.vO2MaxValue, activity.activityType, previousValidVO2Max),
-      rawValue: activity.vO2MaxValue
+      value: formatVO2Max(
+        activity.vO2MaxValue,
+        activity.vO2MaxPreciseValue,
+        activity.activityType,
+        previousValidVO2Max,
+      ),
+      rawValue: activity.vO2MaxPreciseValue ?? activity.vO2MaxValue
     },
   ];
 
