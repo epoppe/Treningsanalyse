@@ -1,6 +1,9 @@
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { activitiesApi } from '../utils/api';
 import { Activity } from '../types';
+
+const browserApiBase = '/api';
+const serverApiBase = `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api`;
+const apiBase = typeof window !== 'undefined' ? browserApiBase : serverApiBase;
 
 // Query keys for activities
 export const activitiesKeys = {
@@ -17,7 +20,7 @@ export function useActivities(limit: number = 100, offset: number = 0) {
   return useQuery({
     queryKey: activitiesKeys.list({ limit, offset }),
     queryFn: async () => {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/activities?limit=${limit}&offset=${offset}`);
+      const response = await fetch(`${apiBase}/activities?limit=${limit}&offset=${offset}`);
       if (!response.ok) throw new Error('Failed to fetch activities');
       return response.json() as Promise<Activity[]>;
     },
@@ -32,7 +35,7 @@ export function useInfiniteActivities(pageSize: number = 100) {
     queryKey: activitiesKeys.lists(),
     queryFn: async ({ pageParam = 0 }) => {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/activities?limit=${pageSize}&offset=${pageParam}`
+        `${apiBase}/activities?limit=${pageSize}&offset=${pageParam}`
       );
       if (!response.ok) throw new Error('Failed to fetch activities');
       const data = await response.json() as Activity[];
@@ -52,7 +55,7 @@ export function useActivityCount() {
   return useQuery({
     queryKey: activitiesKeys.count(),
     queryFn: async () => {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/activities/count`);
+      const response = await fetch(`${apiBase}/activities/count`);
       if (!response.ok) throw new Error('Failed to fetch activity count');
       const data = await response.json();
       return data.count as number;
@@ -66,7 +69,7 @@ export function useActivity(id: string, enabled: boolean = true) {
   return useQuery({
     queryKey: activitiesKeys.detail(id),
     queryFn: async () => {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/activities/${id}`);
+      const response = await fetch(`${apiBase}/activities/${id}`);
       if (!response.ok) throw new Error('Failed to fetch activity');
       return response.json() as Promise<Activity>;
     },
@@ -82,7 +85,7 @@ export function useNewActivities(sinceDate: string | null, enabled: boolean = tr
     queryFn: async () => {
       if (!sinceDate) return [];
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/activities?since=${sinceDate}&limit=100`
+        `${apiBase}/activities?since=${sinceDate}&limit=100`
       );
       if (!response.ok) throw new Error('Failed to fetch new activities');
       return response.json() as Promise<Activity[]>;
@@ -99,7 +102,7 @@ export function useSyncActivities() {
   return useMutation({
     mutationFn: async () => {
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/sync/garmin`,
+        `${apiBase}/sync/garmin`,
         { method: 'POST' }
       );
       if (!response.ok) throw new Error('Failed to sync activities');
