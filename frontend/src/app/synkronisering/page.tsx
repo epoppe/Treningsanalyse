@@ -369,6 +369,10 @@ export default function SynkroniseringPage() {
     startSync(() => api.refreshTrainingEffect(false));
   };
 
+  const syncGarminPerformance = () => {
+    startSync(() => api.syncGarminPerformanceRecent());
+  };
+
   return (
     <Container>
       <Title>Synkronisering av Data</Title>
@@ -417,6 +421,13 @@ export default function SynkroniseringPage() {
             disabled={isLoading}
           >
             Hent aerob/anaerob effekt
+          </QuickActionButton>
+
+          <QuickActionButton 
+            onClick={syncGarminPerformance}
+            disabled={isLoading}
+          >
+            Synk Garmin performance (90 dager)
           </QuickActionButton>
           
           <DangerButton 

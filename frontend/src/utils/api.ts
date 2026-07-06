@@ -630,6 +630,10 @@ export const syncApi = {
       timeout: SYNC_TRIGGER_TIMEOUT_MS,
     }),
 
+  /** Garmin VO2max, treningsstatus, load m.m. for siste 90 dager. */
+  syncGarminPerformanceRecent: () =>
+    apiCall('post', '/sync/garmin-performance/recent', { timeout: SYNC_TRIGGER_TIMEOUT_MS }),
+
   // --- Body Battery ---
   syncBodyBatteryData: (startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
