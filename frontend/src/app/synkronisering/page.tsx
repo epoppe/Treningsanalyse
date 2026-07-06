@@ -165,13 +165,6 @@ const DateContainer = styled.div`
   margin-bottom: 1rem;
 `;
 
-const QuickActions = styled.div`
-  display: flex;
-  flex-wrap: wrap;
-  gap: 1rem;
-  margin-bottom: 2rem;
-`;
-
 const QuickActionButton = styled.button<{ $disabled?: boolean }>`
   background-color: ${props => props.$disabled ? '#bdc3c7' : '#2ecc71'};
   color: white;
@@ -204,6 +197,99 @@ const DangerButton = styled.button<{ $disabled?: boolean }>`
   &:hover {
     background-color: ${props => props.$disabled ? '#bdc3c7' : '#c0392b'};
   }
+`;
+
+const PrimaryButton = styled(QuickActionButton)`
+  min-width: 260px;
+  font-size: 1.05rem;
+  padding: 1.1rem 1.75rem;
+`;
+
+const SecondaryButton = styled.button<{ $disabled?: boolean }>`
+  background-color: ${props => props.$disabled ? '#bdc3c7' : '#3498db'};
+  color: white;
+  border: none;
+  padding: 0.85rem 1.25rem;
+  border-radius: 6px;
+  cursor: ${props => props.$disabled ? 'not-allowed' : 'pointer'};
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: all 0.2s ease-in-out;
+
+  &:hover {
+    background-color: ${props => props.$disabled ? '#bdc3c7' : '#2980b9'};
+  }
+`;
+
+const ActionGroup = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+`;
+
+const ActionBlock = styled.div`
+  padding: 1.25rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafbfc;
+`;
+
+const ActionBlockTitle = styled.h3`
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+  color: #2c3e50;
+`;
+
+const ActionBlockText = styled.p`
+  margin: 0 0 1rem;
+  color: #566573;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  max-width: 42rem;
+`;
+
+const ActionRow = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+`;
+
+const DateFields = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+`;
+
+const AdvancedDetails = styled.details`
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  background: #fff;
+
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #34495e;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  &[open] summary {
+    margin-bottom: 0.75rem;
+  }
+`;
+
+const HintText = styled.p`
+  margin: 0.5rem 0 0;
+  font-size: 0.88rem;
+  color: #7f8c8d;
+  line-height: 1.45;
 `;
 
 export default function SynkroniseringPage() {
@@ -347,6 +433,15 @@ export default function SynkroniseringPage() {
     startSync(() => api.syncActivitiesForPeriod(startDate, endDate));
   };
 
+  const syncFullPeriod = () => {
+    const rangeErr = validateDateRange(startDate, endDate);
+    if (rangeErr) {
+      setSyncActionError(rangeErr);
+      return;
+    }
+    startSync(() => api.fullSyncForPeriod(startDate, endDate));
+  };
+
   const syncAll = () => {
     // Full synk: aktiviteter fra 2008, helsedata fra 2020 (håndteres i backend)
     const end = new Date();
@@ -380,88 +475,91 @@ export default function SynkroniseringPage() {
       {/* Cache Calculation Panel */}
       <CacheCalculationPanel />
 
-      {/* All Sync Options in One Row */}
       <SyncSection>
         <SectionTitle>Synkronisering</SectionTitle>
         {syncActionError && (
           <ErrorBanner role="alert">{syncActionError}</ErrorBanner>
         )}
-        <p style={{ marginBottom: '1rem', color: '#566573', maxWidth: '52rem' }}>
-          <strong>Synk nye (fra siste økt)</strong> — anbefalt daglig (~1–3 min): én pipeline med aktiviteter, FIT, helse,
-          TE, vær, Garmin performance metrics, HRV til database og beregninger. Ingen duplikat helsesynk.
-          <br />
-          <strong>Aktiviteter for periode</strong> — kun økter + FIT for valgt intervall (raskere).
-          <br />
-          <strong>Full synkronisering</strong> — bred historikk (timer); aktivitet fra 2008, helse fra 2020 internt.
-        </p>
-        <QuickActions>
-          <QuickActionButton 
-            onClick={syncNewActivities}
-            disabled={isLoading}
-          >
-            Synk nye (fra siste økt)
-          </QuickActionButton>
-          
-          <QuickActionButton 
-            onClick={syncSelectedPeriod}
-            disabled={isLoading}
-          >
-            Aktiviteter for periode
-          </QuickActionButton>
-          
-          <QuickActionButton 
-            onClick={syncBodyBattery}
-            disabled={isLoading}
-          >
-            Synk Body Battery
-          </QuickActionButton>
 
-          <QuickActionButton 
-            onClick={refreshTrainingEffect}
-            disabled={isLoading}
-          >
-            Hent aerob/anaerob effekt
-          </QuickActionButton>
+        <ActionGroup>
+          <ActionBlock>
+            <ActionBlockTitle>Daglig oppdatering</ActionBlockTitle>
+            <ActionBlockText>
+              Henter nye økter og oppdaterer alt du trenger i daglig bruk: aktiviteter, FIT, helse,
+              trenings effekt, Garmin performance (VO2 max), HRV og beregninger.
+            </ActionBlockText>
+            <PrimaryButton onClick={syncNewActivities} disabled={isLoading}>
+              Synk nye (anbefalt)
+            </PrimaryButton>
+          </ActionBlock>
 
-          <QuickActionButton 
-            onClick={syncGarminPerformance}
-            disabled={isLoading}
-          >
-            Synk Garmin performance (90 dager)
-          </QuickActionButton>
-          
-          <DangerButton 
-            onClick={syncAll}
-            disabled={isLoading}
-          >
-            Full synkronisering (bred historikk)
-          </DangerButton>
-        </QuickActions>
-        
-        {/* Date inputs for selected period */}
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <DateContainer style={{ marginBottom: 0 }}>
-            <DateLabel>Fra dato:</DateLabel>
-            <DateInput
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </DateContainer>
-          <DateContainer style={{ marginBottom: 0 }}>
-            <DateLabel>Til dato:</DateLabel>
-            <DateInput
-              type="date"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </DateContainer>
-        </div>
-        
-        <p style={{ marginTop: '1rem', fontSize: '0.9rem', color: '#7f8c8d' }}>
-          ⚠️ «Full synkronisering» bruker aktiviteter/FIT fra 2008 til i dag; helse-relaterte data begrenses internt til 2020→
-          (som i backend). Forvent lang kjøretid.
-        </p>
+          <ActionBlock>
+            <ActionBlockTitle>Valgt periode</ActionBlockTitle>
+            <ActionBlockText>
+              Bruk datofeltene under for et bestemt intervall. «Kun aktiviteter» er raskest;
+              «Full synk» tar med helse, TE, performance metrics og beregninger for perioden.
+            </ActionBlockText>
+            <DateFields>
+              <DateContainer style={{ marginBottom: 0 }}>
+                <DateLabel>Fra dato</DateLabel>
+                <DateInput
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                />
+              </DateContainer>
+              <DateContainer style={{ marginBottom: 0 }}>
+                <DateLabel>Til dato</DateLabel>
+                <DateInput
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                />
+              </DateContainer>
+            </DateFields>
+            <ActionRow>
+              <SecondaryButton onClick={syncSelectedPeriod} disabled={isLoading}>
+                Kun aktiviteter + FIT
+              </SecondaryButton>
+              <SecondaryButton onClick={syncFullPeriod} disabled={isLoading}>
+                Full synk for perioden
+              </SecondaryButton>
+            </ActionRow>
+          </ActionBlock>
+
+          <AdvancedDetails>
+            <summary>Avansert — reparer eller fyll inn manglende data</summary>
+            <ActionBlockText>
+              Disse jobbene er vanligvis ikke nødvendige hvis du bruker «Synk nye» regelmessig.
+              Bruk dem ved manglende VO2 max-desimaler, trenings effekt eller Body Battery.
+            </ActionBlockText>
+            <ActionRow>
+              <SecondaryButton onClick={refreshTrainingEffect} disabled={isLoading}>
+                Hent manglende trenings effekt
+              </SecondaryButton>
+              <SecondaryButton onClick={syncGarminPerformance} disabled={isLoading}>
+                Synk Garmin performance (90 dager)
+              </SecondaryButton>
+              <SecondaryButton onClick={syncBodyBattery} disabled={isLoading}>
+                Synk Body Battery for perioden
+              </SecondaryButton>
+            </ActionRow>
+          </AdvancedDetails>
+
+          <ActionBlock>
+            <ActionBlockTitle>Full historikk</ActionBlockTitle>
+            <ActionBlockText>
+              Bred synkronisering fra 2008 (aktivitet/FIT) og 2020 (helse) til i dag.
+              Kan ta lang tid — bruk bare ved første gangs oppsett eller større hull i data.
+            </ActionBlockText>
+            <DangerButton onClick={syncAll} disabled={isLoading}>
+              Full historikk-synk
+            </DangerButton>
+            <HintText>
+              Forvent lang kjøretid. Lukk gjerne siden — jobben kjører på serveren.
+            </HintText>
+          </ActionBlock>
+        </ActionGroup>
       </SyncSection>
 
       {/* Active Jobs */}
@@ -525,31 +623,10 @@ export default function SynkroniseringPage() {
       <SyncSection>
         <SectionTitle>Informasjon</SectionTitle>
         <div style={{ lineHeight: '1.6' }}>
-          <p><strong>Hva synkroniseres:</strong></p>
-          <ul>
-            <li><strong>Aktiviteter:</strong> Alle aktiviteter fra Garmin Connect med GPS-data, styrketrening, svømming, etc.</li>
-            <li><strong>FIT-data:</strong> Detaljerte aktivitetsdata for løpeaktiviteter (hastighet, hjertefrekvens, kadens, etc.)</li>
-            <li><strong>Helsedata:</strong> HRV-data, kroppsbatteri, og andre helsemetrics</li>
-            <li><strong>Training Effect:</strong> EPOC, Training Load, og andre treningsmetrics</li>
-            <li><strong>HRV Database:</strong> HRV-data synkroniseres automatisk til database for raskere tilgang</li>
-          </ul>
-          
-          <p><strong>Hva beregnes og lagres:</strong></p>
-          <ul>
-            <li><strong>Power:</strong> Løpekraft for alle løpeaktiviteter (lagres i database for raskere henting)</li>
-            <li><strong>Training Stress Score:</strong> TSS-beregninger for alle aktiviteter</li>
-            <li><strong>Caching:</strong> Forbereder data for raskere visning på alle sider</li>
-          </ul>
-          
-          <p><strong>Tips:</strong></p>
-          <ul>
-            <li><strong>«Synk nye (fra siste økt)»</strong> finner siste lagrede aktivitet og oppdaterer derfra til nå — inkluderer aktivitet, FIT, helse og TE (tilsvarende en «hent alt nytt»-jobb)</li>
-            <li><strong>«Aktiviteter for periode»</strong> er for et valgt datointervall: kun aktiviteter og FIT (raskere enn full synk)</li>
-            <li><strong>«Full synkronisering (bred historikk)»</strong> kjører full pipeline for en lang periode (aktivitet fra 2008, helse fra 2020 internt) — bruk med omtanke</li>
-            <li>Du kan lukke denne siden — jobben kjører på serveren; status vises helt til den er ferdig i denne økten</li>
-            <li>Under «Fase / melding» vises serverens nåværende steg (ikke en nøyaktig prosent)</li>
-            <li>Fullførte jobber forsvinner fra listen etter noen sekunder; feilede jobber vises lenger slik at du rekker å lese feilen</li>
-          </ul>
+          <p><strong>Anbefalt rutine:</strong> Bruk <strong>Synk nye (anbefalt)</strong> etter trening eller én gang om dagen.</p>
+          <p><strong>Valgt periode:</strong> «Kun aktiviteter + FIT» er rask re-import av økter. «Full synk for perioden» inkluderer også helse, TE, VO2 max og beregninger.</p>
+          <p><strong>Avansert:</strong> Reparasjonsjobber for når enkeltfelter mangler uten at du trenger full historikk-synk.</p>
+          <p><strong>Jobbstatus:</strong> Du kan lukke siden mens jobben kjører. Fullførte jobber forsvinner etter noen sekunder; feilede vises lenger.</p>
         </div>
       </SyncSection>
     </Container>
