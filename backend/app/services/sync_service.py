@@ -1419,6 +1419,22 @@ class SyncService:
             current_day += timedelta(days=1)
 
         self.db.commit()
+        try:
+            from .health_metric_backfill import backfill_activity_vo2_precise_in_range
+
+            backfilled = backfill_activity_vo2_precise_in_range(
+                self.db,
+                effective_start.date(),
+                end_day,
+            )
+            if backfilled:
+                logger.info(
+                    "Fylte vo2_max_precise på %s aktiviteter etter performance metrics-synk",
+                    backfilled,
+                )
+        except Exception as e:
+            logger.warning(f"Kunne ikke backfille vo2_max_precise etter performance-synk: {e}")
+
         if updated_count > 0:
             try:
                 state = self.db.query(SyncState).filter_by(key="garmin_performance_metrics").first()

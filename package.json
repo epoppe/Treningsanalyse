@@ -12,7 +12,8 @@
     "test:guardrails": "cd backend && PYTHONPATH=. .venv/bin/python -m unittest tests.test_sync_jobs tests.test_sync_job_acquire_guardrail tests.test_force_refresh_parquet tests.test_summary_activity_type_filter tests.test_sleep_and_hrv_sync -v",
     "preflight": "bash backend/scripts/preflight.sh",
     "sync:garmin-performance": "cd backend && SKIP_GARMIN_INIT=false PYTHONPATH=. .venv/bin/python scripts/run_garmin_performance_sync.py --days 90",
-    "backfill:vo2-precise": "cd backend && PYTHONPATH=. .venv/bin/python scripts/backfill_health_fields.py --activities-only"
+    "backfill:vo2-precise": "cd backend && PYTHONPATH=. .venv/bin/python scripts/backfill_health_fields.py --activities-only",
+    "diagnose:vo2max": "cd backend && PYTHONPATH=. .venv/bin/python scripts/diagnose_vo2max.py"
   },
   "dependencies": {
     "date-fns": "^4.1.0"

@@ -239,7 +239,9 @@ export default function TrainingStatusPage() {
           <MetricRow>
             <MetricLabel>Gjennomsnitt</MetricLabel>
             <MetricValue>
-              {data.vo2max.average ? `${data.vo2max.average} ml/kg/min` : 'Ingen data'}
+              {data.vo2max.average != null
+                ? `${Number(data.vo2max.average).toFixed(1)} ml/kg/min`
+                : 'Ingen data'}
             </MetricValue>
           </MetricRow>
           <MetricRow>
