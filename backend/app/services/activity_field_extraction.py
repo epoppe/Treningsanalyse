@@ -91,6 +91,15 @@ def extract_garmin_weather_fields(act_data: Dict[str, Any]) -> Dict[str, Optiona
     }
 
 
+def extract_vo2_max_precise(act_data: Dict[str, Any]) -> Optional[float]:
+    """Henter presis VO2 max fra Garmin activitylist/summary (varierende nøkkelnavn)."""
+    for key in ("vO2MaxPreciseValue", "vo2MaxPreciseValue"):
+        value = _coerce_float(act_data.get(key))
+        if value is not None and value > 0:
+            return value
+    return None
+
+
 def extract_activity_list_fields(act_data: Dict[str, Any]) -> Dict[str, Optional[float | int]]:
     """Henter felter som allerede finnes i Garmin activitylist JSON."""
     duration = _coerce_float(act_data.get("duration"))

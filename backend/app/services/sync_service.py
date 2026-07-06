@@ -27,7 +27,7 @@ from .activity_data_validation import (
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
-from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields
+from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields, extract_vo2_max_precise
 from .activity_metric_backfill import (
     derive_average_pace_sec_per_km,
     derive_total_steps,
@@ -229,7 +229,7 @@ class SyncService:
                 max_elevation=list_fields["max_elevation"],
                 calories=act_data.get('calories'),
                 vo2_max=act_data.get('vO2MaxValue'),
-                vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
+                vo2_max_precise=extract_vo2_max_precise(act_data),
                 average_heart_rate=act_data.get('averageHR'),
                 max_heart_rate=act_data.get('maxHR'),
                 min_heart_rate=act_data.get('minHR'),
@@ -719,7 +719,7 @@ class SyncService:
                     max_elevation=list_fields["max_elevation"],
                     calories=act_data.get('calories'),
                     vo2_max=act_data.get('vO2MaxValue'),
-                    vo2_max_precise=act_data.get('vO2MaxPreciseValue'),
+                    vo2_max_precise=extract_vo2_max_precise(act_data),
                     average_heart_rate=act_data.get('averageHR'),
                     max_heart_rate=act_data.get('maxHR'),
                     min_heart_rate=act_data.get('minHR'),

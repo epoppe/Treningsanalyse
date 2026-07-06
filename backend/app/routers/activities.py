@@ -9,7 +9,7 @@ from ..services.garmin_client import GarminClient
 from ..services.power_service import PowerService
 from ..storage import DataStorage
 from ..dependencies import get_data_storage, get_garmin_client
-from ..config import settings
+from ..services.vo2_max_resolver import build_vo2_max_precise_lookup, resolve_vo2_max_precise
 import plotly.graph_objects as go
 import plotly.io as pio
 import pandas as pd
@@ -84,6 +84,7 @@ def get_activities_by_date_range(
         power_service = None
         
         response_data = []
+        vo2_precise_lookup = build_vo2_max_precise_lookup(db, activities)
         for act in activities:
             # Hent aktivitetstype
             act_type_data = None
@@ -131,7 +132,7 @@ def get_activities_by_date_range(
                 "averagePace": act.average_pace,
                 "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                 "vO2MaxValue": act.vo2_max,
-                "vO2MaxPreciseValue": act.vo2_max_precise,
+                "vO2MaxPreciseValue": resolve_vo2_max_precise(act, vo2_precise_lookup),
                 "activityType": act_type_data,
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,
@@ -214,6 +215,7 @@ def get_activities(
         power_service = None
         
         response_data = []
+        vo2_precise_lookup = build_vo2_max_precise_lookup(db, activities)
         logger.info(f"Starter prosessering av {len(activities)} aktiviteter for respons...")
         
         for i, act in enumerate(activities):
@@ -266,7 +268,7 @@ def get_activities(
                     "averagePace": act.average_pace,
                     "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                     "vO2MaxValue": act.vo2_max,
-                    "vO2MaxPreciseValue": act.vo2_max_precise,
+                    "vO2MaxPreciseValue": resolve_vo2_max_precise(act, vo2_precise_lookup),
                     "activityType": act_type_data,
                     "avgStrideLength": avg_stride_length,
                     "negativeSplitPercent": act.negative_split_percent,
@@ -323,6 +325,7 @@ def get_new_activities(
         power_service = None
         
         response_data = []
+        vo2_precise_lookup = build_vo2_max_precise_lookup(db, activities)
         for act in activities:
             # Construct the nested activity type object
             act_type_data = None
@@ -368,7 +371,7 @@ def get_new_activities(
                 "averagePace": act.average_pace,
                 "averageRunningCadenceInStepsPerMinute": act.average_running_cadence,
                 "vO2MaxValue": act.vo2_max,
-                "vO2MaxPreciseValue": act.vo2_max_precise,
+                "vO2MaxPreciseValue": resolve_vo2_max_precise(act, vo2_precise_lookup),
                 "activityType": act_type_data,
                 "avgStrideLength": avg_stride_length,
                 "negativeSplitPercent": act.negative_split_percent,

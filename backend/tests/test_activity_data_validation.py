@@ -1,7 +1,11 @@
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-from app.database.models.activity import Activity
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.database.models.activity import Activity, ActivityType, Base, GarminPerformanceMetric
 from app.services.activity_data_validation import (
     apply_garmin_list_hr_fields,
     max_hr_from_fit_records,
@@ -9,6 +13,7 @@ from app.services.activity_data_validation import (
     normalize_stride_length_meters,
     validate_and_repair_activity,
 )
+from app.services.vo2_max_resolver import build_vo2_max_precise_lookup, resolve_vo2_max_precise
 
 
 class NormalizeUnitsTests(unittest.TestCase):
@@ -98,6 +103,54 @@ class StorageBackfillTests(unittest.TestCase):
         result = validate_and_repair_activity(activity, storage=storage)
         self.assertTrue(result.changed)
         self.assertEqual(activity.max_heart_rate, 171.0)
+
+
+class Vo2MaxResolverTests(unittest.TestCase):
+    def setUp(self):
+        self.engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
+        self.db = self.Session()
+
+        running_type = ActivityType(type_key="running", parent_type_key="running")
+        self.db.add(running_type)
+        self.db.flush()
+
+        self.running_type_id = running_type.id
+        self.db.add(
+            GarminPerformanceMetric(
+                date=datetime(2026, 7, 3, tzinfo=timezone.utc),
+                vo2_max=45.0,
+                vo2_max_precise=44.3,
+            )
+        )
+        self.db.commit()
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_resolve_prefers_activity_precise_value(self):
+        activity = Activity(
+            activity_id="1",
+            start_time=datetime(2026, 7, 3, tzinfo=timezone.utc),
+            vo2_max=45.0,
+            vo2_max_precise=44.7,
+            activity_type_id=self.running_type_id,
+        )
+        lookup = build_vo2_max_precise_lookup(self.db, [activity])
+        self.assertEqual(resolve_vo2_max_precise(activity, lookup), 44.7)
+
+    def test_resolve_falls_back_to_daily_performance_metric(self):
+        activity = Activity(
+            activity_id="2",
+            start_time=datetime(2026, 7, 3, tzinfo=timezone.utc),
+            vo2_max=45.0,
+            vo2_max_precise=None,
+            activity_type_id=self.running_type_id,
+        )
+        lookup = build_vo2_max_precise_lookup(self.db, [activity])
+        self.assertEqual(lookup[datetime(2026, 7, 3).date()], 44.3)
+        self.assertEqual(resolve_vo2_max_precise(activity, lookup), 44.3)
 
 
 if __name__ == "__main__":
