@@ -15,6 +15,11 @@ import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
 
+const getEffectiveVo2Max = (activity: Activity): number | undefined => {
+  const value = activity.vO2MaxPreciseValue ?? activity.vO2MaxValue;
+  return value != null && value > 0 ? value : undefined;
+};
+
 const ChartContainer = styled.div`
   background: white;
   padding: 1rem;
@@ -112,7 +117,7 @@ export default function VO2MaxChart({
         a.activityType.typeKey.includes("running") &&
         !a.activityType.typeKey.includes("treadmill")
     )
-    .filter((a) => a.vO2MaxValue && a.vO2MaxValue > 0)
+    .filter((a) => getEffectiveVo2Max(a) != null)
     .sort(
       (a, b) =>
         new Date(a.startTimeLocal).getTime() - new Date(b.startTimeLocal).getTime()
@@ -132,7 +137,7 @@ export default function VO2MaxChart({
 
   const processGroup = (activities: Activity[]) => {
     const vo2MaxValues = activities
-      .map((a) => a.vO2MaxValue!)
+      .map((a) => getEffectiveVo2Max(a)!)
       .filter((v) => v > 0);
 
     if (vo2MaxValues.length === 0) return null;
@@ -144,7 +149,7 @@ export default function VO2MaxChart({
     chartData = runningActivities.map((a) => {
       return {
         date: format(parseISO(a.startTimeLocal), 'dd.MM.yy'),
-        vo2Max: a.vO2MaxValue,
+        vo2Max: getEffectiveVo2Max(a),
         name: a.activityName,
       };
     });
