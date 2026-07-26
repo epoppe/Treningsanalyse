@@ -72,3 +72,15 @@ De beholdes midlertidig som referanse/legacy.
 - Etter modellendring: generer migrasjon, review, commit.
 - SQLite bruker `render_as_batch=True` (nødvendig for ALTER).
 - Aldri rediger allerede anvendte migrasjoner — lag en ny.
+
+## SyncRun / sync_lock
+
+Migrasjon `a0aa219a0c49` legger til:
+
+- `sync_runs` — audit/statistikk per synk-kjøring
+- `sync_locks` — global eksklusiv synk-lås
+
+API (additivt, bakoverkompatibelt):
+
+- `GET /api/sync/runs`
+- `GET /api/sync/lock`
