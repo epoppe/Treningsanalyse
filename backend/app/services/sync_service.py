@@ -125,7 +125,7 @@ class SyncService:
         """Parser FIT-data fra bytes til strukturert JSON."""
         return self.fit_sync.parse_fit_data(fit_data)
 
-    def sync_json_to_db(self) -> dict:
+    async def sync_json_to_db(self) -> dict:
         """
         Leser alle aktiviteter fra JSON-filer og synkroniserer dem til databasen.
         """
@@ -134,11 +134,14 @@ class SyncService:
         lactate_threshold_speed: Optional[float] = None
         lactate_threshold_heart_rate: Optional[float] = None
         try:
-            threshold_info = asyncio.run(self.garmin_client.get_lactate_threshold_info())
-            if threshold_info:
-                lactate_threshold_speed = threshold_info.get("speed_mps")
-                lactate_threshold_heart_rate = threshold_info.get("heart_rate_bpm")
-                self._record_lactate_threshold_history(threshold_info, sync_context="json_sync")
+            if self.garmin_client is not None:
+                threshold_info = await self.garmin_client.get_lactate_threshold_info()
+                if threshold_info:
+                    lactate_threshold_speed = threshold_info.get("speed_mps")
+                    lactate_threshold_heart_rate = threshold_info.get("heart_rate_bpm")
+                    self._record_lactate_threshold_history(
+                        threshold_info, sync_context="json_sync"
+                    )
         except Exception as e:
             logger.warning(f"Kunne ikke hente lactate threshold speed: {e}")
 

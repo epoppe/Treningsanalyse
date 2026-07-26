@@ -386,7 +386,7 @@ def get_sync_lock_status(db: Session = Depends(get_db)):
     }
 
 @router.post("/sync/database", status_code=200)
-def trigger_db_sync(
+async def trigger_db_sync(
     storage: DataStorage = Depends(get_data_storage),
     db: Session = Depends(get_db)
 ):
@@ -395,7 +395,7 @@ def trigger_db_sync(
     """
     # GarminClient er ikke nødvendig her, så vi kan sette den til None
     sync_service = SyncService(garmin_client=None, storage=storage, db_session=db)
-    result = sync_service.sync_json_to_db()
+    result = await sync_service.sync_json_to_db()
     return result
 
 @router.post("/activities", status_code=202)
@@ -825,13 +825,13 @@ async def sync_historical_data(
         raise HTTPException(status_code=500, detail=f"En intern feil oppstod under historisk synkronisering: {str(e)}")
 
 @router.post("/sync-json-to-db", status_code=status.HTTP_200_OK)
-def sync_json_to_db_endpoint(db: Session = Depends(get_db)):
+async def sync_json_to_db_endpoint(db: Session = Depends(get_db)):
     """
     Et endepunkt for manuelt å trigge synkronisering fra JSON-filer til databasen.
     """
     # Denne funksjonen er nå mindre relevant, men beholdes for eventuell fremtidig bruk.
     sync_service = SyncService(None, get_data_storage(), db) # GarminClient er ikke nødvendig her
-    result = sync_service.sync_json_to_db()
+    result = await sync_service.sync_json_to_db()
     return result
 
 async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, ignore_sync_state: bool = False):
@@ -1407,29 +1407,29 @@ async def sync_body_battery_data(
         logger.error(f"Feil ved start av Body Battery-synkronisering: {e}")
         raise HTTPException(status_code=500, detail=f"Feil ved start av Body Battery-synkronisering: {str(e)}")
 
-def run_body_battery_sync_task(job_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None):
-    """Bakgrunnsjobb for Body Battery-synkronisering."""
+async def run_body_battery_sync_task(
+    job_id: str, start_date: Optional[str] = None, end_date: Optional[str] = None
+):
+    """Bakgrunnsjobb for Body Battery-synkronisering (async — ingen asyncio.run)."""
     try:
-        # Opprett ny database session for bakgrunnsjobb
         db = SessionLocal()
         try:
-            # Kjør async funksjon i en event loop
-            import asyncio
-            result = asyncio.run(run_body_battery_sync(start_date, end_date, db))
-            
-            # Oppdater jobb-status
+            result = await run_body_battery_sync(start_date, end_date, db)
+
             sync_jobs[job_id].update({
                 "status": result["status"],
                 "message": result["message"],
                 "result": result,
                 "end_time": datetime.now(timezone.utc)
             })
-            
-            logger.info(f"Body Battery-synkronisering fullført for jobb {job_id}: {result['message']}")
-            
+
+            logger.info(
+                f"Body Battery-synkronisering fullført for jobb {job_id}: {result['message']}"
+            )
+
         finally:
             db.close()
-            
+
     except Exception as e:
         logger.error(f"Feil i Body Battery-synkroniseringsjobb {job_id}: {e}")
         sync_jobs[job_id].update({
