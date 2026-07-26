@@ -3,8 +3,6 @@ from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
-import sys
-from pathlib import Path
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -12,9 +10,8 @@ from .services.garmin_client import GarminClient
 from .storage import DataStorage
 from .config import settings
 from .routers import activities, analysis, analytics, garmin_data, health, readiness_v1, sync, training_readiness, training_stress, power, cache, bulk, factor_relationships, route_analysis
-from .database.models.activity import Base
 from .database.session import engine as db_engine, SessionLocal
-from .database.models import activity as activity_model
+from .database.migrations import get_schema_version, run_migrations
 from .dependencies import get_db, get_garmin_client, get_data_storage
 from .services.sync_service import SyncService
 from .middleware.cache_headers import CacheHeadersMiddleware
@@ -64,48 +61,16 @@ async def lifespan(app: FastAPI):
     # Initialiser DataStorage
     app.state.data_storage = DataStorage(settings.DATA_DIR)
     logger.info("DataStorage initialisert.")
-    
-    # Opprett databasetabeller
-    Base.metadata.create_all(bind=db_engine)
-    logger.info("Databasetabeller opprettet/verifisert.")
 
-    # Kjør idempotente SQLite-migrasjoner (nye kolonner etter git pull)
-    backend_root = Path(__file__).resolve().parent.parent
-    if str(backend_root) not in sys.path:
-        sys.path.insert(0, str(backend_root))
+    # Kjør Alembic-migrasjoner (erstatter create_all + manuelle migrate_*)
     try:
-        from migrate_add_advanced_running_metrics import migrate_add_advanced_running_metrics
-        if migrate_add_advanced_running_metrics():
-            logger.info("Database-migrasjon for løpeanalyse verifisert.")
-        else:
-            logger.warning("Database-migrasjon for løpeanalyse fullførte ikke – sjekk backend-logg.")
+        revision = run_migrations(db_engine, settings.DATABASE_URL)
+        app.state.schema_version = revision
+        logger.info("Database-schema migrert til revisjon %s", revision)
     except Exception as exc:
-        logger.warning("Kunne ikke kjøre database-migrasjon for løpeanalyse: %s", exc)
-    try:
-        from migrate_add_route_analysis import migrate_add_route_analysis
-        if migrate_add_route_analysis():
-            logger.info("Database-migrasjon for ruteanalyse verifisert.")
-        else:
-            logger.warning("Database-migrasjon for ruteanalyse fullførte ikke – sjekk backend-logg.")
-    except Exception as exc:
-        logger.warning("Kunne ikke kjøre database-migrasjon for ruteanalyse: %s", exc)
-    try:
-        from migrate_add_garmin_performance_metrics import migrate_add_garmin_performance_metrics
-        if migrate_add_garmin_performance_metrics():
-            logger.info("Database-migrasjon for Garmin performance metrics verifisert.")
-        else:
-            logger.warning("Database-migrasjon for Garmin performance metrics fullførte ikke – sjekk backend-logg.")
-    except Exception as exc:
-        logger.warning("Kunne ikke kjøre database-migrasjon for Garmin performance metrics: %s", exc)
-    try:
-        from migrate_add_activity_weather import migrate_add_activity_weather
-        if migrate_add_activity_weather():
-            logger.info("Database-migrasjon for activity weather verifisert.")
-        else:
-            logger.warning("Database-migrasjon for activity weather fullførte ikke – sjekk backend-logg.")
-    except Exception as exc:
-        logger.warning("Kunne ikke kjøre database-migrasjon for activity weather: %s", exc)
-    
+        logger.error("Database-migrasjon feilet: %s", exc)
+        raise
+
     yield
     logger.info("Stopper applikasjonen...")
 
@@ -153,6 +118,16 @@ def read_root():
     return {"message": "Welcome to the Treningsanalyse API"}
 
 
+@app.get("/health")
+def health_check():
+    """Enkel health check med schema-versjon (Alembic-revisjon)."""
+    schema = get_schema_version(db_engine)
+    return {
+        "status": "ok" if schema.get("schema_at_head") else "degraded",
+        **schema,
+    }
+
+
 @app.get("/api/debug/db-info")
 def debug_db_info(db: Session = Depends(get_db)):
     """Debug: vis hvilken database som brukes og antall aktiviteter."""
@@ -163,4 +138,5 @@ def debug_db_info(db: Session = Depends(get_db)):
         "database_url": settings.DATABASE_URL[:80] + "..." if len(settings.DATABASE_URL) > 80 else settings.DATABASE_URL,
         "activity_count": count,
         "data_dir": settings.DATA_DIR,
+        **get_schema_version(db_engine),
     }

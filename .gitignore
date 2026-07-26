@@ -111,9 +111,16 @@ test_*.py
 !backend/tests/test_telegram_notifier.py
 !backend/tests/test_garmin_client_sync.py
 !backend/tests/test_mcp_perf_cache.py
+!backend/tests/test_alembic_migrations.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
+!docs/DATABASE_MIGRATIONS.md
+!README.md
+!START_HERE.md
+!REPO_NOTES.md
+!AGENTS.md
+!DEVELOPMENT_NOTES.md
 
 # Virtualenv
 .venv

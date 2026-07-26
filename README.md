@@ -53,14 +53,28 @@ Verdiene lagres i databasen og er umiddelbart tilgjengelige uten re-beregning!
 ## 🏗️ Teknologi
 
 - **Frontend:** Next.js 14, React, Redux, Styled-components
-- **Backend:** Python, FastAPI, SQLAlchemy
+- **Backend:** Python, FastAPI, SQLAlchemy, Alembic
 - **Database:** SQLite (optimalisert med WAL-mode)
 - **Data:** Garmin Connect API, FIT-fil parsing
+
+## 🗄️ Database-migrasjoner
+
+Schema administreres med Alembic (ikke lenger `create_all` + manuelle `migrate_*.py` ved oppstart).
+
+```bash
+npm run db:upgrade    # alembic upgrade head
+npm run db:current    # vis schema-revisjon
+```
+
+Health check med schema-versjon: `GET /health`
+
+Se `docs/DATABASE_MIGRATIONS.md` for detaljer.
 
 ## 📚 Dokumentasjon
 
 - **START_HERE.md** - Start her! Komplett guide og trygg oppstart
 - **REPO_NOTES.md** - Struktur og lavrisiko vedlikeholdsnotater
+- **docs/DATABASE_MIGRATIONS.md** - Alembic-migrasjoner
 - **DEVELOPMENT_NOTES.md** - Utviklernotater om frontend-/Node-struktur
 - **AUTO_CALCULATION_SYSTEM.md** - Automatisk beregningssystem
 - **IMPLEMENTATION_SUMMARY.md** - Oversikt over optimaliseringer
@@ -69,6 +83,9 @@ Verdiene lagres i databasen og er umiddelbart tilgjengelige uten re-beregning!
 - **ANALYTICS_METRICS.md** - EF og aerobic decoupling formler
 
 ## 🔧 API Endepunkter
+
+### System
+- `GET /health` - Health check med Alembic schema-versjon
 
 ### Synkronisering
 - `POST /api/sync/full-sync` - Full synkronisering (aktiviteter + helsedata)

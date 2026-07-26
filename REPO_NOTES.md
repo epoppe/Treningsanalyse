@@ -39,12 +39,13 @@ Det viktigste forbedringsbehovet ser ut til å være repo-organisering, ikke nø
 ### 2. Backend har mange toppnivå-skript
 `backend/` inneholder svært mange skript for:
 - sjekk/debug
-- migrering
+- migrering (legacy `migrate_*.py` — ikke lenger kalt ved oppstart)
 - re-kalkulering
 - engangsoperasjoner
 - datasync
 
-Dette bør sannsynligvis samles og kategoriseres senere, men ikke i en risikofri reiserunde.
+Schema-migrasjoner håndteres nå av Alembic (`backend/alembic/`, se `docs/DATABASE_MIGRATIONS.md`).
+Øvrige toppnivå-skript bør sannsynligvis samles og kategoriseres senere.
 
 ### 3. Frontend har tegn til historisk duplisering
 Det finnes:
