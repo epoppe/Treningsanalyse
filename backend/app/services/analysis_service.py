@@ -137,68 +137,22 @@ class AnalysisService:
 
     def _get_fit_details_for_activity(self, activity_id: int, activity: Activity) -> Optional[pd.DataFrame]:
         """
-        Hent FIT-detaljer fra parquet først, med fallback til detailed_metrics i DB.
-        Returnerer DataFrame med minst timestamp/speed/heart_rate når tilgjengelig.
+        Hent FIT-tidsserie via lag 2 (parquet / materialisert FitSeries).
+
+        Beregningskode leser ikke Garmin JSON direkte — raw materialisering
+        skjer kun i layers.raw_access ved manglende parquet.
         """
-        # 1) Primærkilde: parquet-lager
-        details_df = self.storage.get_activity_details(activity_id)
-        if details_df is not None and not details_df.empty:
-            return enrich_fit_speed_from_distance(details_df)
+        from ..layers.normalized import load_fit_series
 
-        # 2) Fallback: detailed_metrics JSON lagret på aktivitet
-        details = activity.detailed_metrics if activity else None
-        details = self._coerce_dict(details)
-        if not details:
+        details_df = load_fit_series(
+            activity_id,
+            self.storage,
+            activity=activity,
+            allow_raw_materialize=True,
+        )
+        if details_df is None or details_df.empty:
             return None
-
-        records = self._extract_records(details)
-        if not records:
-            return None
-
-        parsed_records: List[Dict[str, Any]] = []
-        for record in records:
-            if not isinstance(record, dict):
-                continue
-            timestamp = pd.to_datetime(
-                record.get("timestamp")
-                or record.get("time")
-                or record.get("record_timestamp"),
-                errors="coerce",
-            )
-            if pd.isna(timestamp):
-                continue
-            speed = self._to_float(
-                record.get("enhanced_speed")
-                or record.get("speed")
-                or record.get("enhancedSpeed")
-            )
-            heart_rate = self._to_float(
-                record.get("heart_rate")
-                or record.get("heartrate")
-                or record.get("hr")
-            )
-            distance = self._to_float(
-                record.get("distance")
-                or record.get("enhanced_distance")
-                or record.get("enhancedDistance")
-            )
-            altitude = self._to_float(
-                record.get("altitude")
-                or record.get("enhanced_altitude")
-                or record.get("enhancedAltitude")
-            )
-            parsed_records.append({
-                "timestamp": timestamp,
-                "speed": speed,
-                "heart_rate": heart_rate,
-                "distance": distance,
-                "altitude": altitude,
-            })
-
-        if not parsed_records:
-            return None
-
-        return enrich_fit_speed_from_distance(pd.DataFrame(parsed_records))
+        return enrich_fit_speed_from_distance(details_df)
 
     def _split_activity_halves(self, valid_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, str]:
         """

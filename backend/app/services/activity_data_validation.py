@@ -146,9 +146,39 @@ def validate_and_repair_activity(
     max_hr = activity.max_heart_rate
     if avg is not None and max_hr is not None and max_hr < avg:
         result.warnings.append(f"max_heart_rate ({max_hr}) < average_heart_rate ({avg})")
-        replacement = max_hr_from_fit_records(activity.detailed_metrics)
-        if replacement is None and storage is not None:
+        # Preferer parquet (lag 2). Raw JSON kun via layers.raw_access.
+        replacement = None
+        if storage is not None:
             replacement = max_hr_from_storage(storage, activity.activity_id)
+            if replacement is None:
+                try:
+                    from ..layers.normalized import load_fit_series
+
+                    series = load_fit_series(
+                        int(activity.activity_id),
+                        storage,
+                        activity=activity,
+                        allow_raw_materialize=True,
+                    )
+                    if series is not None and not series.empty and "heart_rate" in series.columns:
+                        peak = float(series["heart_rate"].dropna().max())
+                        if _hr_in_range(peak):
+                            replacement = round(peak, 1)
+                except Exception:
+                    replacement = None
+        if replacement is None:
+            try:
+                from ..layers.raw_access import parse_raw_fit_records_to_dataframe
+
+                series = parse_raw_fit_records_to_dataframe(
+                    getattr(activity, "detailed_metrics", None)
+                )
+                if series is not None and not series.empty and "heart_rate" in series.columns:
+                    peak = float(series["heart_rate"].dropna().max())
+                    if _hr_in_range(peak):
+                        replacement = round(peak, 1)
+            except Exception:
+                replacement = None
         if replacement is not None and replacement >= avg:
             activity.max_heart_rate = replacement
             result.changed = True

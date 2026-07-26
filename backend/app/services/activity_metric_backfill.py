@@ -369,10 +369,8 @@ def apply_activity_field_backfill(
                 result.fixes.append(f"moving_duration fra FIT: {moving}")
 
         if activity.total_steps is None:
-            steps = extract_fit_total_steps(
-                details_df,
-                detailed_metrics=activity.detailed_metrics,
-            )
+            # Kun normalisert FitSeries (parquet) — ikke rå Garmin JSON
+            steps = extract_fit_total_steps(details_df)
             if steps is not None:
                 activity.total_steps = steps
                 result.changed = True
