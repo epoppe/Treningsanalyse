@@ -95,6 +95,15 @@ class SyncRequest(BaseModel):
     fit_download_mode: Optional[str] = "chunked"  # "auto" | "chunked"
     list_only: Optional[bool] = False  # Kun aktivitetsliste, uten FIT/helsedata
 
+def _job_sync_run_id(job_id: str) -> Optional[int]:
+    job = sync_jobs.get(job_id) or {}
+    run_id = job.get("sync_run_id")
+    try:
+        return int(run_id) if run_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClient, storage: DataStorage, start_date: datetime, end_date: datetime, force_refresh_recent: bool = False, fit_data_limit: int = 100, ignore_sync_state: bool = False, fit_download_mode: str = "chunked"):
     """Kjører aktivitetssynkronisering i bakgrunnen med automatisk FIT-data nedlasting."""
     db_session = None
@@ -109,6 +118,7 @@ async def run_activity_sync_with_fit_data(job_id: str, garmin_client: GarminClie
             fit_data_limit,
             ignore_sync_state,
             fit_download_mode,
+            sync_run_id=_job_sync_run_id(job_id),
         )
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
@@ -139,6 +149,7 @@ async def run_activity_sync(
             end_date,
             ignore_sync_state=ignore_sync_state,
             skip_fit_download=skip_fit_download,
+            sync_run_id=_job_sync_run_id(job_id),
         )
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
@@ -155,7 +166,12 @@ async def run_activity_sync_with_force(job_id: str, garmin_client: GarminClient,
         _mark_job_processing(job_id, "Synkroniserer aktiviteter (force refresh)...")
         db_session = SessionLocal()
         sync_service = SyncService(garmin_client, storage, db_session)
-        result = await sync_service.sync_activities(start_date, end_date, force_refresh_recent)
+        result = await sync_service.sync_activities(
+            start_date,
+            end_date,
+            force_refresh_recent,
+            sync_run_id=_job_sync_run_id(job_id),
+        )
         sync_jobs[job_id].update({"status": "completed", "result": result, "end_time": datetime.now(timezone.utc)})
     except Exception as e:
         logger.critical(f"Feil i aktivitetssynk (jobb {job_id}): {e}", exc_info=True)
@@ -363,6 +379,7 @@ def list_sync_runs(
             "skipped": row.skipped,
             "failed": row.failed,
             "last_error": row.last_error,
+            "checkpoint": row.checkpoint,
             "code_version": row.code_version,
         }
         for row in rows
@@ -866,7 +883,8 @@ async def run_full_sync(job_id: str, garmin_client: GarminClient, storage: DataS
             force_refresh_recent=True,
             fit_data_limit=150,
             ignore_sync_state=ignore_sync_state,
-            fit_download_mode="chunked"
+            fit_download_mode="chunked",
+            sync_run_id=_job_sync_run_id(job_id),
         )
 
         set_job_phase(job_id, 1, FULL_SYNC_PHASES, "Steg 2/4: Garmin performance metrics…")
@@ -1116,6 +1134,7 @@ async def run_new_activities_sync(job_id: str, garmin_client: GarminClient, stor
             fit_data_limit=150,
             ignore_sync_state=True,
             fit_download_mode="chunked",
+            sync_run_id=_job_sync_run_id(job_id),
         )
 
         set_job_phase(job_id, 1, NEW_ACTIVITIES_PHASES, f"Steg 2/{NEW_ACTIVITIES_PHASES}: Garmin performance metrics…")

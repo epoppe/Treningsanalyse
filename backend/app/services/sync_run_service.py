@@ -5,12 +5,13 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 
 from ..database.models.sync_run import SyncRun
+from ..database.models.sync_state import SyncState
 from ..database.session import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,59 @@ def update_sync_run_stats(
     db.commit()
     db.refresh(run)
     return run
+
+
+def update_sync_run_checkpoint(
+    db: Session,
+    run_id: int,
+    checkpoint: Dict[str, Any],
+    *,
+    inserted: Optional[int] = None,
+    updated: Optional[int] = None,
+    skipped: Optional[int] = None,
+) -> Optional[SyncRun]:
+    """Lagre checkpoint midt i en kjøring (restartbar synk)."""
+    run = db.query(SyncRun).filter_by(id=run_id).first()
+    if run is None:
+        return None
+    run.checkpoint = checkpoint
+    if inserted is not None:
+        run.inserted = inserted
+    if updated is not None:
+        run.updated = updated
+    if skipped is not None:
+        run.skipped = skipped
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+def advance_activities_sync_state(
+    db: Session,
+    last_synced_date: date,
+) -> SyncState:
+    """Flytt SyncState for aktiviteter frem — gjør synk restartbar etter batch-commit."""
+    act_state = db.query(SyncState).filter_by(key="activities").first()
+    if not act_state:
+        act_state = SyncState(key="activities")
+        db.add(act_state)
+    if act_state.last_synced_date is None or last_synced_date > act_state.last_synced_date:
+        act_state.last_synced_date = last_synced_date
+    act_state.last_synced_at = _utcnow()
+    db.commit()
+    return act_state
+
+
+def get_latest_incomplete_sync_run(
+    db: Session,
+    *,
+    job_type: Optional[str] = None,
+) -> Optional[SyncRun]:
+    """Finn siste SyncRun som ikke er completed/failed (med evt. checkpoint)."""
+    query = db.query(SyncRun).filter(SyncRun.status == "processing")
+    if job_type:
+        query = query.filter(SyncRun.job_type == job_type)
+    return query.order_by(SyncRun.id.desc()).first()
 
 
 def complete_sync_run(
