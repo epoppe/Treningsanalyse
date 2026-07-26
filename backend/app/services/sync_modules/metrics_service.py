@@ -302,6 +302,19 @@ class SyncMetricsService:
                 logger.debug(f"HRV-sjekk for aktivitet {activity_id}: {exc}")
 
             try:
+                from ..metric_provenance_service import record_activity_metrics_from_results
+
+                recorded = record_activity_metrics_from_results(
+                    self.sync_service.db,
+                    activity,
+                    results,
+                )
+                if recorded:
+                    results["provenance_recorded"] = recorded
+            except Exception as exc:
+                logger.warning("Kunne ikke registrere metrikk-proveniens for %s: %s", activity_id, exc)
+
+            try:
                 self.sync_service.db.commit()
                 logger.info(f"💾 Lagret alle beregnede verdier for aktivitet {activity_id}")
             except Exception as exc:

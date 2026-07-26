@@ -17,6 +17,7 @@ from .sync_state import SyncState
 from .sync_job import SyncJob
 from .sync_run import SyncRun
 from .sync_lock import SyncLock
+from .metric_provenance import MetricProvenance
 from .lactate_threshold_history import LactateThresholdHistory
 
 __all__ = [
@@ -45,5 +46,6 @@ __all__ = [
     'SyncJob',
     'SyncRun',
     'SyncLock',
+    'MetricProvenance',
     'LactateThresholdHistory'
 ]
