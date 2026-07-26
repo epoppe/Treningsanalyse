@@ -644,6 +644,22 @@ def get_activity_chart(
     chart_json = pio.to_json(fig)
     return Response(content=chart_json, media_type="application/json")
 
+@router.get("/activities/{activity_id}/provenance")
+def get_activity_metric_provenance(
+    activity_id: int,
+    db: Session = Depends(get_db),
+):
+    """Returnerer proveniens for beregnede metrikker på aktiviteten."""
+    from ..services.metric_provenance_service import get_activity_provenance
+
+    rows = get_activity_provenance(db, str(activity_id))
+    return {
+        "activity_id": str(activity_id),
+        "metrics": rows,
+        "count": len(rows),
+    }
+
+
 @router.get("/activities/{activity_id}/negative-split")
 def get_activity_negative_split(
     activity_id: int, 
