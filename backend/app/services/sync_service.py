@@ -28,6 +28,7 @@ from .activity_data_validation import (
     validate_and_repair_activity,
 )
 from .activity_field_extraction import extract_activity_list_fields, extract_garmin_weather_fields, extract_vo2_max_precise
+from .activity_upsert import apply_activity_field_updates
 from .activity_metric_backfill import (
     derive_average_pace_sec_per_km,
     derive_total_steps,
@@ -154,7 +155,8 @@ class SyncService:
         logger.info(f"Fant {len(existing_ids)} eksisterende aktiviteter i databasen.")
         
         added_count = 0
-        skipped_count = 0
+        updated_count = 0
+        skipped_count = 0  # unchanged
         
         # Ordbok for å cache ActivityType-objekter
         activity_type_cache = {}
@@ -166,10 +168,6 @@ class SyncService:
                 continue
             activity_id = str(raw_id)
 
-            if activity_id in existing_ids:
-                skipped_count += 1
-                continue
-            
             # Håndter ActivityType
             act_type_block = act_data.get("activityType") or {}
             activity_type_key = act_type_block.get("typeKey")
@@ -216,44 +214,73 @@ class SyncService:
                     average_running_cadence_spm=act_data.get("averageRunningCadenceInStepsPerMinute"),
                 )
 
-            new_activity = Activity(
-                activity_id=activity_id,
-                activity_name=act_data.get('activityName'),
-                start_time=start_time,
-                distance=act_data.get('distance'),
-                duration=act_data.get('duration'),
-                moving_duration=list_fields["moving_duration"],
-                elapsed_duration=list_fields["elapsed_duration"],
-                total_steps=total_steps,
-                min_elevation=list_fields["min_elevation"],
-                max_elevation=list_fields["max_elevation"],
-                calories=act_data.get('calories'),
-                vo2_max=act_data.get('vO2MaxValue'),
-                vo2_max_precise=extract_vo2_max_precise(act_data),
-                average_heart_rate=act_data.get('averageHR'),
-                max_heart_rate=act_data.get('maxHR'),
-                min_heart_rate=act_data.get('minHR'),
-                average_speed=avg_speed,
-                average_moving_speed=act_data.get('averageMovingSpeed'),
-                avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
-                average_pace=avg_pace,
-                activity_type_id=activity_type_obj.id if activity_type_obj else None,
-                average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
-                max_running_cadence=list_fields["max_running_cadence"],
-                total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
-                total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
-                training_effect_label=act_data.get('trainingEffectLabel'),
-                aerobic_training_effect_message=act_data.get('aerobicTrainingEffectMessage'),
-                anaerobic_training_effect_message=act_data.get('anaerobicTrainingEffectMessage'),
-                lactate_threshold_heart_rate=lactate_threshold_heart_rate,
-                lactate_threshold_speed=lactate_threshold_speed  # Lactate threshold speed
-            )
+            field_payload = {
+                "activity_name": act_data.get('activityName'),
+                "start_time": start_time,
+                "distance": act_data.get('distance'),
+                "duration": act_data.get('duration'),
+                "moving_duration": list_fields["moving_duration"],
+                "elapsed_duration": list_fields["elapsed_duration"],
+                "total_steps": total_steps,
+                "min_elevation": list_fields["min_elevation"],
+                "max_elevation": list_fields["max_elevation"],
+                "calories": act_data.get('calories'),
+                "vo2_max": act_data.get('vO2MaxValue'),
+                "vo2_max_precise": extract_vo2_max_precise(act_data),
+                "average_heart_rate": act_data.get('averageHR'),
+                "max_heart_rate": act_data.get('maxHR'),
+                "min_heart_rate": act_data.get('minHR'),
+                "average_speed": avg_speed if avg_speed and avg_speed > 0 else None,
+                "average_moving_speed": act_data.get('averageMovingSpeed'),
+                "avg_grade_adjusted_speed": act_data.get('avgGradeAdjustedSpeed'),
+                "average_pace": avg_pace,
+                "activity_type_id": activity_type_obj.id if activity_type_obj else None,
+                "average_running_cadence": act_data.get('averageRunningCadenceInStepsPerMinute'),
+                "max_running_cadence": list_fields["max_running_cadence"],
+                "total_training_effect": act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
+                "total_anaerobic_training_effect": act_data.get('anaerobicTrainingEffect'),
+                "training_effect_label": act_data.get('trainingEffectLabel'),
+                "aerobic_training_effect_message": act_data.get('aerobicTrainingEffectMessage'),
+                "anaerobic_training_effect_message": act_data.get('anaerobicTrainingEffectMessage'),
+                "lactate_threshold_heart_rate": lactate_threshold_heart_rate,
+                "lactate_threshold_speed": lactate_threshold_speed,
+            }
+
+            if activity_id in existing_ids:
+                existing = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+                if existing is None:
+                    existing_ids.discard(activity_id)
+                else:
+                    changed, _ = apply_activity_field_updates(existing, field_payload, overwrite=False)
+                    if changed:
+                        updated_count += 1
+                    else:
+                        skipped_count += 1
+                    continue
+
+            new_activity = Activity(activity_id=activity_id, **field_payload)
             self.db.add(new_activity)
             added_count += 1
+            existing_ids.add(activity_id)
             
         self.db.commit()
-        logger.info(f"Synkronisering fullført. La til: {added_count}, hoppet over: {skipped_count}.")
-        return {"status": "Fullført", "added": added_count, "skipped": skipped_count}
+        logger.info(
+            "JSON-synk fullført. inserted=%s updated=%s unchanged=%s",
+            added_count,
+            updated_count,
+            skipped_count,
+        )
+        return {
+            "status": "Fullført",
+            "added": added_count,
+            "added_count": added_count,
+            "inserted": added_count,
+            "updated": updated_count,
+            "updated_count": updated_count,
+            "skipped": skipped_count,
+            "skipped_count": skipped_count,
+            "unchanged_count": skipped_count,
+        }
 
     def _calculate_missing_periods(
         self,
@@ -555,7 +582,11 @@ class SyncService:
             
             activity_type_cache = {}
             added_count = 0
+            updated_count = 0
+            skipped_count = 0  # unchanged — bakoverkompatibelt alias
+            unchanged_count = 0
             inserted_activity_ids: List[str] = []
+            updated_activity_ids: List[str] = []
             buffered_parquet_records: List[Dict[str, Any]] = []
             refreshed_parquet_activity_ids: List[int] = []
 
@@ -565,48 +596,34 @@ class SyncService:
                 if not activity_id:
                     continue
                     
-                # Sjekk om aktiviteten er nylig og om vi skal force refresh
                 activity_start_time = parse_activity_start_from_json(act_data)
                 is_recent = activity_start_time >= recent_cutoff
-                
-                # Hvis ignore_sync_state er True (brukt ved manuell synk av valgt periode),
-                # skal vi alltid overskrive eksisterende aktiviteter i perioden
-                if ignore_sync_state:
-                    should_skip = False
-                    if activity_id in existing_ids:
-                        logger.debug(
-                            "Oppdaterer eksisterende aktivitet %s (ignore_sync_state=True, overskriver alltid).",
-                            activity_id,
-                        )
-                        existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
-                        if existing_activity:
-                            self.db.delete(existing_activity)
-                            refreshed_parquet_activity_ids.append(int(activity_id))
-                else:
-                    # Normal logikk: hopp over hvis ikke nylig, eller oppdater hvis force_refresh_recent
-                    should_skip = (activity_id in existing_ids and 
-                                  not (force_refresh_recent and is_recent))
-                    
-                    if activity_id in existing_ids and force_refresh_recent and is_recent:
-                        logger.debug(
-                            "Oppdaterer eksisterende aktivitet %s (force_refresh_recent=True).",
-                            activity_id,
-                        )
-                        # Slett eksisterende aktivitet først
-                        existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
-                        if existing_activity:
-                            self.db.delete(existing_activity)
-                            refreshed_parquet_activity_ids.append(int(activity_id))
-                
-                if should_skip:
-                    continue
+                exists = activity_id in existing_ids
+                # Overskriv list-felter ved manuell periode-synk eller force-refresh av nylige
+                overwrite = bool(ignore_sync_state or (force_refresh_recent and is_recent))
+
+                existing_activity = None
+                if exists:
+                    existing_activity = self.db.query(Activity).filter_by(activity_id=activity_id).first()
+                    if existing_activity is None:
+                        exists = False
 
                 act_type_block = act_data.get("activityType") or {}
                 activity_type_key = act_type_block.get("typeKey")
 
+                # Hent FIT når ny, overwrite, eller eksisterende mangler detailed_metrics
+                needs_fit = (
+                    not skip_fit_download
+                    and not is_indoor_type_key(activity_type_key)
+                    and (
+                        not exists
+                        or overwrite
+                        or (existing_activity is not None and existing_activity.detailed_metrics is None)
+                    )
+                )
+
                 details_json = None
-                if not skip_fit_download and not is_indoor_type_key(activity_type_key):
-                    # Hent detaljerte data (FIT-fil) for utendørsaktiviteter.
+                if needs_fit:
                     fit_data = await self.garmin_client.get_activity_details(activity_id)
                     if fit_data:
                         details_json = self._parse_fit_data(fit_data)
@@ -616,6 +633,8 @@ class SyncService:
 
                             if parquet_records:
                                 buffered_parquet_records.extend(parquet_records)
+                                if exists:
+                                    refreshed_parquet_activity_ids.append(int(activity_id))
                             else:
                                 logger.warning(f"Ingen gyldige FIT-records funnet for aktivitet {activity_id}")
                         else:
@@ -706,47 +725,71 @@ class SyncService:
                         if act_data.get(key) is not None:
                             details_json[key] = act_data.get(key)
 
-                new_activity = Activity(
-                    activity_id=activity_id,
-                    activity_name=act_data.get('activityName'),
-                    start_time=start_time,
-                    distance=act_data.get('distance'),
-                    duration=act_data.get('duration'),
-                    moving_duration=list_fields["moving_duration"],
-                    elapsed_duration=list_fields["elapsed_duration"],
-                    total_steps=total_steps,
-                    min_elevation=list_fields["min_elevation"],
-                    max_elevation=list_fields["max_elevation"],
-                    calories=act_data.get('calories'),
-                    vo2_max=act_data.get('vO2MaxValue'),
-                    vo2_max_precise=extract_vo2_max_precise(act_data),
-                    average_heart_rate=act_data.get('averageHR'),
-                    max_heart_rate=act_data.get('maxHR'),
-                    min_heart_rate=act_data.get('minHR'),
-                    average_speed=avg_speed,
-                    average_moving_speed=act_data.get('averageMovingSpeed'),
-                    avg_grade_adjusted_speed=act_data.get('avgGradeAdjustedSpeed'),
-                    average_pace=avg_pace,
-                    activity_type_id=activity_type_obj.id if activity_type_obj else None,
-                    average_running_cadence=act_data.get('averageRunningCadenceInStepsPerMinute'),
-                    max_running_cadence=list_fields["max_running_cadence"],
-                    total_training_effect=act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
-                    total_anaerobic_training_effect=act_data.get('anaerobicTrainingEffect'),
-                    training_effect_label=act_data.get('trainingEffectLabel'),
-                    aerobic_training_effect_message=act_data.get('aerobicTrainingEffectMessage'),
-                    anaerobic_training_effect_message=act_data.get('anaerobicTrainingEffectMessage'),
-                    epoc=act_data.get('activityTrainingLoad'),  # EPOC data
-                    lactate_threshold_heart_rate=lactate_threshold_heart_rate,
-                    lactate_threshold_speed=lactate_threshold_speed,  # Lactate threshold speed
-                    total_ascent=elevation_gain,  # Elevation gain i meter
-                    total_descent=elevation_loss,  # Elevation loss i meter
-                    temperature=weather_fields.get("temperature"),
-                    weather_condition=weather_fields.get("weather_condition"),
-                    detailed_metrics=details_json
-                )
-                self.db.add(new_activity)
-                added_count += 1
-                inserted_activity_ids.append(activity_id)
+                field_payload: Dict[str, Any] = {
+                    "activity_name": act_data.get('activityName'),
+                    "start_time": start_time,
+                    "distance": act_data.get('distance'),
+                    "duration": act_data.get('duration'),
+                    "moving_duration": list_fields["moving_duration"],
+                    "elapsed_duration": list_fields["elapsed_duration"],
+                    "total_steps": total_steps,
+                    "min_elevation": list_fields["min_elevation"],
+                    "max_elevation": list_fields["max_elevation"],
+                    "calories": act_data.get('calories'),
+                    "vo2_max": act_data.get('vO2MaxValue'),
+                    "vo2_max_precise": extract_vo2_max_precise(act_data),
+                    "average_heart_rate": act_data.get('averageHR'),
+                    "max_heart_rate": act_data.get('maxHR'),
+                    "min_heart_rate": act_data.get('minHR'),
+                    "average_speed": avg_speed if avg_speed and avg_speed > 0 else None,
+                    "average_moving_speed": act_data.get('averageMovingSpeed'),
+                    "avg_grade_adjusted_speed": act_data.get('avgGradeAdjustedSpeed'),
+                    "average_pace": avg_pace,
+                    "activity_type_id": activity_type_obj.id if activity_type_obj else None,
+                    "average_running_cadence": act_data.get('averageRunningCadenceInStepsPerMinute'),
+                    "max_running_cadence": list_fields["max_running_cadence"],
+                    "total_training_effect": act_data.get('aerobicTrainingEffect') or act_data.get('trainingEffect'),
+                    "total_anaerobic_training_effect": act_data.get('anaerobicTrainingEffect'),
+                    "training_effect_label": act_data.get('trainingEffectLabel'),
+                    "aerobic_training_effect_message": act_data.get('aerobicTrainingEffectMessage'),
+                    "anaerobic_training_effect_message": act_data.get('anaerobicTrainingEffectMessage'),
+                    "epoc": act_data.get('activityTrainingLoad'),
+                    "lactate_threshold_heart_rate": lactate_threshold_heart_rate,
+                    "lactate_threshold_speed": lactate_threshold_speed,
+                    "total_ascent": elevation_gain,
+                    "total_descent": elevation_loss,
+                    "temperature": weather_fields.get("temperature"),
+                    "weather_condition": weather_fields.get("weather_condition"),
+                    "detailed_metrics": details_json,
+                }
+
+                if not exists:
+                    new_activity = Activity(activity_id=activity_id, **{
+                        k: v for k, v in field_payload.items() if k != "detailed_metrics" or v is not None
+                    })
+                    new_activity.detailed_metrics = details_json
+                    self.db.add(new_activity)
+                    added_count += 1
+                    inserted_activity_ids.append(activity_id)
+                    existing_ids.add(activity_id)
+                else:
+                    changed, changed_fields = apply_activity_field_updates(
+                        existing_activity,
+                        field_payload,
+                        overwrite=overwrite,
+                    )
+                    if changed:
+                        updated_count += 1
+                        updated_activity_ids.append(activity_id)
+                        logger.debug(
+                            "Oppdaterte aktivitet %s (%s): %s",
+                            activity_id,
+                            "overwrite" if overwrite else "richer",
+                            ", ".join(changed_fields[:12]),
+                        )
+                    else:
+                        unchanged_count += 1
+                        skipped_count += 1
 
             if buffered_parquet_records:
                 try:
@@ -771,7 +814,7 @@ class SyncService:
 
             # Oppdater SyncState for aktiviteter
             try:
-                if added_count > 0:
+                if added_count > 0 or updated_count > 0:
                     # Sett siste synketdato til sluttdatoen vi nettopp ba om, eller siste aktivitet sin dato
                     last_date = end_date.date()
                     try:
@@ -793,16 +836,31 @@ class SyncService:
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             
-            summary["total_fetched"] = added_count
+            summary["total_fetched"] = added_count + updated_count
+            summary["added_count"] = added_count
+            summary["inserted"] = added_count
+            summary["updated_count"] = updated_count
+            summary["updated"] = updated_count
+            summary["skipped_count"] = skipped_count
+            summary["unchanged_count"] = unchanged_count
             summary["activity_ids"] = inserted_activity_ids
+            summary["updated_activity_ids"] = updated_activity_ids
+            logger.info(
+                "Aktivitetssynk: inserted=%s updated=%s unchanged=%s",
+                added_count,
+                updated_count,
+                unchanged_count,
+            )
+            # Beregn metrics for nye + oppdaterte (rikere data kan påvirke beregninger)
+            metrics_ids = list(dict.fromkeys(inserted_activity_ids + updated_activity_ids))
             if skip_fit_download:
-                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(inserted_activity_ids)}
+                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(metrics_ids)}
             else:
-                logger.info("Starter beregning av alle metrics for nye aktiviteter...")
+                logger.info("Starter beregning av alle metrics for nye/oppdaterte aktiviteter...")
                 metrics_results = []
                 self.metrics_service.begin_batch()
                 try:
-                    for aid in inserted_activity_ids:
+                    for aid in metrics_ids:
                         metrics_result = self._calculate_metrics_for_new_activity(aid)
                         metrics_results.append(metrics_result)
                 finally:
