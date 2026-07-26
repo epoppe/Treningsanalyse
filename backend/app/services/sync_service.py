@@ -720,10 +720,8 @@ class SyncService:
                         average_speed_mps=avg_speed if avg_speed and avg_speed > 0 else None,
                         average_running_cadence_spm=act_data.get("averageRunningCadenceInStepsPerMinute"),
                     )
-                if isinstance(details_json, dict):
-                    for key in ("minTemperature", "maxTemperature"):
-                        if act_data.get(key) is not None:
-                            details_json[key] = act_data.get(key)
+                # Temperatur fra Garmin-listen lagres i Activity-kolonner (lag 2),
+                # ikke blandet inn i detailed_metrics (rå FIT-JSON).
 
                 field_payload: Dict[str, Any] = {
                     "activity_name": act_data.get('activityName'),
@@ -1149,18 +1147,11 @@ class SyncService:
         return result if result else None
 
     def _apply_garmin_list_weather_if_missing(self, activity: Activity) -> bool:
-        """Behold Garmin-liste temperatur hvis API-berikelse ikke gir mer."""
-        if activity.temperature is not None:
-            return False
-        metrics = activity.detailed_metrics if isinstance(activity.detailed_metrics, dict) else {}
-        for key in ("minTemperature", "maxTemperature"):
-            if metrics.get(key) is not None:
-                fields = extract_garmin_weather_fields(metrics)
-                if fields.get("temperature") is not None:
-                    activity.temperature = fields["temperature"]
-                    if not activity.weather_condition:
-                        activity.weather_condition = fields.get("weather_condition")
-                    return True
+        """Ingen JSON-fallback: Garmin-liste temperatur settes i Activity-kolonner ved sync.
+
+        Tidligere ble min/maxTemperature dumpet i detailed_metrics (rå JSON).
+        Returnerer alltid False (ingen endring herfra) — lag 2 er allerede fylt.
+        """
         return False
 
     async def sync_activity_weather_for_activity(
