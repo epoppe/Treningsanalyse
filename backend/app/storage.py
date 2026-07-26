@@ -260,12 +260,17 @@ class DataStorage:
             if table.num_rows == 0:
                 return None
             activity_data = table.to_pandas()
+            # Parquet skrevet via pandas-append-stien lagrer timestamp som index.
+            # Gjør den til en kolonne igjen slik at nedstrøms kode (FIT-analyse) finner den.
+            if "timestamp" not in activity_data.columns and activity_data.index.name == "timestamp":
+                activity_data = activity_data.reset_index()
             if "timestamp" in activity_data.columns:
                 activity_data["timestamp"] = pd.to_datetime(
                     activity_data["timestamp"],
                     errors="coerce",
                     utc=True,
                 ).dt.tz_convert(None)
+                return activity_data.reset_index(drop=True)
             return activity_data.reset_index(drop=True)
         except Exception as exc:
             logger.debug(
