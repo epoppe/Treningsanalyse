@@ -117,6 +117,7 @@ test_*.py
 !backend/tests/test_data_integrity.py
 !backend/tests/test_metric_provenance.py
 !backend/tests/test_layer_boundaries.py
+!backend/tests/test_weather_sync_service.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
