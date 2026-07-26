@@ -116,6 +116,9 @@ test_*.py
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
 !docs/DATABASE_MIGRATIONS.md
+!docs/CI.md
+!backend/requirements.txt
+!backend/requirements-dev.txt
 !README.md
 !START_HERE.md
 !REPO_NOTES.md

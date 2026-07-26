@@ -1,0 +1,5 @@
+# Utviklings- og CI-avhengigheter (installeres i tillegg til requirements.txt)
+-r requirements.txt
+ruff>=0.9,<1
+mypy>=1.14,<2
+types-requests>=2.32,<3

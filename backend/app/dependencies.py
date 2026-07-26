@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import Request, HTTPException, Depends
 from sqlalchemy.orm import Session
 from .services.garmin_client import GarminClient
@@ -7,6 +11,9 @@ import os
 from pathlib import Path
 import logging
 from .database.session import SessionLocal
+
+if TYPE_CHECKING:
+    from .services.analysis_service import AnalysisService
 
 # Dependency for å hente en database sesjon
 def get_db():
@@ -33,7 +40,7 @@ async def get_data_storage(request: Request) -> DataStorage:
         raise HTTPException(status_code=500, detail="Lagringstjenesten er ikke tilgjengelig.")
     return request.app.state.data_storage 
 
-def get_analysis_service(storage: DataStorage = Depends(get_data_storage)) -> "AnalysisService":
+def get_analysis_service(storage: DataStorage = Depends(get_data_storage)) -> AnalysisService:
     """Dependency for å hente en instans av AnalysisService."""
     from .services.analysis_service import AnalysisService
     return AnalysisService(storage) 

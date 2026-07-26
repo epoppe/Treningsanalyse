@@ -12,6 +12,7 @@ Treningsanalyse is a Garmin training-analysis app: a FastAPI backend (`backend/`
 ### Tests / lint / build
 - Backend tests: `npm test` (Python `unittest`). Note: ~6 advanced performance-metric tests (`test_performance_metrics`, parts of `test_analysis_atomicity`/`test_sync_metrics`/`test_coaching_analysis`) fail on a clean checkout independent of dependency versions — these are pre-existing app-logic failures, not an environment problem.
 - Backend guardrails (the subset the project treats as critical): `npm run test:guardrails`, or the fuller smoke `npm run preflight` (`backend/scripts/preflight.sh`).
+- CI suite (GitHub Actions): `npm run ci:backend` / `npm run ci:frontend` — se `docs/CI.md` og `.github/workflows/ci.yml`.
 - Frontend lint: `npm run lint`. Frontend build: `npm run build`.
 
 ### Non-obvious gotchas

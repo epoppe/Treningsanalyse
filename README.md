@@ -70,11 +70,21 @@ Health check med schema-versjon: `GET /health`
 
 Se `docs/DATABASE_MIGRATIONS.md` for detaljer.
 
+## 🔁 CI
+
+GitHub Actions (`.github/workflows/ci.yml`) kjører på PR/push til `main`:
+
+- **Backend:** Ruff, MyPy, Alembic-migrasjonstest, pytest, API-smoke
+- **Frontend:** `npm ci`, ESLint, TypeScript, `next build`
+
+Lokalt: `npm run ci:backend` / `npm run ci:frontend`. Se `docs/CI.md`.
+
 ## 📚 Dokumentasjon
 
 - **START_HERE.md** - Start her! Komplett guide og trygg oppstart
 - **REPO_NOTES.md** - Struktur og lavrisiko vedlikeholdsnotater
 - **docs/DATABASE_MIGRATIONS.md** - Alembic-migrasjoner
+- **docs/CI.md** - GitHub Actions CI
 - **DEVELOPMENT_NOTES.md** - Utviklernotater om frontend-/Node-struktur
 - **AUTO_CALCULATION_SYSTEM.md** - Automatisk beregningssystem
 - **IMPLEMENTATION_SUMMARY.md** - Oversikt over optimaliseringer

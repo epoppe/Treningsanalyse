@@ -19,6 +19,7 @@ from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from ..database.models.health_data_missing import HealthDataMissing
 from ..services.health_data_missing_helpers import clear_health_data_missing
+from ..services.sleep_data_mapping import apply_sleep_data_to_row
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
