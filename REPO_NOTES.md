@@ -47,27 +47,26 @@ Det viktigste forbedringsbehovet ser ut til å være repo-organisering, ikke nø
 Schema-migrasjoner håndteres nå av Alembic (`backend/alembic/`, se `docs/DATABASE_MIGRATIONS.md`).
 Øvrige toppnivå-skript bør sannsynligvis samles og kategoriseres senere.
 
-### 3. Frontend har tegn til historisk duplisering
-Det finnes:
-- `frontend/package.json`
-- `frontend/frontend/package.json`
-
-Og også både:
-- `frontend/next.config.js`
-- `frontend/next.config.ts`
-
-Dette bør undersøkes senere før opprydding, men er ikke rørt her.
+### 3. Frontend-duplikater (status juli 2026)
+Tidligere fantes tegn på `frontend/frontend/` og dobbel `next.config`.
+Per nå: kun `frontend/package.json` + `frontend/next.config.js`.
+`npm run lint` og `npm run build` er grønne.
 
 ### 4. Dokumentasjon må holdes konservativ
 Det er tryggere å beskrive observert struktur enn å hevde at gamle dokumentfiler eller hjelpefiler fortsatt er aktive, med mindre det er verifisert.
 
 ## Trygg anbefaling for senere arbeid
 
-Når tjenesten kan røres tryggere, er en god neste tekniske jobb:
-1. kartlegge hvilke toppnivå-skript i `backend/` som fortsatt brukes
-2. gruppere dem i `scripts/`-undermapper
-3. rydde frontend-duplikater kontrollert
-4. innføre noen få smoke tests for de viktigste flytene
+### Scripts
+Kanoniske skript er dokumentert i `backend/scripts/README.md`.
+Toppnivå-`check_*` / `debug_*` / `migrate_*` er legacy (ikke mass-flyttet).
+
+Robusthetsstatus: `docs/ROBUSTNESS_STATUS.md`.
+
+Når tjenesten kan røres tryggere videre:
+1. flytt verifiserte legacy-skript til `scripts/legacy/<kategori>/` i egne PR-er
+2. utvid smoke/guardrail-tester der det mangler
+3. vurder nettverksauth foran API hvis eksponert utenfor localhost
 
 ## Viktig
 
