@@ -128,6 +128,49 @@ def health_check():
     }
 
 
+@app.get("/health/live")
+def health_live():
+    """Liveness: prosessen svarer."""
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    """Readiness: DB + schema på head."""
+    from sqlalchemy import text
+
+    checks: dict = {}
+    try:
+        with db_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    schema = get_schema_version(db_engine)
+    checks["schema"] = "ok" if schema.get("schema_at_head") else "degraded"
+    checks["schema_version"] = schema.get("schema_version")
+
+    data_dir_ok = False
+    try:
+        from pathlib import Path
+        data_dir_ok = Path(settings.DATA_DIR).exists()
+    except Exception:
+        data_dir_ok = False
+    checks["data_dir"] = "ok" if data_dir_ok else "missing"
+
+    ready = checks["database"] == "ok" and checks["schema"] == "ok" and checks["data_dir"] == "ok"
+    return {"status": "ok" if ready else "not_ready", "checks": checks}
+
+
+@app.get("/health/data")
+def health_data(db: Session = Depends(get_db)):
+    """Dataintegritet: manglende datoer, pace, distanse, HR, VO2, duplikater."""
+    from .services.data_integrity_service import build_data_integrity_report
+
+    return build_data_integrity_report(db)
+
+
 @app.get("/api/debug/db-info")
 def debug_db_info(db: Session = Depends(get_db)):
     """Debug: vis hvilken database som brukes og antall aktiviteter."""
