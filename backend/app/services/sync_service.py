@@ -8,7 +8,7 @@ from .garmin_client import GarminClient
 from .analysis_service import AnalysisService
 from ..storage import DataStorage
 from ..config import settings
-from ..database.models.activity import Activity, ActivityType, GarminPerformanceMetric
+from ..database.models.activity import Activity, GarminPerformanceMetric
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from .sync_modules.fit_sync_service import FitSyncService
@@ -185,7 +185,6 @@ class SyncService:
 
         # Body Battery inkrementell synk via database
         try:
-            from .body_battery_service import BodyBatteryService
             bb_service = BodyBatteryService(self.garmin_client)
             # Finn startdato for BB (inkrementell)
             bb_state = self.db.query(SyncState).filter_by(key="body_battery").first()
