@@ -113,6 +113,7 @@ test_*.py
 !backend/tests/test_mcp_perf_cache.py
 !backend/tests/test_alembic_migrations.py
 !backend/tests/test_sync_run_and_lock.py
+!backend/tests/test_activity_upsert.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
