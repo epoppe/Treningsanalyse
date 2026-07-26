@@ -3,7 +3,7 @@ Cache Manager for Treningsanalyse
 Provides hybrid caching: Redis (persistent) + in-memory (fast fallback)
 """
 from functools import lru_cache
-from typing import Optional, Dict, Any
+from typing import Dict, Any, Iterable, Optional
 import hashlib
 import json
 import logging
@@ -138,6 +138,44 @@ class CacheManager:
         age = time.time() - cached['timestamp']
         return age < cached['ttl']
     
+    def invalidate_activity(
+        self,
+        activity_id: str,
+        *,
+        cache_types: Optional[Iterable[str]] = None,
+    ) -> Dict[str, bool]:
+        """Invalider cache for én aktivitet (minne + Redis).
+
+        cache_types: 'tss', 'power', eller None = begge aktivitets-cacher.
+        """
+        types = set(cache_types) if cache_types is not None else {"tss", "power"}
+        result = {"tss": False, "power": False}
+
+        if "tss" in types:
+            if activity_id in self._tss_cache:
+                del self._tss_cache[activity_id]
+                result["tss"] = True
+            if self.redis and self.redis.is_available():
+                try:
+                    self.redis.delete(f"tss:{activity_id}")
+                    result["tss"] = True
+                except Exception as exc:
+                    logger.debug("Redis TSS-invalidation feilet for %s: %s", activity_id, exc)
+
+        if "power" in types:
+            if activity_id in self._power_cache:
+                del self._power_cache[activity_id]
+                result["power"] = True
+            if self.redis and self.redis.is_available():
+                try:
+                    self.redis.delete(f"power:{activity_id}")
+                    result["power"] = True
+                except Exception as exc:
+                    logger.debug("Redis power-invalidation feilet for %s: %s", activity_id, exc)
+
+        logger.debug("Invaliderte cache for aktivitet %s: %s", activity_id, result)
+        return result
+
     def clear_cache(self, cache_type: Optional[str] = None):
         """Tøm cache. Hvis cache_type er spesifisert, tøm kun den typen."""
         if cache_type == 'tss':

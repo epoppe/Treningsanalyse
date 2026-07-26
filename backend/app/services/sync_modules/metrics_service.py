@@ -317,6 +317,33 @@ class SyncMetricsService:
             try:
                 self.sync_service.db.commit()
                 logger.info(f"💾 Lagret alle beregnede verdier for aktivitet {activity_id}")
+                try:
+                    from ...cache.cache_manager import get_cache_manager
+                    from ...metrics.dependency_graph import (
+                        METRIC_TO_CACHE_TYPE,
+                        cache_types_for_metrics,
+                    )
+                    from ..metric_provenance_service import RESULT_FLAG_TO_METRIC
+
+                    recomputed = {
+                        RESULT_FLAG_TO_METRIC[flag]
+                        for flag, ok in results.items()
+                        if ok and flag in RESULT_FLAG_TO_METRIC
+                    }
+                    cache_types = cache_types_for_metrics(recomputed) or set(
+                        METRIC_TO_CACHE_TYPE.values()
+                    )
+                    get_cache_manager().invalidate_activity(
+                        str(activity_id),
+                        cache_types=cache_types,
+                    )
+                    results["cache_invalidated"] = sorted(cache_types)
+                except Exception as cache_exc:
+                    logger.debug(
+                        "Cache-invalidation etter metrics for %s feilet: %s",
+                        activity_id,
+                        cache_exc,
+                    )
             except Exception as exc:
                 self.sync_service.db.rollback()
                 logger.error(f"Feil ved lagring av beregnede verdier for aktivitet {activity_id}: {exc}")
