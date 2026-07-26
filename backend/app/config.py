@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from dotenv import load_dotenv
 from pydantic import field_validator
@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     TELEGRAM_ENABLED: bool = True
     TELEGRAM_REAUTH_COOLDOWN_SECONDS: int = 1800
 
+    # Sikkerhet / CORS
+    # Komma-separert liste, f.eks. "http://localhost:3000,https://app.example.com"
+    CORS_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:3001,http://localhost:3002,"
+        "http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002"
+    )
+    # Hopp over Garmin-innlogging ved app-oppstart (dev/test)
+    SKIP_GARMIN_INIT: bool = False
+
     @field_validator("GARMIN_TOKEN_FILE", "REDIS_PASSWORD", mode="before")
     @classmethod
     def empty_string_to_none(cls, value: object) -> object:
@@ -96,6 +105,24 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: object) -> None:
         Path(self.TOKEN_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.DATA_DIR).mkdir(parents=True, exist_ok=True)
+
+    def cors_origin_list(self) -> List[str]:
+        """Parse CORS_ORIGINS til liste uten tomme elementer."""
+        return [part.strip() for part in self.CORS_ORIGINS.split(",") if part.strip()]
+
+    def masked_garmin_email(self) -> str:
+        """Maskert e-post for logger (aldri full adresse)."""
+        email = (self.GARMIN_EMAIL or "").strip()
+        if not email:
+            return "(ikke satt)"
+        if "@" not in email:
+            return email[:2] + "***" if len(email) > 2 else "***"
+        local, _, domain = email.partition("@")
+        if len(local) <= 2:
+            masked_local = "*" * len(local)
+        else:
+            masked_local = local[:2] + "***"
+        return f"{masked_local}@{domain}"
 
 
 @lru_cache

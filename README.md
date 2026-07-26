@@ -173,10 +173,13 @@ Med automatisk beregning og intelligent caching:
 
 ## 🛡️ Sikkerhet
 
-- ✅ Miljøvariabler for credentials
-- ✅ Ingen hardkodede passord
-- ✅ Token-basert autentisering
-- ✅ .env fil i .gitignore
+- ✅ Credentials via `.env` (gitignore’t)
+- ✅ CORS styrt av `CORS_ORIGINS`
+- ✅ Sikkerhetsheaders (`X-Content-Type-Options`, `X-Frame-Options`, CSP, …)
+- ✅ Maskert e-post i logger
+- ✅ Garmin tokens i `TOKEN_DIR` (gitignore’t)
+
+Se [docs/SECURITY.md](docs/SECURITY.md) for detaljer.
 
 ## 📝 Lisens
 
@@ -185,4 +188,4 @@ Personlig prosjekt - Ikke for kommersiell bruk
 ---
 
 **Status:** ✅ Produksjonsklar  
-**Siste oppdatering:** Mai 2026
+**Siste oppdatering:** Juli 2026
