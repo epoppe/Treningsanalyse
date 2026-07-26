@@ -33,6 +33,10 @@ from .activity_metric_backfill import (
     normalize_garmin_average_pace,
 )
 from .body_battery_service import BodyBatteryService
+from .sync_run_service import (
+    advance_activities_sync_state,
+    update_sync_run_checkpoint,
+)
 from ..utils.activity_filters import is_indoor_type_key, is_running_activity
 
 logger = logging.getLogger(__name__)
@@ -381,6 +385,7 @@ class SyncService:
         fit_data_limit: int = 100,
         ignore_sync_state: bool = False,
         fit_download_mode: str = "chunked",
+        sync_run_id: Optional[int] = None,
     ) -> dict:
         """
         Synkroniserer aktiviteter og laster automatisk ned FIT-data, HRV-data og Training Effect for aktiviteter som mangler det.
@@ -394,7 +399,13 @@ class SyncService:
         logger.info(f"Starter utvidet aktivitetssynkronisering med automatisk FIT-data, HRV og Training Effect nedlasting")
         
         # Først, gjør vanlig aktivitetssynkronisering
-        sync_result = await self.sync_activities(start_date, end_date, force_refresh_recent, ignore_sync_state)
+        sync_result = await self.sync_activities(
+            start_date,
+            end_date,
+            force_refresh_recent,
+            ignore_sync_state,
+            sync_run_id=sync_run_id,
+        )
         
         # Så, last ned FIT-data for aktiviteter som mangler det (kun for aktiviteter i det valgte tidsrommet)
         fit_result = {"status": "Ikke kjørt", "success_count": 0, "total_count": 0}
@@ -563,6 +574,7 @@ class SyncService:
         force_refresh_recent: bool = False,
         ignore_sync_state: bool = False,
         skip_fit_download: bool = False,
+        sync_run_id: Optional[int] = None,
     ) -> dict:
         """
         Orkestrerer synkronisering av aktiviteter for en gitt tidsperiode og lagrer dem i databasen.
@@ -632,10 +644,39 @@ class SyncService:
             skipped_count = 0  # unchanged — bakoverkompatibelt alias
             unchanged_count = 0
             pending_since_commit = 0
+            batch_latest_date = None
+            batch_last_activity_id: Optional[str] = None
             inserted_activity_ids: List[str] = []
             updated_activity_ids: List[str] = []
             buffered_parquet_records: List[Dict[str, Any]] = []
             refreshed_parquet_activity_ids: List[int] = []
+
+            def _persist_checkpoint() -> None:
+                nonlocal batch_latest_date, batch_last_activity_id
+                if batch_latest_date is None:
+                    return
+                try:
+                    advance_activities_sync_state(self.db, batch_latest_date)
+                    if sync_run_id is not None:
+                        update_sync_run_checkpoint(
+                            self.db,
+                            sync_run_id,
+                            {
+                                "last_activity_id": batch_last_activity_id,
+                                "last_start_date": batch_latest_date.isoformat(),
+                                "processed": added_count + updated_count + unchanged_count,
+                            },
+                            inserted=added_count,
+                            updated=updated_count,
+                            skipped=unchanged_count,
+                        )
+                except Exception as checkpoint_exc:
+                    logger.warning(
+                        "Kunne ikke lagre aktivitetssynk-checkpoint: %s",
+                        checkpoint_exc,
+                    )
+                batch_latest_date = None
+                batch_last_activity_id = None
 
             for act_data in activities_to_save:
                 activity_id = str(act_data.get('activityId'))
@@ -836,12 +877,18 @@ class SyncService:
                         unchanged_count += 1
                         skipped_count += 1
 
+                act_date = activity_start_time.date()
+                if batch_latest_date is None or act_date > batch_latest_date:
+                    batch_latest_date = act_date
+                batch_last_activity_id = activity_id
+
                 pending_since_commit += 1
                 if pending_since_commit >= ACTIVITY_SYNC_COMMIT_BATCH_SIZE:
                     self._commit_activity_batch(
                         buffered_parquet_records=buffered_parquet_records,
                         refreshed_parquet_activity_ids=refreshed_parquet_activity_ids,
                     )
+                    _persist_checkpoint()
                     pending_since_commit = 0
 
             if pending_since_commit > 0 or buffered_parquet_records:
@@ -849,6 +896,7 @@ class SyncService:
                     buffered_parquet_records=buffered_parquet_records,
                     refreshed_parquet_activity_ids=refreshed_parquet_activity_ids,
                 )
+                _persist_checkpoint()
 
             # Fyll inn lactate threshold på eldre løpeaktiviteter som mangler verdi.
             # Eksisterende historiske verdier skal bevares.
@@ -857,10 +905,9 @@ class SyncService:
             except Exception as e:
                 logger.warning(f"Feil ved oppdatering av lactate threshold for løpeaktiviteter: {e}")
 
-            # Oppdater SyncState for aktiviteter
+            # Endelig SyncState (dekker også tilfeller uten inserts/updates i siste batch)
             try:
                 if added_count > 0 or updated_count > 0:
-                    # Sett siste synketdato til sluttdatoen vi nettopp ba om, eller siste aktivitet sin dato
                     last_date = end_date.date()
                     try:
                         latest = max(
@@ -871,13 +918,29 @@ class SyncService:
                         last_date = latest
                     except Exception:
                         pass
-                    act_state = self.db.query(SyncState).filter_by(key="activities").first()
-                    if not act_state:
-                        act_state = SyncState(key="activities")
-                        self.db.add(act_state)
-                    act_state.last_synced_date = last_date
-                    act_state.last_synced_at = datetime.now(timezone.utc)
-                    self.db.commit()
+                    advance_activities_sync_state(self.db, last_date)
+                    if sync_run_id is not None:
+                        update_sync_run_checkpoint(
+                            self.db,
+                            sync_run_id,
+                            {
+                                "last_activity_id": (
+                                    inserted_activity_ids[-1]
+                                    if inserted_activity_ids
+                                    else (
+                                        updated_activity_ids[-1]
+                                        if updated_activity_ids
+                                        else None
+                                    )
+                                ),
+                                "last_start_date": last_date.isoformat(),
+                                "processed": added_count + updated_count + unchanged_count,
+                                "complete": True,
+                            },
+                            inserted=added_count,
+                            updated=updated_count,
+                            skipped=unchanged_count,
+                        )
             except Exception as e:
                 logger.warning(f"Kunne ikke oppdatere SyncState for activities: {e}")
             

@@ -1,6 +1,6 @@
 """SyncRun — historikk og statistikk for synkroniseringskjøringer."""
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -22,6 +22,8 @@ class SyncRun(Base):
     skipped = Column(Integer, nullable=False, default=0)
     failed = Column(Integer, nullable=False, default=0)
     last_error = Column(Text, nullable=True)
+    # Restartbar synk: siste sikre posisjon (f.eks. last_activity_id / last_start_time)
+    checkpoint = Column(JSON, nullable=True)
     code_version = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
