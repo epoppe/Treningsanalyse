@@ -195,7 +195,7 @@ class PersonalRecord(Base):
     unit = Column(String(20))  # 'meter', 'sekunder', 'm/s', etc.
     
     # Aktivitetsreferanse
-    activity_id = Column(String(255), ForeignKey('activities.activity_id'))
+    activity_id = Column(String(255), ForeignKey('activities.activity_id'), index=True)
     achieved_date = Column(Date)
     
     # Metadata
