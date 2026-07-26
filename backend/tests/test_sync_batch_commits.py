@@ -16,6 +16,9 @@ class ActivitySyncBatchCommitTests(unittest.TestCase):
         service = SyncService.__new__(SyncService)
         service.db = MagicMock()
         service.storage = MagicMock()
+        from app.services.sync_modules.activity_sync_service import ActivitySyncService
+
+        service.activity_sync = ActivitySyncService(service)
         buffered = [{"activity_id": 1}, {"activity_id": 2}]
         refreshed = [1]
 
@@ -36,6 +39,9 @@ class ActivitySyncBatchCommitTests(unittest.TestCase):
         service = SyncService.__new__(SyncService)
         service.db = MagicMock()
         service.storage = MagicMock()
+        from app.services.sync_modules.activity_sync_service import ActivitySyncService
+
+        service.activity_sync = ActivitySyncService(service)
 
         service._commit_activity_batch()
 
