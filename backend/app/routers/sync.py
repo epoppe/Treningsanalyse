@@ -379,6 +379,7 @@ def list_sync_runs(
             "skipped": row.skipped,
             "failed": row.failed,
             "last_error": row.last_error,
+            "checkpoint": row.checkpoint,
             "code_version": row.code_version,
         }
         for row in rows
