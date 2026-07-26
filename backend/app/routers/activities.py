@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session, joinedload
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
+from ..config import settings
 from ..dependencies import get_db
 from ..database.models.activity import Activity
 from ..services.garmin_client import GarminClient
