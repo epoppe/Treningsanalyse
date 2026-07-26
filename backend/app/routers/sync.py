@@ -51,12 +51,15 @@ def _enqueue_sync_job(
     *,
     shared_job_types: Optional[frozenset[str]] = None,
 ) -> tuple[str, Dict[str, Any], bool]:
-    """Atomisk deduplisering ved jobbstart. Returnerer (job_id, job, reused)."""
-    return acquire_job_slot(
-        job_type,
-        queue_message,
-        shared_job_types=shared_job_types,
-    )
+    """Atomisk deduplisering + global sync-lås. Returnerer (job_id, job, reused)."""
+    try:
+        return acquire_job_slot(
+            job_type,
+            queue_message,
+            shared_job_types=shared_job_types,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _mark_job_processing(job_id: str, message: Optional[str] = None, phase: Optional[int] = None, total_phases: Optional[int] = None):
@@ -330,6 +333,56 @@ async def get_sync_status(job_id: str):
         "end_time": _dt_to_iso(job.get("end_time")),
         "result": job.get("result"),
         "error": job.get("error"),
+        "sync_run_id": job.get("sync_run_id"),
+    }
+
+
+@router.get("/runs")
+def list_sync_runs(
+    limit: int = Query(50, ge=1, le=200),
+    job_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """List siste SyncRun-rader (audit/statistikk)."""
+    from ..database.models.sync_run import SyncRun
+
+    query = db.query(SyncRun).order_by(SyncRun.id.desc())
+    if job_type:
+        query = query.filter(SyncRun.job_type == job_type)
+    rows = query.limit(limit).all()
+    return [
+        {
+            "id": row.id,
+            "job_id": row.job_id,
+            "job_type": row.job_type,
+            "status": row.status,
+            "started_at": _dt_to_iso(row.started_at),
+            "completed_at": _dt_to_iso(row.completed_at),
+            "inserted": row.inserted,
+            "updated": row.updated,
+            "skipped": row.skipped,
+            "failed": row.failed,
+            "last_error": row.last_error,
+            "code_version": row.code_version,
+        }
+        for row in rows
+    ]
+
+
+@router.get("/lock")
+def get_sync_lock_status(db: Session = Depends(get_db)):
+    """Vis status for global synk-lås."""
+    from ..services.sync_lock_service import GLOBAL_SYNC_LOCK, get_lock, is_locked
+
+    row = get_lock(db, GLOBAL_SYNC_LOCK)
+    if row is None:
+        return {"lock_name": GLOBAL_SYNC_LOCK, "locked": False, "owner": None}
+    return {
+        "lock_name": row.lock_name,
+        "locked": is_locked(db, GLOBAL_SYNC_LOCK),
+        "owner": row.owner,
+        "heartbeat": _dt_to_iso(row.heartbeat),
+        "expires": _dt_to_iso(row.expires),
     }
 
 @router.post("/sync/database", status_code=200)

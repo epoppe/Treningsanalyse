@@ -15,6 +15,8 @@ from .health_data_missing import HealthDataMissing
 from .summaries import DailySummary, WeeklySummary, MonthlySummary, YearlySummary, PersonalRecord
 from .sync_state import SyncState
 from .sync_job import SyncJob
+from .sync_run import SyncRun
+from .sync_lock import SyncLock
 from .lactate_threshold_history import LactateThresholdHistory
 
 __all__ = [
@@ -41,5 +43,7 @@ __all__ = [
     'PersonalRecord',
     'SyncState',
     'SyncJob',
+    'SyncRun',
+    'SyncLock',
     'LactateThresholdHistory'
 ]
