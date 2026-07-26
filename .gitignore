@@ -119,6 +119,7 @@ test_*.py
 !backend/tests/test_layer_boundaries.py
 !backend/tests/test_weather_sync_service.py
 !backend/tests/test_no_asyncio_run_in_domain.py
+!backend/tests/test_sync_batch_commits.py
 !ANALYTICS_METRICS.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md

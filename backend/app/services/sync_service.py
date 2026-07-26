@@ -37,6 +37,9 @@ from ..utils.activity_filters import is_indoor_type_key, is_running_activity
 
 logger = logging.getLogger(__name__)
 
+# Commit DB (og evt. bufret parquet) jevnlig under lange aktivitetssynker.
+ACTIVITY_SYNC_COMMIT_BATCH_SIZE = 100
+
 
 def parse_activity_start_from_json(act_data: Dict[str, Any]) -> datetime:
     """
@@ -125,6 +128,36 @@ class SyncService:
         """Parser FIT-data fra bytes til strukturert JSON."""
         return self.fit_sync.parse_fit_data(fit_data)
 
+    def _commit_activity_batch(
+        self,
+        *,
+        buffered_parquet_records: Optional[List[Dict[str, Any]]] = None,
+        refreshed_parquet_activity_ids: Optional[List[int]] = None,
+    ) -> None:
+        """Commit én batch: evt. parquet først, deretter DB-transaksjon."""
+        if buffered_parquet_records:
+            parquet_batch = list(buffered_parquet_records)
+            replace_ids = (
+                list(refreshed_parquet_activity_ids)
+                if refreshed_parquet_activity_ids
+                else None
+            )
+            try:
+                logger.info(
+                    "Lagrer %s bufrede FIT-records til parquet (batch-commit)...",
+                    len(parquet_batch),
+                )
+                self.storage.save_activity_details(
+                    parquet_batch,
+                    replace_activity_ids=replace_ids,
+                )
+            except Exception as e:
+                logger.error("Feil ved batch-lagring av FIT-data til parquet: %s", e)
+            buffered_parquet_records.clear()
+            if refreshed_parquet_activity_ids is not None:
+                refreshed_parquet_activity_ids.clear()
+        self.db.commit()
+
     async def sync_json_to_db(self) -> dict:
         """
         Leser alle aktiviteter fra JSON-filer og synkroniserer dem til databasen.
@@ -159,6 +192,7 @@ class SyncService:
         added_count = 0
         updated_count = 0
         skipped_count = 0  # unchanged
+        pending_since_commit = 0
         
         # Ordbok for å cache ActivityType-objekter
         activity_type_cache = {}
@@ -258,14 +292,24 @@ class SyncService:
                         updated_count += 1
                     else:
                         skipped_count += 1
+                    pending_since_commit += 1
+                    if pending_since_commit >= ACTIVITY_SYNC_COMMIT_BATCH_SIZE:
+                        self._commit_activity_batch()
+                        pending_since_commit = 0
                     continue
 
             new_activity = Activity(activity_id=activity_id, **field_payload)
             self.db.add(new_activity)
             added_count += 1
             existing_ids.add(activity_id)
-            
-        self.db.commit()
+
+            pending_since_commit += 1
+            if pending_since_commit >= ACTIVITY_SYNC_COMMIT_BATCH_SIZE:
+                self._commit_activity_batch()
+                pending_since_commit = 0
+
+        if pending_since_commit > 0:
+            self._commit_activity_batch()
         logger.info(
             "JSON-synk fullført. inserted=%s updated=%s unchanged=%s",
             added_count,
@@ -587,6 +631,7 @@ class SyncService:
             updated_count = 0
             skipped_count = 0  # unchanged — bakoverkompatibelt alias
             unchanged_count = 0
+            pending_since_commit = 0
             inserted_activity_ids: List[str] = []
             updated_activity_ids: List[str] = []
             buffered_parquet_records: List[Dict[str, Any]] = []
@@ -791,19 +836,19 @@ class SyncService:
                         unchanged_count += 1
                         skipped_count += 1
 
-            if buffered_parquet_records:
-                try:
-                    logger.info(
-                        f"Lagrer {len(buffered_parquet_records)} bufrede FIT-records til parquet i én batch..."
+                pending_since_commit += 1
+                if pending_since_commit >= ACTIVITY_SYNC_COMMIT_BATCH_SIZE:
+                    self._commit_activity_batch(
+                        buffered_parquet_records=buffered_parquet_records,
+                        refreshed_parquet_activity_ids=refreshed_parquet_activity_ids,
                     )
-                    self.storage.save_activity_details(
-                        buffered_parquet_records,
-                        replace_activity_ids=refreshed_parquet_activity_ids or None,
-                    )
-                except Exception as e:
-                    logger.error(f"Feil ved batch-lagring av FIT-data til parquet: {e}")
+                    pending_since_commit = 0
 
-            self.db.commit()
+            if pending_since_commit > 0 or buffered_parquet_records:
+                self._commit_activity_batch(
+                    buffered_parquet_records=buffered_parquet_records,
+                    refreshed_parquet_activity_ids=refreshed_parquet_activity_ids,
+                )
 
             # Fyll inn lactate threshold på eldre løpeaktiviteter som mangler verdi.
             # Eksisterende historiske verdier skal bevares.
