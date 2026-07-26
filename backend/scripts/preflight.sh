@@ -56,6 +56,7 @@ export PYTHONPATH="$BACKEND_DIR"
   tests.test_paths_and_fit \
   tests.test_force_refresh_parquet \
   tests.test_summary_activity_type_filter \
+  tests.test_alembic_migrations \
   tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_sleep_sync_retries_previously_missing_date_on_force_refresh \
   tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_hrv_sync_retries_previously_missing_date_on_force_refresh \
   -v
@@ -78,11 +79,23 @@ for _ in $(seq 1 45); do
   sleep 1
 done
 
-echo "Smoke: root og openapi..."
+echo "Smoke: root, openapi og health/schema..."
 ROOT_HTTP="$(curl -s -o /tmp/preflight_root.json -w "%{http_code}" "$BASE_URL/")"
 OPENAPI_HTTP="$(curl -s -o /tmp/preflight_openapi.json -w "%{http_code}" "$BASE_URL/openapi.json")"
-if [[ "$ROOT_HTTP" != "200" || "$OPENAPI_HTTP" != "200" ]]; then
-  echo "NO-GO: Root/OpenAPI feilet (root=$ROOT_HTTP, openapi=$OPENAPI_HTTP)"
+HEALTH_HTTP="$(curl -s -o /tmp/preflight_health.json -w "%{http_code}" "$BASE_URL/health")"
+if [[ "$ROOT_HTTP" != "200" || "$OPENAPI_HTTP" != "200" || "$HEALTH_HTTP" != "200" ]]; then
+  echo "NO-GO: Root/OpenAPI/Health feilet (root=$ROOT_HTTP, openapi=$OPENAPI_HTTP, health=$HEALTH_HTTP)"
+  exit 1
+fi
+SCHEMA_OK="$("$PY" - <<'PY'
+import json,sys
+data=json.loads(sys.stdin.read() or "{}")
+print("true" if data.get("schema_at_head") and data.get("schema_version") else "false")
+PY
+<<<"$(cat /tmp/preflight_health.json)")"
+if [[ "$SCHEMA_OK" != "true" ]]; then
+  echo "NO-GO: /health mangler gyldig schema_version"
+  cat /tmp/preflight_health.json
   exit 1
 fi
 

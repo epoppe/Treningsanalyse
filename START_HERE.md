@@ -38,8 +38,12 @@ copy env.example .env
 # aktiver virtuelt miljø dersom det allerede finnes
 .\.venv\Scripts\Activate.ps1
 
+# Schema opprettes/oppgraderes automatisk ved oppstart via Alembic.
+# Manuelt: alembic upgrade head  (eller: npm run db:upgrade fra repo-rot)
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+Database-migrasjoner: se `docs/DATABASE_MIGRATIONS.md`.
 
 ### Frontend
 ```bash
