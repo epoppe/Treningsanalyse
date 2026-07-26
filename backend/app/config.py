@@ -1,103 +1,111 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+"""Applikasjonsinnstillinger via pydantic-settings.
+
+Miljøvariabler og `.env` leses av BaseSettings — ikke via manuell os.getenv
+på feltene (unngår dobbelt lasting og type-feil).
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
 from pathlib import Path
-import os
-from dotenv import load_dotenv
 from typing import Optional
 
-# Få absolutt sti til backend-mappen
+from dotenv import load_dotenv
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Absolutt sti til backend-mappen
 BACKEND_DIR = Path(__file__).parent.parent.absolute()
 ENV_FILE = BACKEND_DIR / ".env"
 
-# Last miljøvariabler fra riktig sti
+# Last .env tidlig slik at annen kode som leser os.environ også ser verdiene.
 load_dotenv(dotenv_path=ENV_FILE)
-# print(f"Laster miljøvariabler fra: {ENV_FILE}") # Kan kommenteres ut for produksjon
 
-# Standard data-mappe (relativt til backend-mappen hvis ikke absolutt sti er gitt i .env)
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
-# Bruk absolutt sti med forward slashes – fungerer med SQLAlchemy/SQLite på Windows
 _db_path = (DEFAULT_DATA_DIR.absolute() / "treningsanalyse.db").resolve()
 DEFAULT_DATABASE_URL = "sqlite:///" + str(_db_path).replace("\\", "/")
 
-# Sett opp token-mappe
 TOKEN_DIR = BACKEND_DIR / "tokens"
-token_dir_str = str(TOKEN_DIR.absolute())
-os.makedirs(token_dir_str, exist_ok=True)
-# print(f"Token-mappe opprettet: {token_dir_str}") # Kan kommenteres ut for produksjon
+TOKEN_DIR.mkdir(parents=True, exist_ok=True)
+DEFAULT_TOKEN_DIR = str(TOKEN_DIR.absolute())
+
+# Standard LTHR-pace 5:22 min/km → m/s
+_DEFAULT_LTHR_SPEED = 1000 / (5 * 60 + 22)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
+        env_file_encoding="utf-8",
         case_sensitive=True,
+        extra="ignore",
     )
 
-    # Database URL
-    DATABASE_URL: str = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
-    
-    # Garmin Connect API konfigurasjon
-    # VIKTIG: Sett disse som miljøvariabler i .env-filen!
-    GARMIN_EMAIL: str = os.getenv("GARMIN_EMAIL", "")
-    GARMIN_PASSWORD: str = os.getenv("GARMIN_PASSWORD", "")
-    TOKEN_DIR: str = os.getenv("TOKEN_DIR", token_dir_str)
-    # Valgfri eksplisitt sti til garminconnect sin token-cache (garmin_tokens.json).
-    # Tom => <TOKEN_DIR>/garmin_tokens.json.
-    GARMIN_TOKEN_FILE: Optional[str] = os.getenv("GARMIN_TOKEN_FILE") or None
-    # Kinesisk Garmin-konto (garmin.cn) hvis satt.
-    GARMIN_IS_CN: bool = os.getenv("GARMIN_IS_CN", "false").lower() in ("1", "true", "yes")
-    
-    # Lactate threshold speed konfigurasjon (i m/s)
-    # Dette kan settes manuelt hvis ikke tilgjengelig via Garmin API
-    LACTATE_THRESHOLD_SPEED: Optional[float] = 1000 / (5 * 60 + 22)  # m/s, tilsvarer 5:22 min/km pace
-    
-    # Data Storage konfigurasjon
-    DATA_DIR: str = os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR.absolute()))
-    
+    # Database
+    DATABASE_URL: str = DEFAULT_DATABASE_URL
+
+    # Garmin Connect
+    GARMIN_EMAIL: str = ""
+    GARMIN_PASSWORD: str = ""
+    TOKEN_DIR: str = DEFAULT_TOKEN_DIR
+    # Tom => <TOKEN_DIR>/garmin_tokens.json
+    GARMIN_TOKEN_FILE: Optional[str] = None
+    GARMIN_IS_CN: bool = False
+
+    # Lactate threshold (m/s) — manuell fallback hvis Garmin mangler verdi
+    LACTATE_THRESHOLD_SPEED: Optional[float] = _DEFAULT_LTHR_SPEED
+
+    # Data storage
+    DATA_DIR: str = str(DEFAULT_DATA_DIR.absolute())
+
     # Logging
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_LEVEL: str = "INFO"
 
-    # Redis (valgfritt — raskere cache for TSS/power/sammendrag)
-    REDIS_ENABLED: bool = os.getenv("REDIS_ENABLED", "true").lower() in ("1", "true", "yes")
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD") or None
+    # Redis (valgfritt)
+    REDIS_ENABLED: bool = True
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: Optional[str] = None
 
-    # MET Weather API
-    MET_API_USER_AGENT: str = os.getenv(
-        "MET_API_USER_AGENT",
-        "Treningsanalyse/1.0 (tim-agent)",
-    )
-    # Frost API (historisk vær) — https://frost.met.no
-    FROST_CLIENT_ID: str = os.getenv("FROST_CLIENT_ID", "")
-    FROST_CLIENT_SECRET: str = os.getenv("FROST_CLIENT_SECRET", "")
+    # MET / Frost vær
+    MET_API_USER_AGENT: str = "Treningsanalyse/1.0 (tim-agent)"
+    FROST_CLIENT_ID: str = ""
+    FROST_CLIENT_SECRET: str = ""
 
-    # Telegram-varsling (brukes til å varsle når Garmin krever re-innlogging/MFA)
-    TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
-    TELEGRAM_ENABLED: bool = os.getenv("TELEGRAM_ENABLED", "true").lower() in ("1", "true", "yes")
-    TELEGRAM_REAUTH_COOLDOWN_SECONDS: int = int(os.getenv("TELEGRAM_REAUTH_COOLDOWN_SECONDS", "1800"))
+    # Telegram re-auth varsling
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHAT_ID: str = ""
+    TELEGRAM_ENABLED: bool = True
+    TELEGRAM_REAUTH_COOLDOWN_SECONDS: int = 1800
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Følgende print-setninger er nyttige for debugging, men kan fjernes/reduseres i prod.
-        # print(f"Innstillinger initialisert med:")
-        # print(f"- E-post: {self.GARMIN_EMAIL}")
-        # print(f"- Token-mappe: {self.TOKEN_DIR}")
-        # print(f"- Min Request Interval: {self.GARMIN_MIN_REQUEST_INTERVAL}")
-        # print(f"- Max Retries: {self.GARMIN_MAX_RETRIES}")
-        # print(f"- Retry Delay: {self.GARMIN_RETRY_DELAY}")
-        # print(f"- Sync Month Delay: {self.GARMIN_SYNC_MONTH_DELAY}")
-        
-        # Verifiser at token-mappen eksisterer
-        token_path = Path(self.TOKEN_DIR)
-        token_path.mkdir(parents=True, exist_ok=True)
-        # print(f"Token-mappe verifisert: {self.TOKEN_DIR}")
-        # Verifiser at data-mappen eksisterer
+    @field_validator("GARMIN_TOKEN_FILE", "REDIS_PASSWORD", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+    @field_validator("FROST_CLIENT_SECRET", "FROST_CLIENT_ID", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value: object) -> object:
+        if value is None:
+            return ""
+        return value
+
+    def model_post_init(self, __context: object) -> None:
+        Path(self.TOKEN_DIR).mkdir(parents=True, exist_ok=True)
         Path(self.DATA_DIR).mkdir(parents=True, exist_ok=True)
-        # print(f"Storage data-mappe verifisert: {self.DATA_DIR}")
 
-settings = Settings()
-# print(f"Innstillinger lastet med token-mappe: {settings.TOKEN_DIR}")
-# print(f"Innstillinger lastet med data-mappe: {settings.DATA_DIR}")
+
+@lru_cache
+def get_settings() -> Settings:
+    """Singleton Settings — trygt å bruke som FastAPI-dependency."""
+    return Settings()
+
+
+# Bakoverkompatibel modul-global
+settings = get_settings()
 
 
 def data_path(*parts: str) -> Path:
