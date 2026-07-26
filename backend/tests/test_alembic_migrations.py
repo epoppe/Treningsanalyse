@@ -109,6 +109,28 @@ class AlembicMigrationTests(unittest.TestCase):
         self.assertEqual(schema["schema_version"], revision)
         self.assertTrue(schema["schema_at_head"])
 
+    def test_query_performance_indexes_exist(self):
+        """Fase 4: FK-/query-indekser for laps, PR, sync og TE-backfill."""
+        url = "sqlite:///:memory:"
+        engine = self._make_engine(url)
+        run_migrations(engine, url)
+        inspector = inspect(engine)
+
+        lap_indexes = {idx["name"] for idx in inspector.get_indexes("activity_laps")}
+        self.assertIn("ix_activity_laps_activity_id", lap_indexes)
+
+        pr_indexes = {idx["name"] for idx in inspector.get_indexes("personal_records")}
+        self.assertIn("ix_personal_records_activity_id", pr_indexes)
+
+        run_indexes = {idx["name"] for idx in inspector.get_indexes("sync_runs")}
+        self.assertIn("idx_sync_runs_status_job_type", run_indexes)
+
+        job_indexes = {idx["name"] for idx in inspector.get_indexes("sync_jobs")}
+        self.assertIn("idx_sync_jobs_status_job_type", job_indexes)
+
+        activity_indexes = {idx["name"] for idx in inspector.get_indexes("activities")}
+        self.assertIn("idx_activities_missing_training_effect", activity_indexes)
+
 
 if __name__ == "__main__":
     unittest.main()

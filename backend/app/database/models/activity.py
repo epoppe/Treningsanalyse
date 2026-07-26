@@ -1,4 +1,17 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON, Boolean, Text, Index, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
 from .base import Base
 
@@ -20,6 +33,14 @@ class Activity(Base):
         Index('idx_tss_null', 'training_stress_score'),  # For å finne aktiviteter som mangler TSS
         Index('idx_vo2max', 'vo2_max'),  # For VO2max queries
         Index('idx_distance_duration', 'distance', 'duration', 'start_time'),  # Composite for statistikk
+        # Delvis indeks for Training Effect-backfill
+        Index(
+            'idx_activities_missing_training_effect',
+            'start_time',
+            sqlite_where=text(
+                '(total_training_effect IS NULL OR total_training_effect <= 0)'
+            ),
+        ),
     )
 
     # Primærnøkkel - bruker Garmin activity ID
@@ -147,7 +168,7 @@ class ActivityLap(Base):
     __tablename__ = 'activity_laps'
     
     id = Column(Integer, primary_key=True, index=True)
-    activity_id = Column(String(255), ForeignKey('activities.activity_id'))
+    activity_id = Column(String(255), ForeignKey('activities.activity_id'), index=True)
     lap_number = Column(Integer)
     
     # Lap-målinger

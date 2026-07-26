@@ -84,3 +84,18 @@ API (additivt, bakoverkompatibelt):
 
 - `GET /api/sync/runs`
 - `GET /api/sync/lock`
+
+## Query-ytelse (indekser)
+
+Migrasjon `d4b2e8c17a01` legger til:
+
+| Indeks | Tabell | Formål |
+|--------|--------|--------|
+| `ix_activity_laps_activity_id` | `activity_laps` | FK-join fra aktivitet |
+| `ix_personal_records_activity_id` | `personal_records` | FK-join fra aktivitet |
+| `idx_sync_runs_status_job_type` | `sync_runs` | uferdige kjøringer / checkpoint |
+| `idx_sync_jobs_status_job_type` | `sync_jobs` | aktive jobber |
+| `idx_activities_missing_training_effect` | `activities` | delvis indeks for TE-backfill |
+
+Delvise indekser (`sqlite_where`) brukes der filteret er «mangler verdi» — de
+holder indeksen liten og treffer vanlige backfill-queries.

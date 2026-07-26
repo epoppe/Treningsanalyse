@@ -1,6 +1,6 @@
 """SyncRun — historikk og statistikk for synkroniseringskjøringer."""
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from .base import Base
@@ -10,6 +10,9 @@ class SyncRun(Base):
     """Sporbar kjøring av en synk-jobb (audit/metrics, parallelt med SyncJob)."""
 
     __tablename__ = "sync_runs"
+    __table_args__ = (
+        Index("idx_sync_runs_status_job_type", "status", "job_type"),
+    )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     job_id = Column(String(36), nullable=True, index=True)  # kobling til SyncJob.job_id
