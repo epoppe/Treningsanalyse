@@ -2,7 +2,6 @@ from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 import logging
-import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
@@ -15,6 +14,7 @@ from .database.migrations import get_schema_version, run_migrations
 from .dependencies import get_db, get_garmin_client, get_data_storage
 from .services.sync_service import SyncService
 from .middleware.cache_headers import CacheHeadersMiddleware
+from .middleware.security_headers import SecurityHeadersMiddleware
 
 # Konfigurer logging 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -28,8 +28,8 @@ async def lifespan(app: FastAPI):
     """Initialiserer applikasjonen ved oppstart."""
     logger.info("Starte applikasjonen... (v2 - med nye normaliseringer)")
     
-    # Logg konfigurasjonsdetaljer
-    logger.info(f"Bruker Garmin e-post: {settings.GARMIN_EMAIL[:4]}...")
+    # Logg konfigurasjonsdetaljer (aldri full e-post/passord)
+    logger.info("Bruker Garmin e-post: %s", settings.masked_garmin_email())
     logger.info(f"Bruker token-mappe: {settings.TOKEN_DIR}")
     logger.info(f"Bruker datalagringsmappe: {settings.DATA_DIR}")
     
@@ -44,8 +44,7 @@ async def lifespan(app: FastAPI):
     # Hopp over innlogging ved oppstart hvis SKIP_GARMIN_INIT er satt (dev/test).
     # Innlogging skjer da lazy ved første synk. Uten dette vil garminconnect kjøre
     # sine (trege, anti-WAF-forsinkede) innloggingsstrategier ved hver oppstart.
-    skip_garmin_init = os.getenv("SKIP_GARMIN_INIT", "").lower() in ("1", "true", "yes")
-    if skip_garmin_init:
+    if settings.SKIP_GARMIN_INIT:
         logger.info("SKIP_GARMIN_INIT satt – hopper over Garmin-innlogging ved oppstart.")
         app.state.garmin_client = garmin_client
     else:
@@ -77,23 +76,17 @@ async def lifespan(app: FastAPI):
 # Opprett FastAPI app
 app = FastAPI(lifespan=lifespan)
 
-# Konfigurer CORS
+# Konfigurer CORS (origins fra Settings / CORS_ORIGINS)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Frontend-adressen
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-        "http://127.0.0.1:3002",
-    ],
+    allow_origins=settings.cors_origin_list(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
-# Legg til HTTP Cache Headers middleware
+# Sikkerhetsheaders + HTTP Cache Headers
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CacheHeadersMiddleware)
 
 # Inkluder alle routere med korrekt prefix

@@ -125,8 +125,10 @@ test_*.py
 !backend/tests/test_performance_sync_service.py
 !backend/tests/test_metric_dependency_graph.py
 !backend/tests/test_settings.py
+!backend/tests/test_security_headers.py
 !ANALYTICS_METRICS.md
 !docs/METRIC_DEPENDENCIES.md
+!docs/SECURITY.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
 !docs/DATABASE_MIGRATIONS.md
