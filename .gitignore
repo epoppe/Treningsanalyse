@@ -123,7 +123,9 @@ test_*.py
 !backend/tests/test_sync_checkpoint.py
 !backend/tests/test_activity_sync_service.py
 !backend/tests/test_performance_sync_service.py
+!backend/tests/test_metric_dependency_graph.py
 !ANALYTICS_METRICS.md
+!docs/METRIC_DEPENDENCIES.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md
 !docs/DATABASE_MIGRATIONS.md
