@@ -1147,12 +1147,12 @@ class SyncService:
         return result if result else None
 
     def _apply_garmin_list_weather_if_missing(self, activity: Activity) -> bool:
-        """Garmin-liste temperatur ligger allerede i Activity.temperature (lag 2).
+        """Ingen JSON-fallback: Garmin-liste temperatur settes i Activity-kolonner ved sync.
 
         Tidligere ble min/maxTemperature dumpet i detailed_metrics (rå JSON).
-        Det er ikke lenger tillatt — beregning/vær leser normaliserte kolonner.
+        Returnerer alltid False (ingen endring herfra) — lag 2 er allerede fylt.
         """
-        return activity.temperature is not None
+        return False
 
     async def sync_activity_weather_for_activity(
         self,
