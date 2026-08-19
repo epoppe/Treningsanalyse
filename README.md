@@ -137,7 +137,9 @@ Eksempel på MCP-klientkonfigurasjon:
 }
 ```
 
-MCP-serveren eksponerer få, rike verktøy:
+MCP-serveren er gradvis refaktorert til domene-moduler under `backend/app/mcp/tools/` (`profile`, `activities`, `routes`, `metrics`, `coaching`). `training_tools.py` er backwards-compatible facade.
+
+MCP-serveren eksponerer blant annet:
 
 - `athlete_profile` - profil, terskler, siste VO2max/HRV og datadekning
 - `analyze_recent_training` - Banister, 80/20, terskel/drift og HRV-guidance

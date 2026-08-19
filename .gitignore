@@ -105,6 +105,7 @@ test_*.py
 !backend/tests/test_trend_analysis_service.py
 !backend/tests/test_metric_evidence.py
 !backend/tests/test_adaptive_coaching_v2.py
+!backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
 !backend/tests/test_metric_quality_report.py

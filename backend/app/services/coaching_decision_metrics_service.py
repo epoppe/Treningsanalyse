@@ -156,11 +156,20 @@ class CoachingDecisionMetricsService:
 
         return round(max(0.0, min(100.0, score)), 1)
 
-    def get_pb_probability(self, day: date, distance: str) -> Optional[float]:
-        """Backwards-compatible alias — returns heuristic pb_readiness_score (0–100).
+    def get_pb_calibrated_probability(self, day: date, distance: str) -> Dict[str, Any]:
+        from .pb_probability_calibration_service import PbProbabilityCalibrationService
 
-        This is NOT a calibrated statistical probability. See get_pb_readiness_score().
-        """
+        return PbProbabilityCalibrationService(self.db, None, self._ppap).get_calibrated_probability(
+            day,
+            distance,
+        )
+
+    def get_pb_probability(self, day: date, distance: str) -> Optional[float]:
+        """Kalibrert PB-sannsynlighet når historikk finnes; ellers readiness-heuristikk."""
+        calibrated = self.get_pb_calibrated_probability(day, distance)
+        prob = calibrated.get("probability_pct")
+        if prob is not None and calibrated.get("method") == "historical_calibration":
+            return float(prob)
         return self.get_pb_readiness_score(day, distance)
 
     def get_pb_readiness_score(self, day: date, distance: str) -> Optional[float]:
@@ -419,6 +428,10 @@ class CoachingDecisionMetricsService:
         next_session = self.get_next_session_recommendation(day)
 
         pb_scores = {event: self.get_pb_readiness_score(day, event) for event in EVENT_KEYS}
+        pb_calibrated = {event: self.get_pb_calibrated_probability(day, event) for event in EVENT_KEYS}
+        pb_probability_values = {
+            event: self.get_pb_probability(day, event) for event in EVENT_KEYS
+        }
 
         return {
             "date": day.isoformat(),
@@ -437,13 +450,18 @@ class CoachingDecisionMetricsService:
             "readiness_by_event": {
                 event: self.get_event_readiness(day, event) for event in EVENT_KEYS
             },
-            "pb_probability": pb_scores,
+            "pb_probability": pb_probability_values,
             "pb_readiness_score": pb_scores,
+            "pb_calibrated_probability": pb_calibrated,
             "pb_probability_semantics": {
-                "type": "heuristic_readiness_score",
+                "type": "calibrated_when_available",
                 "range": "0-100",
-                "is_calibrated_probability": False,
-                "note": "pb_probability retained for backwards compatibility; prefer pb_readiness_score",
+                "is_calibrated_probability": True,
+                "note": (
+                    "pb_probability uses historical_calibration when enough race observations exist; "
+                    "otherwise falls back to pb_readiness_score heuristic. "
+                    "See pb_calibrated_probability for method/confidence per event."
+                ),
             },
             "polarization_score": self.get_polarization_score(day),
             "training_block": self.get_training_block(day),

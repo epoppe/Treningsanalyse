@@ -15,6 +15,7 @@ from app.database.models.sleep import HRV, RestingHeartRate, Sleep
 from app.database.models.stress import Stress
 from app.database.models.lactate_threshold_history import LactateThresholdHistory
 from app.mcp import training_tools
+from app.mcp.tools import shared as mcp_shared
 from app.services.hrv_fetch import LOCAL_DB_HRV_REASON, NO_HRV_ACTIVITY_DAY_REASON
 from app.services.mcp_derived_metrics_service import DERIVED_METRIC_CATALOG
 from app.services.ppap_metrics_service import PpapMetricsService
@@ -178,7 +179,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         yield self.db, self.storage
 
     def test_athlete_profile_and_activity_deep_dive_are_compact_tool_payloads(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             profile = training_tools.athlete_profile()
             deep_dive = training_tools.activity_deep_dive("2301")
 
@@ -215,7 +216,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("wellness", recovery["body_battery_start"]["reason"])
 
     def test_mcp_hrv_recovery_context_uses_shared_contract(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         hrv = deep_dive["recovery_context"]["hrv"]
@@ -228,7 +229,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.db.query(HRV).delete()
         self.db.commit()
 
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         hrv = deep_dive["recovery_context"]["hrv"]
@@ -239,7 +240,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(hrv["reason"], NO_HRV_ACTIVITY_DAY_REASON)
 
     def test_activity_recovery_fields_expose_availability_and_sources(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         recovery_context = deep_dive["recovery_context"]
@@ -260,7 +261,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.db.query(Activity).filter_by(activity_id="2301").update({"body_battery_start": -1.0})
         self.db.commit()
 
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         start = deep_dive["recovery_context"]["body_battery"]["start"]
@@ -273,7 +274,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.db.query(Activity).filter_by(activity_id="2301").update({"training_readiness_score": 81.0})
         self.db.commit()
 
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             deep_dive = training_tools.activity_deep_dive("2301")
 
         readiness = deep_dive["recovery_context"]["training_readiness"]
@@ -283,7 +284,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertNotIn("components", readiness)
 
     def test_readiness_tool_returns_recommendation_and_flags(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             readiness = training_tools.training_readiness_check("2026-05-28")
 
         self.assertIn(readiness["recommendation"], {"normal_training", "easy_or_moderate", "easy_or_rest"})
@@ -296,7 +297,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("stress", readiness["recovery_context"])
 
     def test_metric_alias_hrv_rmssd_resolves_in_timeseries(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             canonical = training_tools.query_metric_timeseries(
                 "health.hrv_rmssd",
                 start_date="2026-05-01",
@@ -327,7 +328,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("metric_aliases", g)
 
     def test_metric_catalog_and_timeseries_query_expose_whitelisted_metrics(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             catalog = training_tools.metric_catalog()
             series = training_tools.query_metric_timeseries(
                 "activity.training_stress_score",
@@ -343,7 +344,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertEqual(series["points"][0]["value"], 55.0)
 
     def test_metric_catalog_exposes_ppap3_metrics(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             catalog = training_tools.metric_catalog()
         keys = {metric["key"] for metric in catalog["metrics"]}
         self.assertEqual(catalog["schema_version"], "ppap-3")
@@ -352,7 +353,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("training.class_8_pct", keys)
 
     def test_metric_catalog_exposes_metric_availability(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             catalog = training_tools.metric_catalog()
         by_key = {metric["key"]: metric for metric in catalog["metrics"]}
         self.assertEqual(by_key["activity.training_stress_score"]["availability"], "supported")
@@ -428,7 +429,7 @@ class McpTrainingToolsTests(unittest.TestCase):
 
 
     def test_metric_catalog_has_glossary_summary(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             catalog = training_tools.metric_catalog()
         self.assertEqual(catalog.get("schema_version"), "ppap-3")
         entry = next(m for m in catalog["metrics"] if m["key"] == "readiness.total_score")
@@ -440,7 +441,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("TrainingReadinessService", g["entry"]["definition"])
 
     def test_athlete_profile_hrv_uses_shared_contract(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             profile = training_tools.athlete_profile()
 
         hrv = profile["latest_hrv"]
@@ -450,7 +451,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("recovery_tools", profile)
 
     def test_daily_recovery_context_matches_activity_recovery_sections(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             daily = training_tools.daily_recovery_context("2026-05-28")
             deep_dive = training_tools.activity_deep_dive("2301")
 
@@ -463,7 +464,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertNotIn("start", daily["body_battery"])
 
     def test_readiness_snapshot_links_composites_and_recovery(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             snapshot = training_tools.readiness_snapshot("2026-05-28")
 
         self.assertEqual(snapshot["status"], "ok")
@@ -473,7 +474,7 @@ class McpTrainingToolsTests(unittest.TestCase):
         self.assertIn("readiness.total_score", snapshot["metric_links"].values())
 
     def test_metric_catalog_exposes_semantic_links_and_recovery_tools(self):
-        with patch.object(training_tools, "training_context", self._context):
+        with patch.object(mcp_shared, "training_context", self._context):
             catalog = training_tools.metric_catalog()
 
         self.assertIn("semantic_links", catalog)

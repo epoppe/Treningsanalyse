@@ -14,7 +14,7 @@ from ...services.ppap_metrics_service import PpapMetricsService
 from ...services.session_classifier_service import SessionClassifierService
 from ...services.trend_analysis_service import TrendAnalysisService
 from ...storage import DataStorage
-from ..training_tools import _parse_date, _resolve_activity
+from .common import parse_date, resolve_activity
 
 
 def recommend_next_session(
@@ -24,7 +24,7 @@ def recommend_next_session(
     target_date: Optional[str] = None,
     include_treadmill: bool = False,
 ) -> Dict[str, Any]:
-    day = _parse_date(target_date) if target_date else date.today()
+    day = parse_date(target_date) if target_date else date.today()
     ppap = PpapMetricsService(db, storage)
     service = NextBestWorkoutService(db, storage, ppap)
     recommendation = service.recommend(day, include_treadmill=include_treadmill)
@@ -38,7 +38,7 @@ def classify_activity_session(
     activity_id: Optional[str] = None,
     include_treadmill: bool = False,
 ) -> Dict[str, Any]:
-    activity = _resolve_activity(db, activity_id)
+    activity = resolve_activity(db, activity_id)
     if activity is None:
         return {"status": "not_found", "activity_id": activity_id}
     classifier = SessionClassifierService(db, storage)
@@ -57,9 +57,20 @@ def longitudinal_trends(
     *,
     target_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    day = _parse_date(target_date) if target_date else date.today()
+    day = parse_date(target_date) if target_date else date.today()
     service = TrendAnalysisService(db, storage)
     return {"status": "ok", **service.analyze_all(end_date=day)}
+
+
+def coaching_decision_snapshot(
+    db: Session,
+    storage: DataStorage,
+    *,
+    target_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    day = parse_date(target_date) if target_date else date.today()
+    service = CoachingDecisionMetricsService(db, PpapMetricsService(db, storage))
+    return service.build_coaching_snapshot(day)
 
 
 def coaching_backtest_summary(
@@ -72,8 +83,8 @@ def coaching_backtest_summary(
 ) -> Dict[str, Any]:
     service = CoachingBacktestService(db, storage)
     result = service.evaluate_period(
-        start_date=_parse_date(start_date),
-        end_date=_parse_date(end_date),
+        start_date=parse_date(start_date),
+        end_date=parse_date(end_date),
         step_days=step_days,
     )
     return {"status": "ok", **result}

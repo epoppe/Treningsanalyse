@@ -7,22 +7,25 @@ from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..database.models.activity import Activity
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .adaptive_threshold_service import AdaptiveThresholdService
+from .coaching_analysis_service import CoachingAnalysisService
 from .mcp_derived_metrics_service import McpDerivedMetricsService
 from .ppap_metrics_service import PpapMetricsService
 
 DEFAULT_LAG_WINDOWS = (7, 14, 21, 28)
+STIMULUS_WINDOW_DAYS = 7
 
-STIMULUS_METRICS = {
-    "easy_volume": "easy_volume_minutes",
-    "threshold_volume": "threshold_volume_minutes",
-    "high_intensity_volume": "high_volume_minutes",
-    "weekly_tss": "weekly_tss",
-}
+STIMULUS_METRICS = (
+    "easy_volume",
+    "threshold_volume",
+    "high_intensity_volume",
+    "weekly_tss",
+)
 
 OUTCOME_METRICS = {
     "easy_efficiency": "fitness.ef_30d",
@@ -36,7 +39,7 @@ OUTCOME_METRICS = {
 
 
 class TrainingResponseService:
-    """Konservativ analyse av load→response med eksplisitte begrensninger."""
+    """Konservativ analyse av load→response med LT1/LT2-soner og eksplisitte begrensninger."""
 
     def __init__(
         self,
@@ -48,6 +51,8 @@ class TrainingResponseService:
         self.storage = storage
         self._ppap = ppap or PpapMetricsService(db, storage)
         self._derived = McpDerivedMetricsService(db, storage)
+        self._coaching = CoachingAnalysisService(db, storage)
+        self._thresholds = AdaptiveThresholdService(db, storage)
 
     def analyze_responses(
         self,
@@ -118,7 +123,7 @@ class TrainingResponseService:
 
         xs = [p[0] for p in pairs]
         ys = [p[1] for p in pairs]
-        r = self._pearson(xs, ys)
+        r = _pearson(xs, ys)
         if r is None or math.isnan(r):
             return None
 
@@ -148,14 +153,7 @@ class TrainingResponseService:
 
     def _stimulus_value(self, stimulus: str, start: date, end: date) -> Optional[float]:
         if stimulus == "weekly_tss":
-            total = 0.0
-            current = start
-            while current <= end:
-                ctl_series = self._ppap.get_ctl(current)
-                if ctl_series is not None:
-                    total += float(ctl_series)
-                current += timedelta(days=1)
-            return total / max(1, (end - start).days + 1)
+            return self._weekly_tss_sum(start, end)
 
         zone_key = {
             "easy_volume": "low",
@@ -165,7 +163,49 @@ class TrainingResponseService:
         if zone_key is None:
             return None
 
-        total_minutes = 0.0
+        lt1, lt2 = self._threshold_hr_bounds(end)
+        if lt1 is None or lt2 is None:
+            return self._fallback_stimulus_minutes(stimulus, start, end)
+
+        zone_seconds = self._zone_seconds_in_window(start, end, lt1, lt2)
+        seconds = zone_seconds.get(zone_key, 0.0)
+        return round(seconds / 60.0, 1) if seconds > 0 else None
+
+    def _threshold_hr_bounds(self, end: date) -> Tuple[Optional[float], Optional[float]]:
+        adaptive = self._thresholds.estimate_lt1(end_date=end)
+        history = self._coaching._latest_threshold_history(end)
+        lt2 = history.lactate_threshold_heart_rate if history else None
+        lt1 = adaptive.get("lt1_hr")
+        return (float(lt1) if lt1 else None, float(lt2) if lt2 else None)
+
+    def _zone_seconds_in_window(
+        self,
+        start: date,
+        end: date,
+        lt1: float,
+        lt2: float,
+    ) -> Dict[str, float]:
+        totals = {"low": 0.0, "threshold": 0.0, "high": 0.0}
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= end,
+                )
+            )
+            .all()
+        )
+        for activity in activities:
+            if not is_running_activity(activity):
+                continue
+            buckets, _method = self._coaching.get_activity_intensity_buckets(activity, lt1, lt2)
+            for key in totals:
+                totals[key] += float(buckets.get(key, 0.0))
+        return totals
+
+    def _weekly_tss_sum(self, start: date, end: date) -> Optional[float]:
         activities = (
             self.db.query(Activity)
             .filter(
@@ -176,24 +216,86 @@ class TrainingResponseService:
             )
             .all()
         )
+        total = 0.0
+        for activity in activities:
+            if not is_running_activity(activity):
+                continue
+            tss = activity.training_stress_score or activity.epoc
+            if tss:
+                total += float(tss)
+        return round(total, 1) if total > 0 else None
+
+    def _fallback_stimulus_minutes(self, stimulus: str, start: date, end: date) -> Optional[float]:
+        """Fallback når LT1/LT2 mangler — bruk session classifier som grov proxy."""
+        from .session_classifier_service import SessionClassifierService
+
+        classifier = SessionClassifierService(self.db, self.storage, self._coaching)
+        total_min = 0.0
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= end,
+                )
+            )
+            .all()
+        )
+        proxy_map = {
+            "easy_volume": {"recovery_run", "easy_aerobic", "long_aerobic"},
+            "threshold_volume": {"steady", "tempo", "threshold"},
+            "high_intensity_volume": {"vo2_intervals", "anaerobic", "race"},
+        }
+        allowed = proxy_map.get(stimulus, set())
         for activity in activities:
             if not is_running_activity(activity) or not activity.duration:
                 continue
-            total_minutes += float(activity.duration) / 60.0
-        return total_minutes if total_minutes > 0 else None
+            classification = classifier.classify_activity(activity, end_date=end)
+            if classification.get("session_type") in allowed:
+                total_min += float(activity.duration) / 60.0
+        return round(total_min, 1) if total_min > 0 else None
 
     def _outcome_value(self, outcome: str, day: date) -> Optional[float]:
         if outcome == "durability":
             from .coaching_decision_metrics_service import CoachingDecisionMetricsService
 
             return CoachingDecisionMetricsService(self.db, self._ppap).get_durability_score(day)
-        metric_key = OUTCOME_METRICS.get(outcome)
-        if not metric_key:
+        if outcome == "vo2max":
+            from ..database.models.activity import GarminPerformanceMetric
+
+            row = (
+                self.db.query(GarminPerformanceMetric.vo2_max_precise)
+                .filter(func.date(GarminPerformanceMetric.date) <= day)
+                .order_by(GarminPerformanceMetric.date.desc())
+                .first()
+            )
+            return float(row[0]) if row and row[0] is not None else None
+        if outcome == "threshold_pace":
+            history = self._coaching._latest_threshold_history(day)
+            if history and history.lactate_threshold_speed and history.lactate_threshold_speed > 0:
+                return 1000.0 / float(history.lactate_threshold_speed)
             return None
-        if metric_key.startswith("__"):
+
+        metric_key = OUTCOME_METRICS.get(outcome)
+        if not metric_key or metric_key.startswith("__"):
             return None
         value = self._derived._daily_metric_value(metric_key, day)
         return float(value) if value is not None else None
+
+
+def _pearson(xs: List[float], ys: List[float]) -> Optional[float]:
+    if len(xs) != len(ys) or len(xs) < 2:
+        return None
+    n = len(xs)
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
+    den_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
+    if den_x == 0 or den_y == 0:
+        return None
+    return num / (den_x * den_y)
 
 
 def confidence_from_samples(n: int) -> float:

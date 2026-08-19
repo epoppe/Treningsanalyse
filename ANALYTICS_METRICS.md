@@ -170,6 +170,24 @@ Coaching-laget utvider regelbasert analyse med personlig, longitudinal og eviden
 
 **PB readiness:** `pb_probability` i API er beholdt for bakoverkompatibilitet, men er en heuristisk `pb_readiness_score` (0–100) — **ikke** en kalibrert sannsynlighet. Se `pb_probability_semantics` i coaching snapshot.
 
+### MCP-moduler (`backend/app/mcp/tools/`)
+
+| Modul | Innhold |
+|-------|---------|
+| `shared.py` | Felles implementasjon (katalog, recovery-hjelpere, timeseries) |
+| `profile.py` | `athlete_profile`, recovery, readiness |
+| `activities.py` | Aktivitetsliste og deep dive |
+| `routes.py` | Rute-sammenligning |
+| `metrics.py` | Metrikk-katalog og timeseries |
+| `coaching.py` | Coaching v2-verktøy (neste økt, klassifisering, backtest) |
+| `common.py` | Delt context/parsing |
+
+`training_tools.py` er backwards-compatible facade.
+
+### PB-sannsynlighet (kalibrert)
+
+`PbProbabilityCalibrationService` binner historisk `pb_readiness_score` mot faktiske PB-er per distanse og returnerer empirisk `pb_rate_pct` når n≥8 løp. `get_pb_probability()` bruker kalibrering når tilgjengelig, ellers readiness-heuristikk. Metadata i `pb_calibrated_probability` og `pb_probability_semantics`.
+
 ## Migrering
 
 Kjør idempotent migrering:

@@ -198,6 +198,21 @@ def classify_activity_session(
 
 
 @mcp.tool()
+def coaching_backtest_summary(
+    start_date: str,
+    end_date: str,
+    step_days: int = 7,
+) -> dict:
+    """Evaluate historical coaching signals without future leakage (as-of dates)."""
+    return _call_tool(
+        training_tools.coaching_backtest_summary,
+        start_date=start_date,
+        end_date=end_date,
+        step_days=step_days,
+    )
+
+
+@mcp.tool()
 def query_metric_timeseries(
     metric_key: str,
     start_date: Optional[str] = None,
