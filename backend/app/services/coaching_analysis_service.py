@@ -93,6 +93,15 @@ class CoachingAnalysisService:
         snapshot = self.db.query(AnalyticsSnapshot).filter_by(metric_key=self.SNAPSHOT_KEY).first()
         return snapshot.payload if snapshot else None
 
+    def get_activity_intensity_buckets(
+        self,
+        activity: Activity,
+        lt1_hr: Optional[float],
+        lt2_hr: Optional[float],
+    ) -> Tuple[Dict[str, float], str]:
+        """Public wrapper for per-activity HR zone time (seconds)."""
+        return self._activity_intensity_buckets(activity, lt1_hr, lt2_hr)
+
     def _persist_snapshot(self, payload: Dict[str, Any]) -> None:
         snapshot = self.db.query(AnalyticsSnapshot).filter_by(metric_key=self.SNAPSHOT_KEY).first()
         if snapshot is None:

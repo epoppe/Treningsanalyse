@@ -144,6 +144,32 @@ For hver varighet lagres beste kjente punkt for:
 
 Speed curve beregnes alltid når fart finnes. Power curve beregnes bare når FIT-samples inneholder `power`.
 
+## Adaptive Coaching Engine v2
+
+Coaching-laget utvider regelbasert analyse med personlig, longitudinal og evidensbevisst beslutningsstøtte:
+
+| Service | Rolle |
+|---------|-------|
+| `SessionClassifierService` | Klassifiserer løpeøkter (recovery, easy, threshold, VO2, race, …) med confidence og evidence |
+| `TrendAnalysisService` | Longitudinal trender (7/28/90/365 d) for VO2max, CTL, HRV, EF, durability m.m. |
+| `AdaptiveThresholdService` | LT1-estimat med prioritert evidenskjede; LT2-multiplikator som fallback |
+| `TrainingResponseService` | Historisk load→response (korrelasjon, ikke kausalitet) |
+| `NextBestWorkoutService` | Neste økt med guardrails (ingen harde dager på rad uten sterk grunn) |
+| `CoachingBacktestService` | As-of evaluering uten fremtidslekkasje |
+
+### Evidence-typer (`metric_evidence.py`)
+
+| `source_type` | Betydning |
+|---------------|-----------|
+| `measured` | Direkte målt (f.eks. lab) |
+| `garmin` | Levert av Garmin-enhet/konto |
+| `derived` | Beregnet fra normaliserte data (FIT, aktivitetsfelt) |
+| `estimated` | Modell/heuristikk med usikkerhet |
+| `heuristic` | Regelbasert score uten kalibrering |
+| `model` | Prediksjon fra treningsmodell |
+
+**PB readiness:** `pb_probability` i API er beholdt for bakoverkompatibilitet, men er en heuristisk `pb_readiness_score` (0–100) — **ikke** en kalibrert sannsynlighet. Se `pb_probability_semantics` i coaching snapshot.
+
 ## Migrering
 
 Kjør idempotent migrering:

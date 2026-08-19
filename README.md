@@ -147,6 +147,9 @@ MCP-serveren eksponerer få, rike verktøy:
 - `route_comparison` - sammenligning mot historiske samme-rute-løp
 - `compare_recent_runs` - siste løp eller samme-rute-sammenligning
 - `metric_catalog` - liste over whitelisted metrics som kan hentes
+- `coaching_decision_snapshot` - consistency, event readiness, limiters, anbefalt økt
+- `recommend_next_session` - neste økt med varighet, puls, begrunnelse og alternativ
+- `classify_activity_session` - klassifiser løpeøkt (recovery, easy, threshold, intervals, race, …)
 - `query_metric_timeseries` - hent én metric som kompakt tidsserie
 
 Resources:

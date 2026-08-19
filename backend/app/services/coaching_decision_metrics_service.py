@@ -157,19 +157,27 @@ class CoachingDecisionMetricsService:
         return round(max(0.0, min(100.0, score)), 1)
 
     def get_pb_probability(self, day: date, distance: str) -> Optional[float]:
+        """Backwards-compatible alias — returns heuristic pb_readiness_score (0–100).
+
+        This is NOT a calibrated statistical probability. See get_pb_readiness_score().
+        """
+        return self.get_pb_readiness_score(day, distance)
+
+    def get_pb_readiness_score(self, day: date, distance: str) -> Optional[float]:
+        """Heuristisk readiness score for PB attempt — not a calibrated probability."""
         readiness = self.get_event_readiness(day, distance)
         if readiness is None:
             return None
         tsb = self._ppap.get_tsb(day)
         consistency = self.get_consistency_score(day)
-        prob = float(readiness) * 0.55
+        score = float(readiness) * 0.55
         if tsb is not None and -3 <= float(tsb) <= 10:
-            prob += 15.0
+            score += 15.0
         if consistency is not None and float(consistency) >= 75:
-            prob += 10.0
+            score += 10.0
         if consistency is not None and float(consistency) < 55:
-            prob -= 15.0
-        return round(max(0.0, min(100.0, prob)), 1)
+            score -= 15.0
+        return round(max(0.0, min(100.0, score)), 1)
 
     def _long_runs(self, start: date, end: date) -> List[Activity]:
         activities = (
@@ -374,35 +382,16 @@ class CoachingDecisionMetricsService:
         return self.get_limiting_factors(day).get(limiter)
 
     def get_recommended_workout(self, day: date) -> Optional[str]:
-        total = self._ppap.get_readiness_component(day, "readiness.total_score")
-        tsb = self._ppap.get_tsb(day)
-        ctl = self._ppap.get_ctl(day)
-        atl = self._ppap.get_atl(day)
-        acwr = (float(atl) / float(ctl)) if ctl and atl and float(ctl) > 0 else None
+        from .next_best_workout_service import NextBestWorkoutService
 
-        if total is not None and float(total) < 35:
-            return "rest"
-        if tsb is not None and float(tsb) < -25:
-            return "recovery_run"
-        if acwr is not None and float(acwr) > 1.4:
-            return "easy_run"
+        recommendation = NextBestWorkoutService(self.db, None, self._ppap).recommend(day)
+        return recommendation.get("workout_type")
 
-        block = self.get_training_block(day)
-        if block == "recovery":
-            return "recovery_run"
-        if block == "overload":
-            return "easy_run"
+    def get_next_session_recommendation(self, day: Optional[date] = None) -> Dict[str, Any]:
+        from .next_best_workout_service import NextBestWorkoutService
 
-        if total is not None and float(total) >= 75 and tsb is not None and 0 <= float(tsb) <= 12:
-            return "vo2_intervals"
-        if total is not None and float(total) >= 65 and tsb is not None and -8 <= float(tsb) <= 5:
-            return "threshold"
-
-        consistency = self.get_consistency_score(day)
-        if consistency is not None and float(consistency) < 55:
-            return "easy_run"
-
-        return "easy_run"
+        target = day or date.today()
+        return NextBestWorkoutService(self.db, None, self._ppap).recommend(target)
 
     def get_fueling_score(self, day: date) -> Optional[float]:
         """Placeholder — krever ernæringsdata som ikke finnes i dag."""
@@ -416,6 +405,20 @@ class CoachingDecisionMetricsService:
         day = day or date.today()
         limiters = self.get_limiting_factors(day)
         top_limiter = max(limiters, key=limiters.get) if limiters else None
+
+        from .adaptive_threshold_service import AdaptiveThresholdService
+        from .trend_analysis_service import TrendAnalysisService
+        from .training_response_service import TrainingResponseService
+
+        adaptive_lt1 = AdaptiveThresholdService(self.db, None).estimate_lt1(end_date=day)
+        trends = TrendAnalysisService(self.db, None).analyze_all(end_date=day, windows=(28, 90))
+        load_responses = TrainingResponseService(self.db, None, self._ppap).analyze_responses(
+            end_date=day,
+            lookback_days=180,
+        )
+        next_session = self.get_next_session_recommendation(day)
+
+        pb_scores = {event: self.get_pb_readiness_score(day, event) for event in EVENT_KEYS}
 
         return {
             "date": day.isoformat(),
@@ -434,8 +437,13 @@ class CoachingDecisionMetricsService:
             "readiness_by_event": {
                 event: self.get_event_readiness(day, event) for event in EVENT_KEYS
             },
-            "pb_probability": {
-                event: self.get_pb_probability(day, event) for event in EVENT_KEYS
+            "pb_probability": pb_scores,
+            "pb_readiness_score": pb_scores,
+            "pb_probability_semantics": {
+                "type": "heuristic_readiness_score",
+                "range": "0-100",
+                "is_calibrated_probability": False,
+                "note": "pb_probability retained for backwards compatibility; prefer pb_readiness_score",
             },
             "polarization_score": self.get_polarization_score(day),
             "training_block": self.get_training_block(day),
@@ -450,6 +458,12 @@ class CoachingDecisionMetricsService:
             "limiting_factors": limiters,
             "top_limiter": top_limiter,
             "recommended_workout": self.get_recommended_workout(day),
+            "next_session_recommendation": next_session,
+            "adaptive_thresholds": {
+                "lt1": adaptive_lt1,
+            },
+            "longitudinal_trends": trends,
+            "training_load_responses": load_responses,
             "data_gaps": [
                 "fueling_score krever karbohydrat-/ernæringsregistrering",
                 "recovery_model_accuracy krever historisk validering",

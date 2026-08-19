@@ -172,6 +172,32 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> dict:
 
 
 @mcp.tool()
+def recommend_next_session(
+    target_date: Optional[str] = None,
+    include_treadmill: bool = False,
+) -> dict:
+    """Recommend next running session with duration, HR targets, rationale and alternative."""
+    return _call_tool(
+        training_tools.recommend_next_session,
+        target_date=target_date,
+        include_treadmill=include_treadmill,
+    )
+
+
+@mcp.tool()
+def classify_activity_session(
+    activity_id: Optional[str] = None,
+    include_treadmill: bool = False,
+) -> dict:
+    """Classify one running session (recovery, easy, threshold, intervals, race, …)."""
+    return _call_tool(
+        training_tools.classify_activity_session,
+        activity_id=activity_id,
+        include_treadmill=include_treadmill,
+    )
+
+
+@mcp.tool()
 def query_metric_timeseries(
     metric_key: str,
     start_date: Optional[str] = None,

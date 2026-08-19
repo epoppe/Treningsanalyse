@@ -978,6 +978,38 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, A
         return service.build_coaching_snapshot(day)
 
 
+def recommend_next_session(
+    target_date: Optional[str] = None,
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
+    """Anbefalt neste løpeøkt med varighet, puls, begrunnelse og alternativ."""
+    with training_context() as (db, storage):
+        from .tools.coaching import recommend_next_session as _recommend
+
+        return _recommend(
+            db,
+            storage,
+            target_date=target_date,
+            include_treadmill=include_treadmill,
+        )
+
+
+def classify_activity_session(
+    activity_id: Optional[str] = None,
+    include_treadmill: bool = False,
+) -> Dict[str, Any]:
+    """Klassifiser én løpeøkt (recovery, easy, threshold, intervals, race, …)."""
+    with training_context() as (db, storage):
+        from .tools.coaching import classify_activity_session as _classify
+
+        return _classify(
+            db,
+            storage,
+            activity_id=activity_id,
+            include_treadmill=include_treadmill,
+        )
+
+
 def metric_catalog() -> Dict[str, Any]:
     with training_context() as (db, _storage):
         table_counts = _model_table_counts(db)
