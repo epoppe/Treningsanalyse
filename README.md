@@ -152,7 +152,7 @@ MCP-serveren eksponerer blant annet:
 - `coaching_decision_snapshot` - consistency, event readiness, limiters, anbefalt økt
 - `recommend_next_session` - neste økt med varighet, puls, begrunnelse, decision_trace og alternativ
 - `classify_activity_session` - klassifiser løpeøkt (recovery, easy, threshold, intervals, race, …)
-- `training_decision_brief` - kompakt AI-coaching-pakke (mål, fase, prescription, kandidater, ukeplan, trace)
+- `training_decision_brief` - kompakt AI-coaching-pakke (v5: ledger-id, planversjon, availability, decision_status, projected week)
 - `session_quality` / `comparable_sessions` - øktkvalitet og like-økt-benchmark
 - `coaching_evaluation_report` - maskinlesbar modellvalidering (kalibrering, health, coverage)
 - `query_metric_timeseries` - hent én metric som kompakt tidsserie
