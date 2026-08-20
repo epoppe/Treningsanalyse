@@ -16,9 +16,12 @@ from .adaptive_threshold_service import AdaptiveThresholdService
 from .coaching_analysis_service import CoachingAnalysisService
 from .mcp_derived_metrics_service import McpDerivedMetricsService
 from .ppap_metrics_service import PpapMetricsService
+from .statistical_uncertainty import bootstrap_ci, evidence_band
 
 DEFAULT_LAG_WINDOWS = (7, 14, 21, 28)
 STIMULUS_WINDOW_DAYS = 7
+MIN_EFFECT_FOR_RANKING = 0.25
+MIN_N_FOR_RANKING = 12
 
 STIMULUS_METRICS = (
     "easy_volume",
@@ -63,6 +66,8 @@ class TrainingResponseService:
     ) -> Dict[str, Any]:
         end = end_date or date.today()
         start = end - timedelta(days=lookback_days)
+        # Conservative family size for stimulus × outcome × lag search.
+        family_size = max(1, len(STIMULUS_METRICS) * len(OUTCOME_METRICS) * len(lag_windows))
         relationships: List[Dict[str, Any]] = []
 
         for stimulus_key in STIMULUS_METRICS:
@@ -73,14 +78,26 @@ class TrainingResponseService:
                     start,
                     end,
                     lag_windows,
+                    family_size=family_size,
                 )
                 if best is not None:
                     relationships.append(best)
 
+        # Only moderate/strong statistical support may influence ranking.
+        ranking_eligible = [
+            r for r in relationships if r.get("statistical_support") in {"moderate", "strong"}
+        ]
         return {
             "end_date": end.isoformat(),
             "lookback_days": lookback_days,
             "relationships": relationships,
+            "ranking_eligible_relationships": ranking_eligible,
+            "multiple_testing": {
+                "family_size": family_size,
+                "method": "bonferroni_effect_threshold",
+                "min_effect_for_ranking": MIN_EFFECT_FOR_RANKING,
+                "min_n_for_ranking": MIN_N_FOR_RANKING,
+            },
             "disclaimer": "Correlations describe historical co-movement — not causal training effects.",
         }
 
@@ -157,13 +174,19 @@ class TrainingResponseService:
         conf = min(0.75, 0.2 + 0.02 * len(pairs))
         if best_range is None:
             conf = min(conf, 0.3)
+        effects = [b["effect"] for b in dose_response if b.get("effect") is not None]
+        unc = bootstrap_ci(effects) if effects else {"estimate": None, "ci95": None, "sample_count": 0}
+        support = evidence_band(sample_count=len(pairs), effect_size=0.2 if best_range else 0.0)
         return {
             "stimulus": stimulus,
             "response": outcome,
             "lag_days": lag_days,
             "dose_response": dose_response,
             "best_supported_historical_range": best_range,
-            "confidence": round(conf, 2),
+            "confidence": round(conf, 2),  # compatibility alias
+            "evidence_strength": round(conf, 2),
+            "statistical_support": support,
+            "uncertainty": unc,
             "sample_count": len(pairs),
             "disclaimer": "observational_association_not_causal — not an optimal_range",
         }
@@ -175,14 +198,35 @@ class TrainingResponseService:
         start: date,
         end: date,
         lag_windows: Tuple[int, ...],
+        *,
+        family_size: int = 1,
     ) -> Optional[Dict[str, Any]]:
-        best: Optional[Dict[str, Any]] = None
+        candidates: List[Dict[str, Any]] = []
         for lag in lag_windows:
-            result = self._correlate(stimulus, outcome, start, end, lag)
-            if result is None:
-                continue
-            if best is None or result["confidence"] > best["confidence"]:
-                best = result
+            result = self._correlate(
+                stimulus, outcome, start, end, lag, family_size=family_size
+            )
+            if result is not None:
+                candidates.append(result)
+        if not candidates:
+            return None
+        # Stability across lags: same sign and |effect| above ranking floor.
+        stable_folds = 0
+        signs = [1 if c["effect_size"] > 0 else -1 for c in candidates if abs(c["effect_size"]) >= 0.15]
+        if signs and all(s == signs[0] for s in signs):
+            stable_folds = sum(
+                1 for c in candidates if abs(c["effect_size"]) >= MIN_EFFECT_FOR_RANKING
+            )
+        best = max(candidates, key=lambda c: c["evidence_strength"])
+        best["stable_folds"] = stable_folds
+        best["statistical_support"] = evidence_band(
+            sample_count=best["sample_count"],
+            effect_size=best["effect_size"],
+            min_n=MIN_N_FOR_RANKING,
+            min_effect=MIN_EFFECT_FOR_RANKING,
+            stable_folds=stable_folds,
+        )
+        best["ranking_eligible"] = best["statistical_support"] in {"moderate", "strong"}
         return best
 
     def _correlate(
@@ -192,6 +236,8 @@ class TrainingResponseService:
         start: date,
         end: date,
         lag_days: int,
+        *,
+        family_size: int = 1,
     ) -> Optional[Dict[str, Any]]:
         pairs: List[Tuple[float, float]] = []
         current = start + timedelta(days=lag_days + 7)
@@ -219,7 +265,18 @@ class TrainingResponseService:
         else:
             relationship = "negative"
 
-        confidence = min(0.9, abs(r) * confidence_from_samples(len(pairs)))
+        # Bonferroni-style: raise effective |r| bar with family size.
+        adjusted_min = MIN_EFFECT_FOR_RANKING * (1.0 + math.log10(max(1, family_size)) * 0.15)
+        raw_conf = min(0.9, abs(r) * confidence_from_samples(len(pairs)))
+        if abs(r) < adjusted_min:
+            raw_conf = min(raw_conf, 0.35)
+        evidence_strength = round(raw_conf, 2)
+        support = evidence_band(
+            sample_count=len(pairs),
+            effect_size=effect_size,
+            min_n=MIN_N_FOR_RANKING,
+            min_effect=adjusted_min,
+        )
 
         return {
             "stimulus": stimulus,
@@ -227,11 +284,17 @@ class TrainingResponseService:
             "lag_days": lag_days,
             "relationship": relationship,
             "effect_size": effect_size,
-            "confidence": round(confidence, 2),
+            "confidence": evidence_strength,  # compatibility alias
+            "evidence_strength": evidence_strength,
+            "decision_confidence": None,
+            "statistical_support": support,
+            "ranking_eligible": support in {"moderate", "strong"},
+            "multiple_testing_adjusted_min_effect": round(adjusted_min, 3),
             "sample_count": len(pairs),
             "limitations": [
                 "observational_correlation_not_causation",
                 "confounding_by_other_training_not_controlled",
+                "multiple_testing_across_stimulus_outcome_lag",
             ],
         }
 
