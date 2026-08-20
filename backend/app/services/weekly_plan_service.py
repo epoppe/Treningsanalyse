@@ -46,6 +46,7 @@ class WeeklyPlanService:
         persist: bool = False,
         next_rec: Optional[Dict[str, Any]] = None,
         previous_plan_id: Optional[int] = None,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         day = day or date.today()
         payload = self._optimizer.optimize(
@@ -59,10 +60,13 @@ class WeeklyPlanService:
                 week_start=day,
                 payload=payload,
                 previous_plan_id=previous_plan_id,
+                commit=commit,
             )
             payload["plan_id"] = stored["plan_id"]
             payload["version"] = stored["version"]
             payload["previous_plan_id"] = stored["previous_plan_id"]
+            payload["content_hash"] = stored.get("content_hash")
+            payload["idempotent_reuse"] = stored.get("idempotent_reuse", False)
         else:
             payload.setdefault("plan_id", None)
             payload.setdefault("version", None)

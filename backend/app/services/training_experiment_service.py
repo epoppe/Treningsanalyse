@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from ..database.models.coaching_v5 import TrainingExperiment
+from ..schemas.coaching import ExperimentStatus, coerce_enum
+from .coaching_tx import finalize_write
 
 
 class TrainingExperimentService:
@@ -26,6 +28,7 @@ class TrainingExperimentService:
         stop_conditions: Optional[Dict[str, Any]] = None,
         user_confirmed: bool = False,
         notes: Optional[str] = None,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         row = TrainingExperiment(
             hypothesis=hypothesis,
@@ -35,44 +38,47 @@ class TrainingExperimentService:
             baseline_json=baseline,
             metric_outcomes_json=metric_outcomes,
             stop_conditions_json=stop_conditions,
-            status="draft",
+            status=ExperimentStatus.DRAFT.value,
             user_confirmed=False,
             notes=notes,
         )
         self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
         if user_confirmed:
-            return self.start(row.id, user_confirmed=True)
+            return self.start(row.id, user_confirmed=True, commit=commit)
         return self._to_dict(row)
 
-    def start(self, experiment_id: int, *, user_confirmed: bool) -> Dict[str, Any]:
+    def start(self, experiment_id: int, *, user_confirmed: bool, commit: bool = True) -> Dict[str, Any]:
         if not user_confirmed:
             raise PermissionError("Experiments never start without explicit user confirmation.")
         row = self.db.query(TrainingExperiment).filter(TrainingExperiment.id == experiment_id).first()
         if row is None:
             raise ValueError("experiment not found")
         row.user_confirmed = True
-        row.status = "active"
-        self.db.commit()
-        self.db.refresh(row)
+        row.status = ExperimentStatus.ACTIVE.value
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
         return self._to_dict(row)
 
-    def stop(self, experiment_id: int, *, reason: Optional[str] = None) -> Dict[str, Any]:
+    def stop(self, experiment_id: int, *, reason: Optional[str] = None, commit: bool = True) -> Dict[str, Any]:
         row = self.db.query(TrainingExperiment).filter(TrainingExperiment.id == experiment_id).first()
         if row is None:
             raise ValueError("experiment not found")
-        row.status = "stopped"
+        row.status = ExperimentStatus.STOPPED.value
         if reason:
             row.notes = ((row.notes or "") + f"\nstop: {reason}").strip()
-        self.db.commit()
-        self.db.refresh(row)
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
         return self._to_dict(row)
 
     def get_active(self) -> Optional[Dict[str, Any]]:
         row = (
             self.db.query(TrainingExperiment)
-            .filter(TrainingExperiment.status == "active", TrainingExperiment.user_confirmed.is_(True))
+            .filter(TrainingExperiment.status == ExperimentStatus.ACTIVE.value, TrainingExperiment.user_confirmed.is_(True))
             .order_by(TrainingExperiment.created_at.desc())
             .first()
         )
@@ -80,6 +86,7 @@ class TrainingExperimentService:
 
     @staticmethod
     def _to_dict(row: TrainingExperiment) -> Dict[str, Any]:
+        status = coerce_enum(ExperimentStatus, row.status, ExperimentStatus.DRAFT)
         return {
             "id": row.id,
             "hypothesis": row.hypothesis,
@@ -89,7 +96,7 @@ class TrainingExperimentService:
             "baseline": row.baseline_json,
             "metric_outcomes": row.metric_outcomes_json,
             "stop_conditions": row.stop_conditions_json,
-            "status": row.status,
+            "status": status.value if status else row.status,
             "user_confirmed": row.user_confirmed,
             "notes": row.notes,
         }

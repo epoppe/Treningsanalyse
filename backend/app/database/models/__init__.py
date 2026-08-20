@@ -28,6 +28,8 @@ from .coaching_v5 import (
     CalibrationSnapshot,
     TrainingAvailability,
     TrainingExperiment,
+    CoachingModelRegistryEntry,
+    ShadowRecommendation,
 )
 
 __all__ = [
@@ -66,4 +68,6 @@ __all__ = [
     'CalibrationSnapshot',
     'TrainingAvailability',
     'TrainingExperiment',
+    'CoachingModelRegistryEntry',
+    'ShadowRecommendation',
 ]

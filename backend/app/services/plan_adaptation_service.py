@@ -41,10 +41,11 @@ class PlanAdaptationService:
         plan: Optional[Dict[str, Any]] = None,
         goal: Optional[Dict[str, Any]] = None,
         persist: bool = False,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         day = day or date.today()
         stored = self._store.get_active_plan(day) if persist or plan is None else None
-        plan = plan or stored or self._weekly.build(day, goal=goal)
+        plan = plan or stored or self._weekly.build(day, goal=goal, commit=commit)
         params = self._calibration.resolve_parameters(end_date=day)
         hrv_warn = params["hrv_drop_warning_pct"]
         rhr_warn = params["rhr_rise_warning_bpm"]
@@ -101,6 +102,7 @@ class PlanAdaptationService:
                 reason=reasons,
                 simulation=plan.get("simulation"),
                 scores=plan.get("scores"),
+                commit=commit,
             )
             new_plan_id = stored["plan_id"]
             new_version = stored["version"]

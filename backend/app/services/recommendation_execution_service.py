@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import RecommendationExecution, RecommendationRecord
+from ..schemas.coaching import ExecutionAnalysisV1, ExecutionStatus, coerce_enum, dump_validated
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .coaching_tx import finalize_write
 from .recommendation_ledger_service import RecommendationLedgerService
 from .session_classifier_service import SessionClassifierService
 from .workout_execution_analysis_service import WorkoutExecutionAnalysisService
@@ -36,13 +38,14 @@ class RecommendationExecutionService:
 
     def link_activity(self, activity: Activity, *, commit: bool = True) -> Dict[str, Any]:
         if activity.start_time is None:
-            return self._store(None, activity, "unplanned", None, None, commit=commit)
+            return self._store(None, activity, ExecutionStatus.UNPLANNED.value, None, None, commit=commit)
         day = activity.start_time.date()
         record = (
             self.db.query(RecommendationRecord)
             .filter(
                 RecommendationRecord.as_of_date == day,
                 RecommendationRecord.is_active.is_(True),
+                RecommendationRecord.is_shadow.is_(False),
             )
             .order_by(RecommendationRecord.generated_at.desc())
             .first()
@@ -53,35 +56,42 @@ class RecommendationExecutionService:
                 .filter(
                     RecommendationRecord.as_of_date >= day - timedelta(days=1),
                     RecommendationRecord.as_of_date <= day,
+                    RecommendationRecord.is_shadow.is_(False),
                 )
                 .order_by(RecommendationRecord.generated_at.desc())
                 .first()
             )
             record = nearby
 
-        actual_type = None
         if is_running_activity(activity, include_treadmill=True):
             actual_type = self._classifier.classify_activity(activity, end_date=day).get("session_type")
         else:
-            actual_type = (activity.activity_type.type_key if activity.activity_type else "non_running")
+            actual_type = activity.activity_type.type_key if activity.activity_type else "non_running"
 
         if record is None:
-            return self._store(None, activity, "unplanned", None, actual_type, commit=commit)
+            return self._store(None, activity, ExecutionStatus.UNPLANNED.value, None, actual_type, commit=commit)
 
         planned = record.recommended_workout_type
         planned_dur = self._planned_duration_min(record)
         actual_dur = (float(activity.duration) / 60.0) if activity.duration else None
         compatible = actual_type in COMPATIBLE.get(planned, set()) or actual_type == planned
-        analysis = self._execution_quality.analyze(activity, record.workout_prescription_json or {})
+        analysis = dump_validated(
+            ExecutionAnalysisV1,
+            self._execution_quality.analyze(activity, record.workout_prescription_json or {}),
+        )
 
         if planned == "rest":
-            status = "replaced"
-        elif compatible and self._duration_close(planned_dur, actual_dur) and analysis.get("completion_pct", 100) >= 80:
-            status = "followed"
+            status = ExecutionStatus.REPLACED.value
+        elif (
+            compatible
+            and self._duration_close(planned_dur, actual_dur)
+            and (analysis.get("completion_pct") or 100) >= 80
+        ):
+            status = ExecutionStatus.FOLLOWED.value
         elif compatible:
-            status = "modified"
+            status = ExecutionStatus.MODIFIED.value
         else:
-            status = "replaced"
+            status = ExecutionStatus.REPLACED.value
 
         intensity = {
             "target_intensity_pct": analysis.get("target_intensity_pct"),
@@ -110,21 +120,38 @@ class RecommendationExecutionService:
             commit=commit,
         )
 
-    def mark_skipped(self, recommendation_id: int) -> Dict[str, Any]:
+    def mark_skipped(self, recommendation_id: int, *, commit: bool = True) -> Dict[str, Any]:
         record = self._ledger.get_recommendation(recommendation_id)
         if record is None:
             return {"status": "not_found"}
+        existing = (
+            self.db.query(RecommendationExecution)
+            .filter(
+                RecommendationExecution.recommendation_id == recommendation_id,
+                RecommendationExecution.execution_status == ExecutionStatus.SKIPPED.value,
+                RecommendationExecution.activity_id.is_(None),
+            )
+            .first()
+        )
+        if existing:
+            return {
+                "id": existing.id,
+                "execution_status": ExecutionStatus.SKIPPED.value,
+                "recommendation_id": recommendation_id,
+                "idempotent_reuse": True,
+            }
         row = RecommendationExecution(
             recommendation_id=recommendation_id,
             activity_id=None,
-            execution_status="skipped",
+            execution_status=ExecutionStatus.SKIPPED.value,
             planned_type=record["recommended_workout_type"],
             actual_type=None,
         )
         self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
-        return {"id": row.id, "execution_status": "skipped", "recommendation_id": recommendation_id}
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
+        return {"id": row.id, "execution_status": ExecutionStatus.SKIPPED.value, "recommendation_id": recommendation_id}
 
     def _store(
         self,
@@ -141,6 +168,43 @@ class RecommendationExecutionService:
         analysis: Optional[Dict[str, Any]] = None,
         commit: bool = True,
     ) -> Dict[str, Any]:
+        status = coerce_enum(ExecutionStatus, status, ExecutionStatus.UNPLANNED).value
+        existing = None
+        if recommendation_id is not None:
+            existing = (
+                self.db.query(RecommendationExecution)
+                .filter(
+                    RecommendationExecution.recommendation_id == recommendation_id,
+                    RecommendationExecution.activity_id == activity.activity_id,
+                )
+                .first()
+            )
+        else:
+            existing = (
+                self.db.query(RecommendationExecution)
+                .filter(
+                    RecommendationExecution.activity_id == activity.activity_id,
+                    RecommendationExecution.recommendation_id.is_(None),
+                )
+                .first()
+            )
+        if existing is not None:
+            return {
+                "id": existing.id,
+                "recommendation_id": existing.recommendation_id,
+                "activity_id": existing.activity_id,
+                "execution_status": existing.execution_status,
+                "planned_type": existing.planned_type,
+                "actual_type": existing.actual_type,
+                "planned_duration": existing.planned_duration,
+                "actual_duration": existing.actual_duration,
+                "intensity_adherence": existing.intensity_adherence_json,
+                "structure_adherence": existing.structure_adherence_json,
+                "overall_adherence": existing.overall_adherence,
+                "idempotent_reuse": True,
+                "note": "Adherence ≠ workout quality or physiological response.",
+            }
+
         row = RecommendationExecution(
             recommendation_id=recommendation_id,
             activity_id=activity.activity_id,
@@ -155,11 +219,9 @@ class RecommendationExecutionService:
             analysis_json=analysis,
         )
         self.db.add(row)
+        finalize_write(self.db, commit=commit)
         if commit:
-            self.db.commit()
             self.db.refresh(row)
-        else:
-            self.db.flush()
         return {
             "id": row.id,
             "recommendation_id": recommendation_id,
@@ -181,6 +243,9 @@ class RecommendationExecutionService:
         total = rx.get("total_duration_min")
         if isinstance(total, (int, float)):
             return float(total)
+        raw = rx.get("raw") if isinstance(rx, dict) else None
+        if isinstance(raw, dict) and isinstance(raw.get("total_duration_min"), (int, float)):
+            return float(raw["total_duration_min"])
         return None
 
     @staticmethod
