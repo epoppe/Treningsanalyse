@@ -218,6 +218,31 @@ v3 bygger på v2 uten å erstatte eksisterende services. Fokus: personlig kalibr
 
 Alle historiske evalueringer er `as_of_date`-safe (ingen fremtidslekkasje).
 
+## Adaptive Coaching Engine v4
+
+v4 er preskriptiv og målstyrt. Den bygger på v2/v3 uten nye parallelle score-systemer.
+
+Beslutningskjede: AthleteState → PersonalCalibration → Goal/Phase → kandidater → guardrails → ranking → WorkoutPrescription → ukeplan → outcome.
+
+| Service | Rolle |
+|---------|-------|
+| `AthleteCalibrationService.get_parameter` | Resolved terskel med `threshold_source` (personalized kun ved evidensgate) |
+| `IntensityPrescriptionService` | Kanoniske soner: threshold via LT2/CS, ikke LT1±5% |
+| `GoalContextService` | Mål fra konfigurasjon; `goal_feasibility` uten å anta at target_time er realistisk |
+| `TrainingPhaseService` | recovery/base/build/specific/peak/taper/maintenance — ikke kalender alene |
+| `RaceCapabilityService` | Kapasitetsgap mot løpsmål |
+| `WorkoutPrescriptionService` | Konkret økt (sett, pause, HR/pace/RPE + source) |
+| `WorkoutCandidateRanker` | Eksplisitte komponenter; guardrails = eligibility |
+| `WeeklyPlanService` / `PlanAdaptationService` | Rullerende uke + closed-loop justering |
+| `WorkoutEffectivenessService` | Observasjonell lag-respons (ikke kausalitet) |
+| `CoachingBacktestV4Service` | old vs v4 uten å erklære vinner uten data |
+
+ACWR er diagnostisk i decision_trace, ikke primær guardrail. Lastbeslutninger bruker load variability, hard-day density, spacing og individuell lasttoleranse.
+
+`training_decision_brief` MCP returnerer goal, phase, prescription, kandidater, ukeplan, evidence_strength og recommendation_confidence.
+
+Mål konfigureres i `.env` (`ATHLETE_GOAL_*`) uten DB-migrering.
+
 ## Migrering
 
 Kjør idempotent migrering:
