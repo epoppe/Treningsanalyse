@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from ..storage import DataStorage
 from .coaching_decision_metrics_service import CoachingDecisionMetricsService
-from .next_best_workout_service import HARD_SESSION_TYPES, NextBestWorkoutService
+from .coaching_session_types import HARD_SESSION_TYPES
+from .next_best_workout_service import NextBestWorkoutService
 from .ppap_metrics_service import PpapMetricsService
 from .session_classifier_service import SessionClassifierService
 

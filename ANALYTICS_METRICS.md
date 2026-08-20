@@ -179,7 +179,7 @@ Coaching-laget utvider regelbasert analyse med personlig, longitudinal og eviden
 | `activities.py` | Aktivitetsliste og deep dive |
 | `routes.py` | Rute-sammenligning |
 | `metrics.py` | Metrikk-katalog og timeseries |
-| `coaching.py` | Coaching v2-verktøy (neste økt, klassifisering, backtest) |
+| `coaching.py` | Coaching v2/v3-verktøy (neste økt, klassifisering, backtest, decision brief, evaluation) |
 | `common.py` | Delt context/parsing |
 
 `training_tools.py` er backwards-compatible facade.
@@ -187,6 +187,36 @@ Coaching-laget utvider regelbasert analyse med personlig, longitudinal og eviden
 ### PB-sannsynlighet (kalibrert)
 
 `PbProbabilityCalibrationService` binner historisk `pb_readiness_score` mot faktiske PB-er per distanse og returnerer empirisk `pb_rate_pct` når n≥8 løp. `get_pb_probability()` bruker kalibrering når tilgjengelig, ellers readiness-heuristikk. Metadata i `pb_calibrated_probability` og `pb_probability_semantics`.
+
+## Adaptive Coaching Engine v3
+
+v3 bygger på v2 uten å erstatte eksisterende services. Fokus: personlig kalibrering, outcome-validering, sammenlignbare økter og transparent beslutningskjede.
+
+| Service | Rolle |
+|---------|-------|
+| `SessionQualityService` | Type-spesifikk øktkvalitet 0–100 (ikke krysstype-sammenlignbar) |
+| `ComparableSessionService` | Finn «like» historiske økter; percentile mot personlig baseline |
+| `RecommendationOutcomeService` | Kobler anbefaling ↔ faktisk oppfølging; skiller adherence / outcome / counterfactual |
+| `AthleteCalibrationService` | Individuelle terskler kun ved sterk evidens (ellers default) |
+| `LoadVariabilityService` | Monotoni, strain, hard-day densitet — supplement til CTL/ATL/TSB (ikke ACWR-skade) |
+| `ContextAdjustedTrendService` | Prestasjonstrender justert for varme, høyde m.m. |
+| `CalibrationReportService` | Confidence-bins vs empirisk treffsikkerhet |
+| `AthleteStateService` | Separate dimensjoner (fitness, fatigue, recovery, …) uten opaque superscore |
+| `CoachingModelHealthService` | `healthy` / `degraded` / `insufficient_data` |
+| `CoachingEvaluationService` | Maskinlesbart evaluation-payload for senere dashboard |
+
+`NextBestWorkoutService` returnerer nå `decision_trace` og `load_variability`.
+
+### Nye MCP-verktøy
+
+| Tool | Formål |
+|------|--------|
+| `training_decision_brief` | Kompakt executive-pakke (state + anbefaling + trace) |
+| `session_quality` | Kvalitet for én aktivitet |
+| `comparable_sessions` | Personlig baseline-sammenligning |
+| `coaching_evaluation_report` | Evaluation payload |
+
+Alle historiske evalueringer er `as_of_date`-safe (ingen fremtidslekkasje).
 
 ## Migrering
 

@@ -12,5 +12,9 @@ from .tools.shared import (  # noqa: F401 — private helpers used by tests/scri
     _resolve_metric_key,
     _run_query_metric_timeseries,
     coaching_backtest_summary,
+    coaching_evaluation_report,
+    comparable_sessions,
+    session_quality,
     training_context,
+    training_decision_brief,
 )

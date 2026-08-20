@@ -1028,6 +1028,38 @@ def coaching_backtest_summary(
         )
 
 
+def training_decision_brief(target_date: Optional[str] = None) -> Dict[str, Any]:
+    """Kompakt AI-coaching brief: state, limiters, neste økt, decision_trace."""
+    with training_context() as (db, storage):
+        from .coaching import training_decision_brief as _brief
+
+        return _brief(db, storage, target_date=target_date)
+
+
+def session_quality(activity_id: Optional[str] = None) -> Dict[str, Any]:
+    with training_context() as (db, storage):
+        from .coaching import session_quality as _quality
+
+        return _quality(db, storage, activity_id=activity_id)
+
+
+def comparable_sessions(activity_id: Optional[str] = None, limit: int = 10) -> Dict[str, Any]:
+    with training_context() as (db, storage):
+        from .coaching import comparable_sessions as _cmp
+
+        return _cmp(db, storage, activity_id=activity_id, limit=limit)
+
+
+def coaching_evaluation_report(
+    target_date: Optional[str] = None,
+    lookback_days: int = 90,
+) -> Dict[str, Any]:
+    with training_context() as (db, storage):
+        from .coaching import coaching_evaluation_report as _eval
+
+        return _eval(db, storage, target_date=target_date, lookback_days=lookback_days)
+
+
 def metric_catalog() -> Dict[str, Any]:
     with training_context() as (db, _storage):
         table_counts = _model_table_counts(db)

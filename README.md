@@ -150,8 +150,11 @@ MCP-serveren eksponerer blant annet:
 - `compare_recent_runs` - siste løp eller samme-rute-sammenligning
 - `metric_catalog` - liste over whitelisted metrics som kan hentes
 - `coaching_decision_snapshot` - consistency, event readiness, limiters, anbefalt økt
-- `recommend_next_session` - neste økt med varighet, puls, begrunnelse og alternativ
+- `recommend_next_session` - neste økt med varighet, puls, begrunnelse, decision_trace og alternativ
 - `classify_activity_session` - klassifiser løpeøkt (recovery, easy, threshold, intervals, race, …)
+- `training_decision_brief` - kompakt AI-coaching-pakke (athlete state, limiters, anbefaling, trace)
+- `session_quality` / `comparable_sessions` - øktkvalitet og like-økt-benchmark
+- `coaching_evaluation_report` - maskinlesbar modellvalidering (kalibrering, health, coverage)
 - `query_metric_timeseries` - hent én metric som kompakt tidsserie
 
 Resources:
