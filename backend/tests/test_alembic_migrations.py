@@ -140,6 +140,7 @@ class AlembicMigrationTests(unittest.TestCase):
         self.assertIn("training_experiments", tables)
         self.assertIn("coaching_model_registry", tables)
         self.assertIn("shadow_recommendations", tables)
+        self.assertIn("validation_runs", tables)
 
 
 if __name__ == "__main__":

@@ -294,6 +294,25 @@ Mål: correctness → validation → reliability → maintainability → longer-
 
 Alembic: `f62b1c9d0e02` (idempotency + registry + shadow).
 
+## Coaching v7 — true OOS validation + personal periodization
+
+| Komponent | Rolle |
+|-----------|-------|
+| `AsOfTrainingContext` / `ModelTrainingContext` | Fold isolation: history ≤ train_end |
+| `RecommendationUtilityEvaluator` | Imitation ≠ outcome utility |
+| `ValidationRun` + `ValidationRunService` | Immutable validation evidence |
+| `CoachingModelRegistry.promote(validation_run_id=…)` | Gate derived from ValidationRun |
+| Confidence calibration | Reliability diagram; overconfident → `decision_strength` |
+| `ExecutionPatternService` / `AthleteUtilityProfile` | Adherence feasibility + transparent weights |
+| `LoadProgressionService` | Personal progression envelope (not 10% rule) |
+| Adaptive `MesocyclePlanner` + `MesocycleSimulationService` | History-driven 4–6 week targets + candidate compare |
+| Personalized `TaperPlanner` | Defaults until ≥4 races |
+| `RaceOutcomeAnalysisService` / env-aware intensity | Richer race outcomes; pace ranges with weather caution |
+| `FreshnessPolicy` / `missingness` | Stale/missing ≠ negative |
+| `ShadowOutcomeEvaluationService` | Prospective production vs shadow vs actual |
+
+Alembic head: `a71c2e8f0b03` (validation_runs + registry FK).
+
 ## Migrering
 
 Kjør idempotent migrering:
