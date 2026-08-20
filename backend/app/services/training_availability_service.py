@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..config import get_settings
 from ..database.models.coaching_v5 import TrainingAvailability
+from .coaching_tx import finalize_write
 
 WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 
@@ -29,6 +30,7 @@ class TrainingAvailabilityService:
         avoid_hard: bool = False,
         allows_long_run: Optional[bool] = None,
         reason: Optional[str] = None,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         query = self.db.query(TrainingAvailability)
         if on_date is not None:
@@ -51,8 +53,9 @@ class TrainingAvailabilityService:
         row.avoid_hard = avoid_hard
         row.allows_long_run = allows_long_run
         row.reason = reason
-        self.db.commit()
-        self.db.refresh(row)
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
         return self._to_dict(row)
 
     def constraints_for_week(self, week_start: date) -> List[Dict[str, Any]]:

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from ..database.models.coaching_v5 import AthleteFeedback
+from .coaching_tx import finalize_write
 
 VALID_FEEL = {"very_easy", "easy", "as_expected", "hard", "very_hard"}
 VALID_LEGS = {"fresh", "normal", "heavy"}
@@ -28,6 +29,7 @@ class AthleteFeedbackService:
         motivation: Optional[int] = None,
         notes: Optional[str] = None,
         recorded_at: Optional[datetime] = None,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         if session_feel and session_feel not in VALID_FEEL:
             raise ValueError("invalid session_feel")
@@ -44,8 +46,9 @@ class AthleteFeedbackService:
             notes=notes,
         )
         self.db.add(row)
-        self.db.commit()
-        self.db.refresh(row)
+        finalize_write(self.db, commit=commit)
+        if commit:
+            self.db.refresh(row)
         return self._to_dict(row)
 
     def get_for_activity(self, activity_id: str) -> Optional[Dict[str, Any]]:

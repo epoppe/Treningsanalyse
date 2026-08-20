@@ -1,0 +1,1 @@
+"""Schema package root."""

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..database.models.coaching_v5 import CalibrationSnapshot
 from .athlete_calibration_service import AthleteCalibrationService
+from .coaching_tx import finalize_write
 
 MAX_RELATIVE_STEP = 0.15
 HYSTERESIS_RELATIVE = 0.08
@@ -26,13 +27,14 @@ class CalibrationSnapshotService:
         as_of_date: Optional[date] = None,
         calibration: Optional[Dict[str, Any]] = None,
         prefer_defaults: bool = False,
+        commit: bool = True,
     ) -> Dict[str, Any]:
         as_of_date = as_of_date or date.today()
         calibration = calibration or self._calibration.calibrate_all(end_date=as_of_date)
         snapshots = []
         for item in calibration.get("parameters") or []:
             snapshots.append(self._update_one(item, as_of_date, prefer_defaults=prefer_defaults))
-        self.db.commit()
+        finalize_write(self.db, commit=commit)
         return {
             "as_of_date": as_of_date.isoformat(),
             "snapshots": snapshots,

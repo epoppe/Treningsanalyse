@@ -1030,12 +1030,16 @@ def coaching_backtest_summary(
         )
 
 
-def training_decision_brief(target_date: Optional[str] = None, persist: Optional[bool] = None) -> Dict[str, Any]:
-    """Kompakt AI-coaching brief: state, limiters, neste økt, decision_trace."""
+def training_decision_brief(
+    target_date: Optional[str] = None,
+    persist: Optional[bool] = None,
+    detail: str = "concise",
+) -> Dict[str, Any]:
+    """Kompakt AI-coaching brief via CoachingOrchestrator (default detail=concise)."""
     with training_context() as (db, storage):
         from .coaching import training_decision_brief as _brief
 
-        return _brief(db, storage, target_date=target_date, persist=persist)
+        return _brief(db, storage, target_date=target_date, persist=persist, detail=detail)
 
 
 def session_quality(activity_id: Optional[str] = None) -> Dict[str, Any]:

@@ -97,6 +97,16 @@ Migrasjon `e51eadc0a001` legger til:
 - `training_availability` — ukedagsmal og dato-overrides
 - `training_experiments` — eksplisitt bekreftede coaching-eksperimenter
 
+## Coaching hardening
+
+Migrasjon `f62b1c9d0e02` legger til:
+
+- `decision_payload_hash` / `decision_confidence` / `data_quality_score` / shadow-felter på `recommendation_records`
+- `content_hash` på `training_plan_versions`
+- unique `uq_exec_rec_activity` på `recommendation_executions`
+- `coaching_model_registry`
+- `shadow_recommendations`
+
 ## Query-ytelse (indekser)
 
 Migrasjon `d4b2e8c17a01` legger til:

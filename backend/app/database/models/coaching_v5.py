@@ -33,6 +33,7 @@ class RecommendationRecord(Base):
     __table_args__ = (
         Index("idx_rec_as_of_active", "as_of_date", "is_active"),
         Index("idx_rec_generated_at", "generated_at"),
+        Index("idx_rec_idempotency", "as_of_date", "config_hash", "decision_payload_hash"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -47,6 +48,7 @@ class RecommendationRecord(Base):
     ranker_version = Column(String(32), nullable=True)
     prescription_version = Column(String(32), nullable=True)
     config_hash = Column(String(64), nullable=False)
+    decision_payload_hash = Column(String(64), nullable=True)
     provenance_json = Column(JSON, nullable=True)
 
     goal_snapshot_json = Column(JSON, nullable=True)
@@ -58,11 +60,15 @@ class RecommendationRecord(Base):
     weekly_plan_json = Column(JSON, nullable=True)
     evidence_strength = Column(Float, nullable=True)
     recommendation_confidence = Column(Float, nullable=True)
+    decision_confidence = Column(Float, nullable=True)
+    data_quality_score = Column(Float, nullable=True)
     decision_status = Column(String(32), nullable=True)
     decision_trace_json = Column(JSON, nullable=True)
     model_health = Column(String(32), nullable=True)
     data_quality = Column(JSON, nullable=True)
     superseded_by_id = Column(Integer, ForeignKey("recommendation_records.id"), nullable=True)
+    is_shadow = Column(Boolean, nullable=False, default=False)
+    shadow_of_id = Column(Integer, ForeignKey("recommendation_records.id"), nullable=True)
 
 
 class TrainingPlan(Base):
@@ -107,6 +113,7 @@ class TrainingPlanVersion(Base):
     reason_json = Column(JSON, nullable=True)
     simulation_json = Column(JSON, nullable=True)
     scores_json = Column(JSON, nullable=True)
+    content_hash = Column(String(64), nullable=True)
     plan = relationship("TrainingPlan", back_populates="versions", foreign_keys=[plan_id])
 
 
@@ -130,6 +137,7 @@ class RecommendationExecution(Base):
     __table_args__ = (
         Index("idx_exec_recommendation", "recommendation_id"),
         Index("idx_exec_activity", "activity_id"),
+        UniqueConstraint("recommendation_id", "activity_id", name="uq_exec_rec_activity"),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -201,3 +209,36 @@ class TrainingExperiment(Base):
     user_confirmed = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     notes = Column(Text, nullable=True)
+
+
+class CoachingModelRegistryEntry(Base):
+    __tablename__ = "coaching_model_registry"
+    __table_args__ = (UniqueConstraint("model_key", "version", name="uq_model_key_version"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    model_key = Column(String(64), nullable=False)
+    version = Column(String(64), nullable=False)
+    status = Column(String(32), nullable=False, default="experimental")
+    config_json = Column(JSON, nullable=True)
+    promotion_gate_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    activated_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+
+
+class ShadowRecommendation(Base):
+    """Experimental model output persisted separately — never drives the active plan."""
+
+    __tablename__ = "shadow_recommendations"
+    __table_args__ = (Index("idx_shadow_as_of", "as_of_date"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    as_of_date = Column(Date, nullable=False)
+    generated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    production_recommendation_id = Column(Integer, ForeignKey("recommendation_records.id"), nullable=True)
+    model_key = Column(String(64), nullable=False)
+    model_version = Column(String(64), nullable=False)
+    production_workout_type = Column(String(64), nullable=True)
+    shadow_workout_type = Column(String(64), nullable=False)
+    payload_json = Column(JSON, nullable=True)
+    config_hash = Column(String(64), nullable=True)
