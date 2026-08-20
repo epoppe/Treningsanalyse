@@ -80,6 +80,7 @@ class IntensityPrescriptionService:
         *,
         end_date: Optional[date] = None,
         include_treadmill: bool = False,
+        environment: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         day = end_date or date.today()
         zone = WORKOUT_TO_ZONE.get(zone_or_workout, zone_or_workout)
@@ -121,10 +122,17 @@ class IntensityPrescriptionService:
         if source == "rpe_fallback":
             confidence = min(confidence, 0.35)
 
+        env_adj = self._environment_pace_adjustment(pace, environment)
+        if env_adj.get("weak_weather"):
+            limitations.append("weak_weather_data")
+
         return {
             "zone": zone,
             "hr_bpm": hr,
             "pace_sec_km": pace,
+            "nominal_pace": pace,
+            "environment_adjusted_pace": env_adj.get("adjusted_pace"),
+            "adjustment_reason": env_adj.get("reason"),
             "speed_mps": speed,
             "power_w": power,
             "rpe": rpe,
@@ -138,6 +146,7 @@ class IntensityPrescriptionService:
                 "confidence": lt2.get("confidence"),
             },
             "limitations": limitations,
+            "missing_evidence": env_adj.get("missing_evidence") or [],
         }
 
     def _hr_range(
@@ -203,6 +212,69 @@ class IntensityPrescriptionService:
             return paces, [round(s, 3) for s in speeds], "adaptive_lt1", float(lt1.get("confidence") or 0.5)
 
         return None, None, "rpe_fallback", 0.25
+
+    @staticmethod
+    def _environment_pace_adjustment(
+        nominal_pace: Optional[List[int]],
+        environment: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Slow pace targets for heat/humidity/wind/hills; do not over-adjust on weak data."""
+        if nominal_pace is None:
+            return {
+                "adjusted_pace": None,
+                "reason": None,
+                "weak_weather": False,
+                "missing_evidence": ["nominal_pace"],
+            }
+        if not environment:
+            return {
+                "adjusted_pace": list(nominal_pace),
+                "reason": "no_environment_data",
+                "weak_weather": True,
+                "missing_evidence": ["temperature", "humidity", "wind", "elevation"],
+            }
+        temp = environment.get("temperature_c")
+        humidity = environment.get("humidity_pct")
+        wind = environment.get("wind_mps")
+        grade = environment.get("elevation_gain_m_per_km")
+        present = [x for x in (temp, humidity, wind, grade) if x is not None]
+        if len(present) < 1:
+            return {
+                "adjusted_pace": list(nominal_pace),
+                "reason": "weak_weather_data",
+                "weak_weather": True,
+                "missing_evidence": ["temperature", "humidity", "wind", "elevation"],
+            }
+        factor = 1.0
+        reasons = []
+        if temp is not None and float(temp) >= 22:
+            factor += min(0.08, (float(temp) - 20) * 0.008)
+            reasons.append("heat")
+        if humidity is not None and float(humidity) >= 70 and temp is not None and float(temp) >= 18:
+            factor += 0.02
+            reasons.append("humidity")
+        if wind is not None and float(wind) >= 8:
+            factor += 0.02
+            reasons.append("wind")
+        if grade is not None and float(grade) >= 15:
+            factor += min(0.06, float(grade) / 400.0)
+            reasons.append("hilly")
+        adjusted = [int(p * factor) for p in nominal_pace]
+        return {
+            "adjusted_pace": adjusted,
+            "reason": ",".join(reasons) or "neutral",
+            "weak_weather": len(present) < 2,
+            "missing_evidence": [
+                k
+                for k, v in {
+                    "temperature": temp,
+                    "humidity": humidity,
+                    "wind": wind,
+                    "elevation": grade,
+                }.items()
+                if v is None
+            ],
+        }
 
     @staticmethod
     def _power_range(zone: str, cp: Optional[float]) -> Optional[List[int]]:
