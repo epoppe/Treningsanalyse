@@ -36,12 +36,14 @@ class WorkoutCandidateRanker:
         context: Dict[str, Any],
         *,
         historical_by_type: Optional[Dict[str, float]] = None,
+        prospective_outcomes: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         historical_by_type = historical_by_type or {}
+        prospective_outcomes = prospective_outcomes or {}
         evidence_strength = float(context.get("evidence_strength") or 0.5)
         rows: List[Dict[str, Any]] = []
         for workout in CANDIDATES:
-            row = self._score_one(workout, context, historical_by_type)
+            row = self._score_one(workout, context, historical_by_type, prospective_outcomes)
             rows.append(row)
 
         eligible = [r for r in rows if r["eligible"]]
@@ -73,6 +75,7 @@ class WorkoutCandidateRanker:
         workout: str,
         ctx: Dict[str, Any],
         historical: Dict[str, float],
+        prospective: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         eligible, reason = self._eligible(workout, ctx)
         limiter = ctx.get("top_limiter")
@@ -139,6 +142,10 @@ class WorkoutCandidateRanker:
 
         hist = historical.get(workout)
         hist_score = float(hist) if hist is not None else 50.0
+        prospective = prospective or {}
+        outcome_component = prospective.get(workout)
+        if outcome_component and outcome_component.get("usable"):
+            hist_score = float(outcome_component["value"])
 
         ranking = 50.0
         ranking += WEIGHTS["benefit_score"] * benefit
@@ -148,7 +155,7 @@ class WorkoutCandidateRanker:
         ranking += WEIGHTS["recovery_cost"] * recovery_cost
         ranking += WEIGHTS["risk_penalty"] * risk
 
-        return {
+        row = {
             "workout_type": workout,
             "benefit_score": round(benefit, 1),
             "recovery_cost": round(recovery_cost, 1),
@@ -161,6 +168,15 @@ class WorkoutCandidateRanker:
             "ineligible_reason": reason,
             "ranking_score": round(ranking, 1),
         }
+        if outcome_component:
+            row["historical_outcome_component"] = {
+                "value": outcome_component.get("value"),
+                "sample_count": outcome_component.get("sample_count"),
+                "confidence": outcome_component.get("confidence"),
+                "source": outcome_component.get("source") or "prospective_records",
+                "used_in_ranking": bool(outcome_component.get("usable")),
+            }
+        return row
 
     @staticmethod
     def _eligible(workout: str, ctx: Dict[str, Any]) -> tuple:

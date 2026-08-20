@@ -19,6 +19,16 @@ from .sync_run import SyncRun
 from .sync_lock import SyncLock
 from .metric_provenance import MetricProvenance
 from .lactate_threshold_history import LactateThresholdHistory
+from .coaching_v5 import (
+    RecommendationRecord,
+    TrainingPlan,
+    TrainingPlanVersion,
+    AthleteFeedback,
+    RecommendationExecution,
+    CalibrationSnapshot,
+    TrainingAvailability,
+    TrainingExperiment,
+)
 
 __all__ = [
     'Base',
@@ -47,5 +57,13 @@ __all__ = [
     'SyncRun',
     'SyncLock',
     'MetricProvenance',
-    'LactateThresholdHistory'
+    'LactateThresholdHistory',
+    'RecommendationRecord',
+    'TrainingPlan',
+    'TrainingPlanVersion',
+    'AthleteFeedback',
+    'RecommendationExecution',
+    'CalibrationSnapshot',
+    'TrainingAvailability',
+    'TrainingExperiment',
 ]

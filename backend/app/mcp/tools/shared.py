@@ -981,6 +981,7 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> Dict[str, A
 def recommend_next_session(
     target_date: Optional[str] = None,
     include_treadmill: bool = False,
+    persist: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Anbefalt neste løpeøkt med varighet, puls, begrunnelse og alternativ."""
     with training_context() as (db, storage):
@@ -991,6 +992,7 @@ def recommend_next_session(
             storage,
             target_date=target_date,
             include_treadmill=include_treadmill,
+            persist=persist,
         )
 
 
@@ -1028,12 +1030,12 @@ def coaching_backtest_summary(
         )
 
 
-def training_decision_brief(target_date: Optional[str] = None) -> Dict[str, Any]:
+def training_decision_brief(target_date: Optional[str] = None, persist: Optional[bool] = None) -> Dict[str, Any]:
     """Kompakt AI-coaching brief: state, limiters, neste økt, decision_trace."""
     with training_context() as (db, storage):
         from .coaching import training_decision_brief as _brief
 
-        return _brief(db, storage, target_date=target_date)
+        return _brief(db, storage, target_date=target_date, persist=persist)
 
 
 def session_quality(activity_id: Optional[str] = None) -> Dict[str, Any]:

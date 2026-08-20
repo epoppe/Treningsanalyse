@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 ACTIVITY_SYNC_COMMIT_BATCH_SIZE = 100
 
 
+def _link_recommendation_execution(db, activity: Activity) -> None:
+    try:
+        from ..recommendation_execution_service import RecommendationExecutionService
+
+        db.flush()
+        RecommendationExecutionService(db).link_activity(activity, commit=False)
+    except Exception:
+        logger.debug("Kunne ikke koble aktivitet %s til recommendation ledger", getattr(activity, "activity_id", None), exc_info=True)
+
+
 def parse_activity_start_from_json(act_data: Dict[str, Any]) -> datetime:
     """
     Tolker starttid fra JSON-aktivitet (Garmin API, epoch eller ISO-strenger).
@@ -286,6 +296,7 @@ class ActivitySyncService:
             self.db.add(new_activity)
             added_count += 1
             existing_ids.add(activity_id)
+            _link_recommendation_execution(self.db, new_activity)
 
             pending_since_commit += 1
             if pending_since_commit >= ACTIVITY_SYNC_COMMIT_BATCH_SIZE:
@@ -838,6 +849,7 @@ class ActivitySyncService:
                     added_count += 1
                     inserted_activity_ids.append(activity_id)
                     existing_ids.add(activity_id)
+                    _link_recommendation_execution(self.db, new_activity)
                 else:
                     changed, changed_fields = apply_activity_field_updates(
                         existing_activity,

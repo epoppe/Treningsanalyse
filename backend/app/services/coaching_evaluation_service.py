@@ -32,10 +32,14 @@ class CoachingEvaluationService:
         end = end_date or date.today()
         start = end - timedelta(days=lookback_days)
 
-        outcomes = RecommendationOutcomeService(self.db, self.storage).evaluate_period(
+        backtest_outcomes = RecommendationOutcomeService(self.db, self.storage).evaluate_period(
             start_date=start,
             end_date=end,
             step_days=7,
+        )
+        prospective_outcomes = RecommendationOutcomeService(self.db, self.storage).evaluate_recorded_period(
+            start_date=start,
+            end_date=end,
         )
         calibration = CalibrationReportService(self.db, self.storage).build_report(
             start_date=start,
@@ -57,9 +61,16 @@ class CoachingEvaluationService:
             "generated_at": end.isoformat(),
             "lookback_days": lookback_days,
             "recommendation_accuracy": {
-                "adherence_rate": outcomes.get("summary", {}).get("adherence_rate"),
-                "evaluation_count": outcomes.get("summary", {}).get("count"),
-                "note": "Adherence is not correctness; see outcome labels in evaluations.",
+                "backtest": {
+                    "evaluation_kind": "backtest",
+                    "adherence_rate": backtest_outcomes.get("summary", {}).get("adherence_rate"),
+                    "evaluation_count": backtest_outcomes.get("summary", {}).get("count"),
+                },
+                "prospective": {
+                    "evaluation_kind": "prospective",
+                    "evaluation_count": prospective_outcomes.get("summary", {}).get("count"),
+                },
+                "note": "Backtest regenerates the current model. Prospective uses the recommendation ledger.",
             },
             "session_classification_quality": {
                 "avg_confidence_proxy": health.get("checks", {}).get("avg_classifier_confidence"),
