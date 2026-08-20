@@ -211,6 +211,32 @@ class TrainingExperiment(Base):
     notes = Column(Text, nullable=True)
 
 
+class ValidationRun(Base):
+    """Immutable walk-forward (or similar) validation evidence for model promotion."""
+
+    __tablename__ = "validation_runs"
+    __table_args__ = (
+        Index("idx_validation_runs_model", "model_key", "model_version"),
+        Index("idx_validation_runs_created", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    model_key = Column(String(64), nullable=False)
+    model_version = Column(String(64), nullable=False)
+    config_hash = Column(String(64), nullable=False)
+    data_start = Column(Date, nullable=False)
+    data_end = Column(Date, nullable=False)
+    fold_definition_json = Column(JSON, nullable=True)
+    metrics_json = Column(JSON, nullable=True)
+    baseline_metrics_json = Column(JSON, nullable=True)
+    sample_size = Column(Integer, nullable=False, default=0)
+    validation_code_version = Column(String(32), nullable=False)
+    status = Column(String(32), nullable=False, default="completed")
+    reproducibility_bundle_json = Column(JSON, nullable=True)
+    result_fingerprint = Column(String(64), nullable=True)
+
+
 class CoachingModelRegistryEntry(Base):
     __tablename__ = "coaching_model_registry"
     __table_args__ = (UniqueConstraint("model_key", "version", name="uq_model_key_version"),)
@@ -221,6 +247,7 @@ class CoachingModelRegistryEntry(Base):
     status = Column(String(32), nullable=False, default="experimental")
     config_json = Column(JSON, nullable=True)
     promotion_gate_json = Column(JSON, nullable=True)
+    validation_run_id = Column(Integer, ForeignKey("validation_runs.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     activated_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)

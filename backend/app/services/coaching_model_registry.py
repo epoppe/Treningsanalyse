@@ -1,4 +1,4 @@
-"""Model registry — experimental → shadow → eligible → active → retired."""
+"""Model registry — promotion requires immutable ValidationRun evidence."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from ..database.models.coaching_v5 import CoachingModelRegistryEntry
+from ..database.models.coaching_v5 import CoachingModelRegistryEntry, ValidationRun
 from ..schemas.coaching import ModelRegistryStatus, coerce_enum
 from .coaching_tx import finalize_write
 
@@ -55,10 +55,96 @@ class CoachingModelRegistry:
         *,
         model_key: str,
         version: str,
-        gate: Dict[str, Any],
+        validation_run_id: Optional[int] = None,
+        gate: Optional[Dict[str, Any]] = None,
+        manual_override: bool = False,
+        override_reason: Optional[str] = None,
         commit: bool = True,
     ) -> Dict[str, Any]:
-        """Promotion requires explicit gate evidence — never auto-activate."""
+        """
+        Promotion derives evidence from immutable ValidationRun.
+
+        Caller-supplied `gate` is rejected unless manual_override=True with reason
+        (legacy / emergency only).
+        """
+        if validation_run_id is None and not manual_override:
+            raise ValueError("promotion requires validation_run_id (or manual_override=true)")
+
+        derived_gate: Dict[str, Any]
+        if validation_run_id is not None:
+            run = self.db.query(ValidationRun).filter(ValidationRun.id == validation_run_id).first()
+            if run is None:
+                raise ValueError("validation_run not found")
+            if run.status != "completed":
+                raise ValueError("promotion blocked: validation_run is not completed/immutable")
+            if run.model_key != model_key:
+                raise ValueError("validation_run model_key mismatch")
+            derived_gate = self._gate_from_validation_run(run)
+            derived_gate["validation_run_id"] = run.id
+        elif manual_override:
+            if not override_reason:
+                raise ValueError("manual_override requires override_reason")
+            if not gate:
+                raise ValueError("manual_override requires gate dict")
+            derived_gate = dict(gate)
+            derived_gate["manual_override"] = True
+            derived_gate["override_reason"] = override_reason
+        else:
+            raise ValueError("promotion requires validation_run_id")
+
+        self._assert_gate(derived_gate)
+
+        row = (
+            self.db.query(CoachingModelRegistryEntry)
+            .filter(
+                CoachingModelRegistryEntry.model_key == model_key,
+                CoachingModelRegistryEntry.version == version,
+            )
+            .first()
+        )
+        if row is None:
+            raise ValueError("model version not registered")
+
+        actives = (
+            self.db.query(CoachingModelRegistryEntry)
+            .filter(
+                CoachingModelRegistryEntry.model_key == model_key,
+                CoachingModelRegistryEntry.status == ModelRegistryStatus.ACTIVE.value,
+            )
+            .all()
+        )
+        for active in actives:
+            active.status = ModelRegistryStatus.RETIRED.value
+        row.status = ModelRegistryStatus.ACTIVE.value
+        row.promotion_gate_json = derived_gate
+        row.validation_run_id = validation_run_id
+        row.activated_at = datetime.now(timezone.utc)
+        if manual_override:
+            notes = (row.notes or "") + f"\n[override] {override_reason}"
+            row.notes = notes.strip()
+        finalize_write(self.db, commit=commit)
+        return self._to_dict(row)
+
+    @staticmethod
+    def _gate_from_validation_run(run: ValidationRun) -> Dict[str, Any]:
+        metrics = run.metrics_json or {}
+        baseline_delta = metrics.get("utility_delta")
+        if baseline_delta is None:
+            baseline_delta = metrics.get("baseline_delta")
+        return {
+            "walk_forward": bool(metrics.get("walk_forward", True)),
+            "baseline_delta": baseline_delta,
+            "sample_size": int(metrics.get("sample_size") or run.sample_size or 0),
+            "stability": metrics.get("stability") or "watch",
+            "guardrails_pass": bool(metrics.get("guardrails_pass", False)),
+            "calibration": metrics.get("calibration") or metrics.get("confidence_calibration"),
+            "utility_metric": metrics.get("utility_metric"),
+            "imitation_rate": metrics.get("imitation_rate"),
+            "source": "validation_run",
+        }
+
+    @staticmethod
+    def _assert_gate(gate: Dict[str, Any]) -> None:
         required = ("walk_forward", "baseline_delta", "sample_size", "stability", "guardrails_pass")
         missing = [k for k in required if k not in gate]
         if missing:
@@ -71,33 +157,6 @@ class CoachingModelRegistry:
             raise ValueError("promotion blocked: insufficient sample_size")
         if gate.get("stability") not in {"stable", "watch"}:
             raise ValueError("promotion blocked: unstable personalization/model")
-
-        row = (
-            self.db.query(CoachingModelRegistryEntry)
-            .filter(
-                CoachingModelRegistryEntry.model_key == model_key,
-                CoachingModelRegistryEntry.version == version,
-            )
-            .first()
-        )
-        if row is None:
-            raise ValueError("model version not registered")
-        # Retire previous active for same key
-        actives = (
-            self.db.query(CoachingModelRegistryEntry)
-            .filter(
-                CoachingModelRegistryEntry.model_key == model_key,
-                CoachingModelRegistryEntry.status == ModelRegistryStatus.ACTIVE.value,
-            )
-            .all()
-        )
-        for active in actives:
-            active.status = ModelRegistryStatus.RETIRED.value
-        row.status = ModelRegistryStatus.ACTIVE.value
-        row.promotion_gate_json = gate
-        row.activated_at = datetime.now(timezone.utc)
-        finalize_write(self.db, commit=commit)
-        return self._to_dict(row)
 
     def set_status(
         self,
@@ -156,6 +215,7 @@ class CoachingModelRegistry:
             "status": row.status,
             "config": row.config_json,
             "promotion_gate": row.promotion_gate_json,
+            "validation_run_id": getattr(row, "validation_run_id", None),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "activated_at": row.activated_at.isoformat() if row.activated_at else None,
             "notes": row.notes,

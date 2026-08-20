@@ -63,9 +63,14 @@ class TrainingResponseService:
         end_date: Optional[date] = None,
         lookback_days: int = 365,
         lag_windows: Tuple[int, ...] = DEFAULT_LAG_WINDOWS,
+        training_context=None,
     ) -> Dict[str, Any]:
-        end = end_date or date.today()
+        from .as_of_training_context import resolve_history_end
+
+        end = resolve_history_end(end_date, training_context=training_context)
         start = end - timedelta(days=lookback_days)
+        if training_context is not None and hasattr(training_context, "train_start"):
+            start = max(start, training_context.train_start)
         # Conservative family size for stimulus × outcome × lag search.
         family_size = max(1, len(STIMULUS_METRICS) * len(OUTCOME_METRICS) * len(lag_windows))
         relationships: List[Dict[str, Any]] = []
@@ -98,6 +103,7 @@ class TrainingResponseService:
                 "min_effect_for_ranking": MIN_EFFECT_FOR_RANKING,
                 "min_n_for_ranking": MIN_N_FOR_RANKING,
             },
+            "training_context_applied": training_context is not None,
             "disclaimer": "Correlations describe historical co-movement — not causal training effects.",
         }
 
