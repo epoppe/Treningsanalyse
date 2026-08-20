@@ -213,6 +213,37 @@ def coaching_backtest_summary(
 
 
 @mcp.tool()
+def training_decision_brief(target_date: Optional[str] = None) -> dict:
+    """Compact executive coaching package: athlete state, limiters, next session, decision trace."""
+    return _call_tool(training_tools.training_decision_brief, target_date=target_date)
+
+
+@mcp.tool()
+def session_quality(activity_id: Optional[str] = None) -> dict:
+    """Context-aware quality score for one completed run (not comparable across session types)."""
+    return _call_tool(training_tools.session_quality, activity_id=activity_id)
+
+
+@mcp.tool()
+def comparable_sessions(activity_id: Optional[str] = None, limit: int = 10) -> dict:
+    """Compare one run to historically similar sessions (route, distance, weather, type)."""
+    return _call_tool(training_tools.comparable_sessions, activity_id=activity_id, limit=limit)
+
+
+@mcp.tool()
+def coaching_evaluation_report(
+    target_date: Optional[str] = None,
+    lookback_days: int = 90,
+) -> dict:
+    """Machine-readable evaluation: recommendation accuracy, calibration, model health."""
+    return _call_tool(
+        training_tools.coaching_evaluation_report,
+        target_date=target_date,
+        lookback_days=lookback_days,
+    )
+
+
+@mcp.tool()
 def query_metric_timeseries(
     metric_key: str,
     start_date: Optional[str] = None,

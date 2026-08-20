@@ -13,13 +13,16 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .adaptive_threshold_service import AdaptiveThresholdService
 from .coaching_decision_metrics_service import CoachingDecisionMetricsService
+from .coaching_session_types import HARD_SESSION_TYPES, HARD_WORKOUT_TYPES
+from .load_variability_service import LoadVariabilityService
 from .metric_evidence import confidence_from_sample_count
 from .ppap_metrics_service import PpapMetricsService
 from .session_classifier_service import SessionClassifierService
 from .trend_analysis_service import TrendAnalysisService
 
-HARD_SESSION_TYPES = frozenset({"threshold", "vo2_intervals", "tempo", "anaerobic", "race"})
-HARD_WORKOUT_TYPES = frozenset({"threshold", "vo2_intervals", "race_pace"})
+# Re-eksport for bakoverkompatibilitet (backtest, tester, etc.)
+__all__ = ["HARD_SESSION_TYPES", "HARD_WORKOUT_TYPES", "NextBestWorkoutService"]
+
 MIN_RECOVERY_HOURS_AFTER_HARD = 36
 
 
@@ -39,6 +42,7 @@ class NextBestWorkoutService:
         self._classifier = SessionClassifierService(self.db, storage)
         self._trends = TrendAnalysisService(self.db, storage)
         self._thresholds = AdaptiveThresholdService(self.db, storage)
+        self._load_var = LoadVariabilityService(self.db, storage, self._ppap)
 
     def recommend(
         self,
@@ -48,7 +52,7 @@ class NextBestWorkoutService:
     ) -> Dict[str, Any]:
         day = day or date.today()
         context = self._build_context(day, include_treadmill=include_treadmill)
-        workout_type, rationale, contraindications = self._decide(context)
+        workout_type, rationale, contraindications, decision_trace = self._decide(context)
         confidence = self._confidence(context, contraindications)
         duration_min, target_hr = self._targets(workout_type, context)
         alternative = self._alternative(context)
@@ -62,7 +66,10 @@ class NextBestWorkoutService:
             "confidence": round(confidence, 2),
             "rationale": rationale,
             "contraindications": contraindications,
+            "decision_trace": decision_trace,
+            "decision": workout_type,
             "alternative": alternative,
+            "load_variability": context.get("load_variability"),
             "context_summary": {
                 "readiness": context.get("readiness"),
                 "tsb": context.get("tsb"),
@@ -86,6 +93,7 @@ class NextBestWorkoutService:
         last_hard = self._last_hard_session(day, include_treadmill=include_treadmill)
         lt1 = self._thresholds.estimate_lt1(end_date=day, include_treadmill=include_treadmill)
         ctl_trend = self._trends.analyze_metric("ctl", end_date=day, window_days=28)
+        load_variability = self._load_var.analyze(day)
 
         acwr = (float(atl) / float(ctl)) if ctl and atl and float(ctl) > 0 else None
         load_ratio = None
@@ -111,46 +119,86 @@ class NextBestWorkoutService:
             "lt1_confidence": lt1.get("confidence", 0),
             "lt1_hr": lt1.get("lt1_hr"),
             "ctl_trend_direction": ctl_trend.get("direction"),
+            "load_variability": load_variability,
             "include_treadmill": include_treadmill,
         }
 
-    def _decide(self, ctx: Dict[str, Any]) -> Tuple[str, List[str], List[str]]:
+    def _decide(self, ctx: Dict[str, Any]) -> Tuple[str, List[str], List[str], List[Dict[str, Any]]]:
         rationale: List[str] = []
         contraindications: List[str] = []
+        trace: List[Dict[str, Any]] = []
 
         readiness = ctx.get("readiness")
         tsb = ctx.get("tsb")
         block = ctx.get("training_block")
+        load_flags = (ctx.get("load_variability") or {}).get("flags", [])
+
+        if readiness is not None:
+            effect = "supports_training" if readiness >= 55 else "limits_intensity"
+            if readiness < 35:
+                effect = "requires_rest"
+            trace.append({"factor": "readiness", "value": readiness, "effect": effect})
+
+        if tsb is not None:
+            effect = "supports_quality" if -8 <= tsb <= 12 else "limits_hard_work"
+            if tsb < -25:
+                effect = "requires_recovery"
+            trace.append({"factor": "tsb", "value": tsb, "effect": effect})
+
+        if ctx.get("hard_days_7d") is not None:
+            effect = "blocks_hard_session" if ctx["hard_days_7d"] >= 2 else "allows_quality"
+            trace.append(
+                {
+                    "factor": "hard_sessions_last_7d",
+                    "value": ctx["hard_days_7d"],
+                    "effect": effect,
+                }
+            )
+
+        for flag in load_flags:
+            trace.append({"factor": "load_variability", "value": flag, "effect": "favors_easy_or_recovery"})
 
         if readiness is not None and readiness < 35:
             rationale.append(f"readiness={readiness:.0f} indicates very low recovery")
-            return "rest", rationale, contraindications
+            return "rest", rationale, contraindications, trace
 
         if tsb is not None and tsb < -25:
             rationale.append(f"TSB={tsb:.0f} suggests high accumulated fatigue")
-            return "recovery_run", rationale, contraindications
+            return "recovery_run", rationale, contraindications, trace
 
         if ctx.get("hrv_delta_pct") is not None and ctx["hrv_delta_pct"] < -15:
             contraindications.append("HRV significantly below baseline")
             rationale.append("HRV drop suggests incomplete recovery")
-            return "easy_run", rationale, contraindications
+            trace.append(
+                {
+                    "factor": "hrv_delta_pct",
+                    "value": ctx["hrv_delta_pct"],
+                    "effect": "blocks_hard_session",
+                }
+            )
+            return "easy_run", rationale, contraindications, trace
 
         if ctx.get("sleep_debt_hours") is not None and ctx["sleep_debt_hours"] > 8:
             rationale.append(f"sleep debt={ctx['sleep_debt_hours']:.1f}h")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
+
+        if "rapid_load_change" in load_flags or "monotonous_loading" in load_flags:
+            rationale.append(f"load variability flags: {', '.join(load_flags)}")
+            contraindications.append("avoid_compensatory_hard_session")
+            return "easy_run", rationale, contraindications, trace
 
         if ctx.get("acwr") is not None and ctx["acwr"] > 1.4:
             rationale.append(f"ACWR={ctx['acwr']:.2f} — rapid load increase")
             contraindications.append("avoid_compensatory_hard_session")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
 
         if block == "recovery":
             rationale.append("training block=recovery")
-            return "recovery_run", rationale, contraindications
+            return "recovery_run", rationale, contraindications, trace
 
         if block == "overload":
             rationale.append("training block=overload — prioritize absorption")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
 
         last_hard = ctx.get("last_hard_session")
         if last_hard and ctx.get("hard_days_7d", 0) >= 1:
@@ -161,13 +209,27 @@ class NextBestWorkoutService:
                     f"last hard session ({last_hard.get('session_type')}) "
                     f"{hours_since:.0f}h ago — guardrail: no back-to-back hard days"
                 )
-                return "easy_run", rationale, contraindications
+                trace.append(
+                    {
+                        "factor": "hours_since_hard",
+                        "value": round(hours_since, 1),
+                        "effect": "blocks_hard_session",
+                    }
+                )
+                return "easy_run", rationale, contraindications, trace
 
         if ctx.get("hard_days_7d", 0) >= 3:
             rationale.append(f"{ctx['hard_days_7d']} hard days in last 7 — consolidate")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
 
         ctx["priority"] = self._priority(ctx)
+        trace.append(
+            {
+                "factor": "easy_volume_priority",
+                "value": ctx["priority"],
+                "effect": "supports_easy_volume" if ctx["priority"] == "aerobic_volume" else "supports_quality",
+            }
+        )
 
         if (
             readiness is not None
@@ -178,24 +240,24 @@ class NextBestWorkoutService:
         ):
             rationale.append("good readiness and form window for quality")
             if ctx.get("top_limiter") == "vo2":
-                return "vo2_intervals", rationale, contraindications
-            return "threshold", rationale, contraindications
+                return "vo2_intervals", rationale, contraindications, trace
+            return "threshold", rationale, contraindications, trace
 
         if readiness is not None and readiness >= 65 and tsb is not None and -8 <= tsb <= 5:
             rationale.append("moderate readiness supports controlled quality")
-            return "threshold", rationale, contraindications
+            return "threshold", rationale, contraindications, trace
 
         consistency = self._decision.get_consistency_score(ctx["day"])
         if consistency is not None and consistency < 55:
             rationale.append(f"consistency={consistency:.0f}% — rebuild habit with easy volume")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
 
         if ctx.get("ctl_trend_direction") == "declining" and block in {"base", "build"}:
             rationale.append("CTL trend declining — easy aerobic volume priority")
-            return "easy_run", rationale, contraindications
+            return "easy_run", rationale, contraindications, trace
 
         rationale.append("default aerobic maintenance")
-        return "easy_run", rationale, contraindications
+        return "easy_run", rationale, contraindications, trace
 
     def _priority(self, ctx: Dict[str, Any]) -> str:
         limiter = ctx.get("top_limiter")
