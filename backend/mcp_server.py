@@ -215,9 +215,18 @@ def coaching_backtest_summary(
 
 
 @mcp.tool()
-def training_decision_brief(target_date: Optional[str] = None, persist: Optional[bool] = None) -> dict:
-    """Compact executive coaching package: goal, phase, prescription, candidates, weekly plan."""
-    return _call_tool(training_tools.training_decision_brief, target_date=target_date, persist=persist)
+def training_decision_brief(
+    target_date: Optional[str] = None,
+    persist: Optional[bool] = None,
+    detail: str = "concise",
+) -> dict:
+    """Compact executive coaching package via orchestrator (detail=concise|standard|diagnostic)."""
+    return _call_tool(
+        training_tools.training_decision_brief,
+        target_date=target_date,
+        persist=persist,
+        detail=detail,
+    )
 
 
 @mcp.tool()

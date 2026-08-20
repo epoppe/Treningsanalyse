@@ -269,6 +269,31 @@ Historisk backtest ≠ recorded prospective recommendation ≠ observed executio
 
 `training_decision_brief` v5 legger til `current_recommendation_id`, `plan.id/version`, `decision_status`, `projected_week`, `recent_execution/feedback`, `personalization_stability` og `prospective_learning`.
 
+## Coaching hardening (post-v5)
+
+Mål: correctness → validation → reliability → maintainability → longer-horizon planning.
+
+| Komponent | Rolle |
+|-----------|-------|
+| `CoachingOrchestrator` | Canonical live/preview workflow; eier transaksjon |
+| `coaching_tx.finalize_write` / `coaching_transaction` | Domain flush; orchestrator commit/rollback |
+| Idempotency | `decision_payload_hash`, exec unique `(recommendation_id, activity_id)`, plan `content_hash` |
+| Schemas `app/schemas/coaching` | `schema_version`-wrappers; invalid legacy → degraded |
+| Enums | `DecisionStatus`, `ExecutionStatus`, `ModelRegistryStatus`, … |
+| Uncertainty | `data_quality` ≠ `evidence_strength` ≠ `decision_confidence` |
+| `TemporalModelValidationService` | Walk-forward (ingen random split) |
+| `CoachingBaselines` | Easy-unless / Riegel / pyramidal — krever positiv OOS-delta |
+| `statistical_uncertainty` | Bootstrap CI95 + evidence bands |
+| Multiple-testing (`TrainingResponseService`) | min n/effect, lag-stability, Bonferroni-ish bar; kun moderate/strong → ranking |
+| `CoachingModelRegistry` | experimental→shadow→eligible→active med promotion gate |
+| Shadow mode | Persisteres separat; endrer aldri aktiv plan |
+| `assert_query_budget` + request cache | N+1-kontroll / as_of-safe cache |
+| `CoachingDataExportService` | JSON-manifest uten credentials |
+| MCP `detail=` | `concise` (default) / `standard` / `diagnostic` |
+| `MesocyclePlanner` / `DeloadNeedService` / `TaperPlanner` | Etter hardening: 4–6 ukers sketch |
+
+Alembic: `f62b1c9d0e02` (idempotency + registry + shadow).
+
 ## Migrering
 
 Kjør idempotent migrering:
