@@ -269,6 +269,25 @@ class PpapMetricsService:
             return None
         return round(sum(values) / len(values), 1)
 
+    def get_rhr_delta_bpm(self, day: date) -> Optional[float]:
+        """Dagens RHR minus 14-dagers baseline (positiv = høyere hvilepuls)."""
+        row = (
+            self.db.query(RestingHeartRate.resting_heart_rate)
+            .filter(
+                and_(
+                    RestingHeartRate.measurement_date == day,
+                    RestingHeartRate.resting_heart_rate.isnot(None),
+                )
+            )
+            .first()
+        )
+        if row is None or row.resting_heart_rate is None:
+            return None
+        baseline = self.get_rhr_rolling(day - timedelta(days=1), 14)
+        if baseline is None:
+            return None
+        return round(float(row.resting_heart_rate) - float(baseline), 1)
+
     def _duration_curve_payload(self) -> Dict[str, Any]:
         if self._duration_curve_cache is not None:
             return self._duration_curve_cache

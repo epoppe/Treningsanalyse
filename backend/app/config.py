@@ -88,10 +88,31 @@ class Settings(BaseSettings):
     # Hopp over Garmin-innlogging ved app-oppstart (dev/test)
     SKIP_GARMIN_INIT: bool = False
 
-    @field_validator("GARMIN_TOKEN_FILE", "REDIS_PASSWORD", mode="before")
+    # Valgfritt løpsmål for Adaptive Coaching Engine v4 (ingen DB-krav)
+    ATHLETE_GOAL_TYPE: Optional[str] = None
+    ATHLETE_GOAL_EVENT: Optional[str] = None
+    ATHLETE_GOAL_TARGET_DATE: Optional[str] = None
+    ATHLETE_GOAL_TARGET_TIME_SEC: Optional[int] = None
+    ATHLETE_GOAL_PRIORITY: str = "A"
+
+    @field_validator(
+        "GARMIN_TOKEN_FILE",
+        "REDIS_PASSWORD",
+        "ATHLETE_GOAL_TYPE",
+        "ATHLETE_GOAL_EVENT",
+        "ATHLETE_GOAL_TARGET_DATE",
+        mode="before",
+    )
     @classmethod
     def empty_string_to_none(cls, value: object) -> object:
         if value == "":
+            return None
+        return value
+
+    @field_validator("ATHLETE_GOAL_TARGET_TIME_SEC", mode="before")
+    @classmethod
+    def empty_int_to_none(cls, value: object) -> object:
+        if value == "" or value is None:
             return None
         return value
 

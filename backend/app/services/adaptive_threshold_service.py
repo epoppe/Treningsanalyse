@@ -116,6 +116,39 @@ class AdaptiveThresholdService:
             ),
         }
 
+    def latest_lt2(self, end_date: Optional[date] = None) -> Dict[str, Any]:
+        """LT2 fra historikk med stale-flagg. Ikke en ny terskelmodell."""
+        end = end_date or date.today()
+        lt2 = self._latest_lt2(end)
+        observed = lt2.get("observed_at")
+        freshness_days = None
+        stale = True
+        if observed:
+            try:
+                from datetime import datetime
+
+                ts = datetime.fromisoformat(str(observed).replace("Z", "+00:00"))
+                freshness_days = (end - ts.date()).days
+                stale = freshness_days > 90
+            except (TypeError, ValueError):
+                stale = True
+        speed = lt2.get("speed_mps")
+        pace = 1000.0 / float(speed) if speed and float(speed) > 0 else None
+        hr = lt2.get("heart_rate_bpm")
+        confidence = 0.0
+        if hr:
+            confidence = 0.35 if stale else 0.75
+        return {
+            "lt2_hr": round(float(hr), 0) if hr is not None else None,
+            "lt2_speed_mps": round(float(speed), 3) if speed is not None else None,
+            "lt2_pace_sec_km": round(pace, 1) if pace is not None else None,
+            "observed_at": observed,
+            "freshness_days": freshness_days,
+            "stale": stale,
+            "confidence": confidence,
+            "source": "lactate_threshold_history",
+        }
+
     def _latest_lt2(self, end: date) -> Dict[str, Any]:
         history = (
             self.db.query(LactateThresholdHistory)

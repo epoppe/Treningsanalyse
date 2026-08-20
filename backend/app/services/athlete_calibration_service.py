@@ -29,8 +29,18 @@ DEFAULTS: Dict[str, float] = {
     "tsb_hard_session_max": 12.0,
     "hard_session_spacing_hours": 36.0,
     "acwr_caution": 1.4,
+    "load_increase_ratio_caution": 1.5,
     "easy_volume_min_min_per_week": 150.0,
     "threshold_density_max_pct": 15.0,
+}
+
+PARAMETER_ALIASES: Dict[str, str] = {
+    "hrv_warning_threshold": "hrv_drop_warning_pct",
+    "rhr_warning_threshold": "rhr_rise_warning_bpm",
+    "hard_session_spacing": "hard_session_spacing_hours",
+    "load_increase_tolerance": "load_increase_ratio_caution",
+    "threshold_density_ceiling": "threshold_density_max_pct",
+    "easy_volume_target": "easy_volume_min_min_per_week",
 }
 
 
@@ -63,7 +73,9 @@ class AthleteCalibrationService:
             self.calibrate_tsb_for_hard(start, end),
             self.calibrate_hard_spacing(start, end),
             self.calibrate_acwr_tolerance(start, end),
+            self.calibrate_load_increase(start, end),
             self.calibrate_threshold_density(start, end),
+            self.calibrate_easy_volume(start, end),
         ]
         return {
             "end_date": end.isoformat(),
@@ -264,6 +276,112 @@ class AthleteCalibrationService:
             "observed_value": personalized,
         }
 
+    def calibrate_easy_volume(self, start: date, end: date) -> Dict[str, Any]:
+        default = DEFAULTS["easy_volume_min_min_per_week"]
+        weeks: List[float] = []
+        current = start + timedelta(days=7)
+        while current <= end:
+            minutes = self._easy_minutes(current - timedelta(days=6), current)
+            if minutes is not None and minutes >= 60:
+                weeks.append(minutes)
+            current += timedelta(days=7)
+        personalized = median(weeks) * 0.85 if weeks else None
+        return self._parameter_result(
+            "easy_volume_min_min_per_week",
+            default,
+            personalized,
+            len(weeks),
+            "median_weekly_easy_minutes_lower_bound",
+            weeks,
+        )
+
+    def calibrate_load_increase(self, start: date, end: date) -> Dict[str, Any]:
+        """Ukentlig lastøkning som historisk samsvarte med ok kvalitet — ikke skadeprediktor."""
+        default = DEFAULTS["load_increase_ratio_caution"]
+        ratios: List[float] = []
+        current = start + timedelta(days=14)
+        while current <= end:
+            this = self._tss_sum(current - timedelta(days=6), current)
+            prior = self._tss_sum(current - timedelta(days=13), current - timedelta(days=7))
+            if this and prior and prior > 0:
+                quality = self._hard_or_any_quality(current)
+                if quality is not None and quality >= 70:
+                    ratios.append(this / prior)
+            current += timedelta(days=7)
+        personalized = (
+            sorted(ratios)[int(len(ratios) * 0.9)] if len(ratios) >= 5 else None
+        )
+        return self._parameter_result(
+            "load_increase_ratio_caution",
+            default,
+            personalized,
+            len(ratios),
+            "p90_weekly_load_ratio_on_good_quality_weeks",
+            ratios,
+        )
+
+    def get_parameter(
+        self,
+        parameter: str,
+        *,
+        end_date: Optional[date] = None,
+        calibration: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Returnér én kalibrert parameter med evidensgate og resolved value.
+
+        Bruk `value` i beslutninger. `use_personalized` er False når evidensen
+        er for svak — da er `value` lik `default_value`.
+        """
+        name = PARAMETER_ALIASES.get(parameter, parameter)
+        if calibration is None:
+            calibration = self.calibrate_all(end_date=end_date)
+        for item in calibration.get("parameters", []):
+            if item.get("parameter") == name:
+                return self._with_resolved_value(item)
+        default = DEFAULTS.get(name)
+        if name == "tsb_hard_session_range":
+            default = [DEFAULTS["tsb_hard_session_min"], DEFAULTS["tsb_hard_session_max"]]
+        return self._with_resolved_value(
+            {
+                "parameter": name,
+                "default_value": default,
+                "personalized_value": None,
+                "confidence": 0.0,
+                "sample_count": 0,
+                "method": "missing_parameter_fallback",
+                "use_personalized": False,
+            }
+        )
+
+    def resolve_parameters(
+        self,
+        *,
+        end_date: Optional[date] = None,
+        calibration: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
+        calibration = calibration or self.calibrate_all(end_date=end_date)
+        names = [
+            "hrv_drop_warning_pct",
+            "rhr_rise_warning_bpm",
+            "tsb_hard_session_range",
+            "hard_session_spacing_hours",
+            "load_increase_ratio_caution",
+            "threshold_density_max_pct",
+            "easy_volume_min_min_per_week",
+            "acwr_caution",
+        ]
+        return {name: self.get_parameter(name, end_date=end_date, calibration=calibration) for name in names}
+
+    @staticmethod
+    def _with_resolved_value(item: Dict[str, Any]) -> Dict[str, Any]:
+        use = bool(item.get("use_personalized")) and item.get("personalized_value") is not None
+        value = item.get("personalized_value") if use else item.get("default_value")
+        return {
+            **item,
+            "value": value,
+            "threshold_source": "personalized" if use else "default",
+        }
+
     def get_effective_value(self, parameter: str, calibration: Optional[Dict[str, Any]] = None) -> float:
         if calibration is None:
             calibration = self.calibrate_all()
@@ -349,3 +467,46 @@ class AthleteCalibrationService:
             if q is not None:
                 scores.append(float(q))
         return sum(scores) / len(scores) if scores else None
+
+    def _easy_minutes(self, start: date, end: date) -> Optional[float]:
+        from .session_quality_service import EASY_TYPES
+
+        total = 0.0
+        found = False
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= end,
+                )
+            )
+            .all()
+        )
+        for activity in activities:
+            if not is_running_activity(activity) or not activity.duration:
+                continue
+            st = self._classifier.classify_activity(activity, end_date=end).get("session_type")
+            if st in EASY_TYPES:
+                total += float(activity.duration) / 60.0
+                found = True
+        return round(total, 1) if found else None
+
+    def _tss_sum(self, start: date, end: date) -> Optional[float]:
+        activities = (
+            self.db.query(Activity)
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= end,
+                )
+            )
+            .all()
+        )
+        total = 0.0
+        for activity in activities:
+            load = activity.training_stress_score or activity.epoc
+            if load:
+                total += float(load)
+        return total if total > 0 else None

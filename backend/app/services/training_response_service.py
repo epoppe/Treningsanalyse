@@ -84,6 +84,90 @@ class TrainingResponseService:
             "disclaimer": "Correlations describe historical co-movement — not causal training effects.",
         }
 
+    def analyze_dose_response(
+        self,
+        *,
+        stimulus: str = "threshold_volume",
+        outcome: str = "threshold_pace",
+        end_date: Optional[date] = None,
+        lookback_days: int = 365,
+        lag_days: int = 21,
+    ) -> Dict[str, Any]:
+        """Observational dose buckets. Ikke kalt optimal dose."""
+        end = end_date or date.today()
+        start = end - timedelta(days=lookback_days)
+        pairs: List[Tuple[float, float]] = []
+        current = start + timedelta(days=lag_days + 7)
+        while current <= end:
+            stim = self._stimulus_value(stimulus, current - timedelta(days=lag_days), current)
+            out = self._outcome_value(outcome, current)
+            if stim is not None and out is not None:
+                pairs.append((stim, out))
+            current += timedelta(days=7)
+
+        if len(pairs) < 6:
+            return {
+                "stimulus": stimulus,
+                "response": outcome,
+                "dose_response": [],
+                "best_supported_historical_range": None,
+                "confidence": 0.0,
+                "sample_count": len(pairs),
+                "disclaimer": "observational_association_not_causal_not_optimal",
+            }
+
+        xs = sorted(p[0] for p in pairs)
+        t1 = xs[len(xs) // 3]
+        t2 = xs[(2 * len(xs)) // 3]
+        buckets = [
+            {"range": [0, round(t1, 1)], "values": []},
+            {"range": [round(t1, 1), round(t2, 1)], "values": []},
+            {"range": [round(t2, 1), round(xs[-1], 1)], "values": []},
+        ]
+        # For pace, lower is better; for EF/VO2/CS higher is better.
+        invert = outcome in {"threshold_pace"}
+        for stim, out in pairs:
+            if stim <= t1:
+                buckets[0]["values"].append(out)
+            elif stim <= t2:
+                buckets[1]["values"].append(out)
+            else:
+                buckets[2]["values"].append(out)
+
+        dose_response = []
+        best_idx = None
+        best_score = None
+        for idx, bucket in enumerate(buckets):
+            vals = bucket["values"]
+            mean_v = sum(vals) / len(vals) if vals else None
+            score = (-mean_v if invert else mean_v) if mean_v is not None else None
+            dose_response.append(
+                {
+                    "range": bucket["range"],
+                    "effect": round(mean_v, 3) if mean_v is not None else None,
+                    "sample_count": len(vals),
+                    "label": ("low", "moderate", "high")[idx],
+                }
+            )
+            if score is not None and (best_score is None or score > best_score) and len(vals) >= 3:
+                best_score = score
+                best_idx = idx
+
+        best_range = dose_response[best_idx]["range"] if best_idx is not None else None
+        conf = min(0.75, 0.2 + 0.02 * len(pairs))
+        if best_range is None:
+            conf = min(conf, 0.3)
+        return {
+            "stimulus": stimulus,
+            "response": outcome,
+            "lag_days": lag_days,
+            "dose_response": dose_response,
+            "best_supported_historical_range": best_range,
+            "confidence": round(conf, 2),
+            "sample_count": len(pairs),
+            "disclaimer": "observational_association_not_causal — not an optimal_range",
+        }
+
     def _best_lag_relationship(
         self,
         stimulus: str,
