@@ -111,6 +111,12 @@ def training_decision_brief(
     load_var = LoadVariabilityService(db, storage, ppap).analyze(day)
     trends = ContextAdjustedTrendService(db, storage).analyze_performance_bundle(end_date=day)
 
+    from ...services.plan_adaptation_service import PlanAdaptationService
+    from ...services.weekly_plan_service import WeeklyPlanService
+
+    weekly = WeeklyPlanService(db, storage, ppap).build(day)
+    adaptation = PlanAdaptationService(db, storage, ppap).assess(day, plan=weekly)
+
     main_changes = []
     for key in ("fitness", "recovery", "aerobic_efficiency", "durability"):
         dim = state.get(key) or {}
@@ -123,6 +129,18 @@ def training_decision_brief(
     data_warnings = list(health.get("warnings") or [])
     data_warnings.extend(load_var.get("flags") or [])
 
+    candidates = next_session.get("candidate_workouts") or []
+    compact_candidates = [
+        {
+            "workout_type": c.get("workout_type"),
+            "eligible": c.get("eligible"),
+            "ranking_score": c.get("ranking_score"),
+            "ineligible_reason": c.get("ineligible_reason"),
+        }
+        for c in candidates
+        if c.get("eligible") or c.get("workout_type") == next_session.get("workout_type")
+    ][:6]
+
     return {
         "status": "ok",
         "date": day.isoformat(),
@@ -134,9 +152,37 @@ def training_decision_brief(
             "context_adjusted_trends": trends,
             "training_block": decision.get_training_block(day),
         },
-        "recommended_next_session": next_session,
+        "goal": next_session.get("goal"),
+        "training_phase": next_session.get("training_phase"),
+        "race_capability": next_session.get("race_capability"),
+        "recommended_next_session": {
+            "workout_type": next_session.get("workout_type"),
+            "duration_min": next_session.get("duration_min"),
+            "target_hr": next_session.get("target_hr"),
+            "target_pace": next_session.get("target_pace"),
+            "rationale": next_session.get("rationale"),
+        },
+        "workout_prescription": next_session.get("workout_prescription"),
+        "candidate_workouts": compact_candidates,
+        "weekly_plan": {
+            "week_objective": weekly.get("week_objective"),
+            "sessions": [
+                {"day_offset": s.get("day_offset"), "type": s.get("type"), "duration_min": s.get("duration_min")}
+                for s in weekly.get("sessions") or []
+            ],
+            "target_volume_min": weekly.get("target_volume_min"),
+            "hard_sessions": weekly.get("hard_sessions"),
+        },
+        "adaptation_rules": weekly.get("adaptation_rules"),
+        "plan_adaptation": {
+            "plan_status": adaptation.get("plan_status"),
+            "changes": adaptation.get("changes"),
+            "reason": adaptation.get("reason"),
+        },
         "decision_trace": next_session.get("decision_trace", []),
-        "confidence": next_session.get("confidence"),
+        "evidence_strength": next_session.get("evidence_strength"),
+        "recommendation_confidence": next_session.get("recommendation_confidence"),
+        "confidence": next_session.get("recommendation_confidence") or next_session.get("confidence"),
         "data_warnings": data_warnings,
         "model_health": health.get("status"),
     }
