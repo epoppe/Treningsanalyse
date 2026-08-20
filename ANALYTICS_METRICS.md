@@ -144,6 +144,50 @@ For hver varighet lagres beste kjente punkt for:
 
 Speed curve beregnes alltid når fart finnes. Power curve beregnes bare når FIT-samples inneholder `power`.
 
+## Adaptive Coaching Engine v2
+
+Coaching-laget utvider regelbasert analyse med personlig, longitudinal og evidensbevisst beslutningsstøtte:
+
+| Service | Rolle |
+|---------|-------|
+| `SessionClassifierService` | Klassifiserer løpeøkter (recovery, easy, threshold, VO2, race, …) med confidence og evidence |
+| `TrendAnalysisService` | Longitudinal trender (7/28/90/365 d) for VO2max, CTL, HRV, EF, durability m.m. |
+| `AdaptiveThresholdService` | LT1-estimat med prioritert evidenskjede; LT2-multiplikator som fallback |
+| `TrainingResponseService` | Historisk load→response (korrelasjon, ikke kausalitet) |
+| `NextBestWorkoutService` | Neste økt med guardrails (ingen harde dager på rad uten sterk grunn) |
+| `CoachingBacktestService` | As-of evaluering uten fremtidslekkasje |
+
+### Evidence-typer (`metric_evidence.py`)
+
+| `source_type` | Betydning |
+|---------------|-----------|
+| `measured` | Direkte målt (f.eks. lab) |
+| `garmin` | Levert av Garmin-enhet/konto |
+| `derived` | Beregnet fra normaliserte data (FIT, aktivitetsfelt) |
+| `estimated` | Modell/heuristikk med usikkerhet |
+| `heuristic` | Regelbasert score uten kalibrering |
+| `model` | Prediksjon fra treningsmodell |
+
+**PB readiness:** `pb_probability` i API er beholdt for bakoverkompatibilitet, men er en heuristisk `pb_readiness_score` (0–100) — **ikke** en kalibrert sannsynlighet. Se `pb_probability_semantics` i coaching snapshot.
+
+### MCP-moduler (`backend/app/mcp/tools/`)
+
+| Modul | Innhold |
+|-------|---------|
+| `shared.py` | Felles implementasjon (katalog, recovery-hjelpere, timeseries) |
+| `profile.py` | `athlete_profile`, recovery, readiness |
+| `activities.py` | Aktivitetsliste og deep dive |
+| `routes.py` | Rute-sammenligning |
+| `metrics.py` | Metrikk-katalog og timeseries |
+| `coaching.py` | Coaching v2-verktøy (neste økt, klassifisering, backtest) |
+| `common.py` | Delt context/parsing |
+
+`training_tools.py` er backwards-compatible facade.
+
+### PB-sannsynlighet (kalibrert)
+
+`PbProbabilityCalibrationService` binner historisk `pb_readiness_score` mot faktiske PB-er per distanse og returnerer empirisk `pb_rate_pct` når n≥8 løp. `get_pb_probability()` bruker kalibrering når tilgjengelig, ellers readiness-heuristikk. Metadata i `pb_calibrated_probability` og `pb_probability_semantics`.
+
 ## Migrering
 
 Kjør idempotent migrering:

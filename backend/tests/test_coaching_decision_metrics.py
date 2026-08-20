@@ -87,10 +87,14 @@ class CoachingDecisionMetricsTests(unittest.TestCase):
 
     def test_build_coaching_snapshot_has_required_keys(self):
         with patch.object(self.service, "get_consistency_score", return_value=78.0):
-            snapshot = self.service.build_coaching_snapshot(date(2026, 5, 28))
+            with patch.object(self.service, "get_next_session_recommendation", return_value={"workout_type": "easy_run"}):
+                with patch.object(self.service, "get_pb_readiness_score", return_value=55.0):
+                    snapshot = self.service.build_coaching_snapshot(date(2026, 5, 28))
         self.assertIn("readiness_by_event", snapshot)
         self.assertIn("recommended_workout", snapshot)
         self.assertIn("limiting_factors", snapshot)
+        self.assertIn("pb_readiness_score", snapshot)
+        self.assertIn("next_session_recommendation", snapshot)
         self.assertIn("data_gaps", snapshot)
 
 
