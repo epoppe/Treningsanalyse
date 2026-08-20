@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..database.models.activity import Activity
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .coaching_constants import MONOTONY_PROGRESSION_BLOCK
 from .load_variability_service import LoadVariabilityService
 from .ppap_metrics_service import PpapMetricsService
 from .statistical_uncertainty import evidence_band
@@ -106,7 +107,7 @@ class LoadProgressionService:
         except Exception:
             variability = {}
         monotony = (variability or {}).get("monotony")
-        if monotony is not None and float(monotony) > 2.2:
+        if monotony is not None and float(monotony) > MONOTONY_PROGRESSION_BLOCK:
             return False
         hrv = self._ppap.get_hrv_delta_pct(week_end)
         # Missing HRV is not treated as negative.

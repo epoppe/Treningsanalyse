@@ -26,6 +26,11 @@ from .recommendation_ledger_service import RecommendationLedgerService
 from .shadow_recommendation_service import ShadowRecommendationService
 from .training_availability_service import TrainingAvailabilityService
 from .weekly_plan_service import WeeklyPlanService
+from .decision_explanation_service import DecisionExplanationService
+from .coaching_health_service import CoachingHealthService
+from .plan_stability import PlanRobustnessService, PlanStabilityService
+from .personalization_evidence_policy import PersonalizationEvidencePolicy
+from .freshness_policy import FreshnessPolicy
 
 
 class CoachingOrchestrator:
@@ -251,6 +256,22 @@ class CoachingOrchestrator:
         )
         stability = PersonalizationStabilityService(self.db).assess(as_of_date=day)
         registry = CoachingModelRegistry(self.db).get_active("ranker")
+        explanation = DecisionExplanationService().build(
+            recommendation,
+            context={
+                "tsb": (recommendation.get("context_summary") or {}).get("tsb"),
+                "readiness": (recommendation.get("context_summary") or {}).get("readiness"),
+                "hrv_delta_pct": (recommendation.get("context_summary") or {}).get("hrv_delta_pct"),
+                "as_of_date": day,
+                "metric_ages": {},
+            },
+            as_of=day.isoformat(),
+        )
+        robustness = PlanRobustnessService().score(weekly.get("sessions") or [])
+        plan_stability = PlanStabilityService().classify(
+            int((adaptation.get("plan_change_count_14d") or 0)),
+            material_changes=len(adaptation.get("changes") or []),
+        )
 
         load_var = None
         trends = None
@@ -265,6 +286,12 @@ class CoachingOrchestrator:
 
         rec_count = self.db.query(RecommendationRecord).count()
         exec_count = self.db.query(RecommendationExecution).count()
+        personalization_level = PersonalizationEvidencePolicy().assess(
+            sample_count=rec_count,
+            evidence_strength=evidence_strength,
+            prospective=True,
+            as_of=day,
+        )
         recent_exec = (
             self.db.query(RecommendationExecution)
             .order_by(RecommendationExecution.linked_at.desc())
@@ -293,6 +320,9 @@ class CoachingOrchestrator:
                 "decision_confidence": decision_confidence,
                 "recommendation_confidence": decision_confidence,
             },
+            "why": explanation.get("top_reasons"),
+            "guardrails": explanation.get("guardrails_triggered"),
+            "decision_explanation": explanation,
             "workout_prescription": recommendation.get("workout_prescription"),
             "plan": {
                 "plan_id": weekly.get("plan_id"),
@@ -307,12 +337,21 @@ class CoachingOrchestrator:
                     for s in weekly.get("sessions") or []
                 ],
             },
+            "plan_stability": plan_stability.get("status"),
+            "plan_robustness": robustness.get("robustness_score"),
             "key_evidence": (recommendation.get("decision_trace") or [])[:5],
             "warnings": list(health.get("warnings") or []),
             "model_provenance": (recorded or {}).get("provenance"),
             "active_model": registry,
             "model_health": health.get("status"),
+            "data_freshness": explanation.get("data_freshness"),
             "personalization_stability": stability.get("status"),
+            "evidence": {
+                "data_quality": data_quality,
+                "personalization_level": personalization_level.get("level"),
+                "decision_confidence": decision_confidence,
+                "evidence_strength": evidence_strength,
+            },
             "availability_constraints": [
                 {
                     "date": c.get("date"),

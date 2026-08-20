@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from ..database.models.activity import Activity
 from ..storage import DataStorage
 from .athlete_calibration_service import AthleteCalibrationService
-from .next_best_workout_service import NextBestWorkoutService
 from .pb_probability_calibration_service import PbProbabilityCalibrationService
 from .ppap_metrics_service import PpapMetricsService
 from .session_classifier_service import SessionClassifierService
@@ -25,7 +24,6 @@ class CoachingModelHealthService:
         self.storage = storage
         self._ppap = PpapMetricsService(db, storage)
         self._classifier = SessionClassifierService(db, storage)
-        self._next = NextBestWorkoutService(db, storage, self._ppap)
 
     def assess(self, day: Optional[date] = None) -> Dict[str, Any]:
         day = day or date.today()
@@ -81,16 +79,40 @@ class CoachingModelHealthService:
         )
         checks["personalized_parameters"] = athlete_cal.get("personalized_count", 0)
 
-        # Recommendation distribution stability (last 4 weeks vs prior 4)
-        recent_recs = [self._next.recommend(day - timedelta(days=i * 7)).get("workout_type") for i in range(4)]
-        prior_recs = [
-            self._next.recommend(day - timedelta(days=28 + i * 7)).get("workout_type") for i in range(4)
-        ]
-        checks["recent_recommendation_types"] = recent_recs
+        # Recommendation distribution stability from ledger — do NOT re-enter recommend() engine
+        from ..database.models.coaching_v5 import RecommendationRecord
+
+        recent_cutoff = day - timedelta(days=28)
+        prior_cutoff = day - timedelta(days=56)
+        recent_rows = (
+            self.db.query(RecommendationRecord.recommended_workout_type)
+            .filter(
+                RecommendationRecord.as_of_date >= recent_cutoff,
+                RecommendationRecord.as_of_date <= day,
+                RecommendationRecord.is_shadow.is_(False),
+            )
+            .all()
+        )
+        prior_rows = (
+            self.db.query(RecommendationRecord.recommended_workout_type)
+            .filter(
+                RecommendationRecord.as_of_date >= prior_cutoff,
+                RecommendationRecord.as_of_date < recent_cutoff,
+                RecommendationRecord.is_shadow.is_(False),
+            )
+            .all()
+        )
+        recent_recs = [r[0] for r in recent_rows]
+        prior_recs = [r[0] for r in prior_rows]
+        checks["recent_recommendation_types"] = recent_recs[:8]
+        checks["distribution_source"] = "recommendation_ledger"
         if recent_recs and prior_recs:
             recent_hard = sum(1 for r in recent_recs if r in {"threshold", "vo2_intervals"})
             prior_hard = sum(1 for r in prior_recs if r in {"threshold", "vo2_intervals"})
-            if abs(recent_hard - prior_hard) >= 3:
+            # Compare rates to avoid raw count bias from unequal n
+            recent_rate = recent_hard / max(1, len(recent_recs))
+            prior_rate = prior_hard / max(1, len(prior_recs))
+            if abs(recent_rate - prior_rate) >= 0.45 and len(recent_recs) >= 3:
                 warnings.append("recommendation_distribution_shift")
 
         if activity_count == 0:
@@ -102,7 +124,7 @@ class CoachingModelHealthService:
         else:
             status = "healthy"
 
-        # Soften: single missing HRV alone -> still healthy with warning
+        # Soften: single missing HRV alone -> still healthy with warning (missing ≠ negative)
         if status == "degraded" and warnings == ["missing_hrv"]:
             status = "healthy"
 
