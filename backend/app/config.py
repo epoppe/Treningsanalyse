@@ -94,6 +94,7 @@ class Settings(BaseSettings):
     ATHLETE_GOAL_TARGET_DATE: Optional[str] = None
     ATHLETE_GOAL_TARGET_TIME_SEC: Optional[int] = None
     ATHLETE_GOAL_PRIORITY: str = "A"
+    ATHLETE_AVAILABILITY_JSON: Optional[str] = None
 
     @field_validator(
         "GARMIN_TOKEN_FILE",
@@ -101,6 +102,7 @@ class Settings(BaseSettings):
         "ATHLETE_GOAL_TYPE",
         "ATHLETE_GOAL_EVENT",
         "ATHLETE_GOAL_TARGET_DATE",
+        "ATHLETE_AVAILABILITY_JSON",
         mode="before",
     )
     @classmethod

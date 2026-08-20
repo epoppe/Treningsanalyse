@@ -243,6 +243,32 @@ ACWR er diagnostisk i decision_trace, ikke primær guardrail. Lastbeslutninger b
 
 Mål konfigureres i `.env` (`ATHLETE_GOAL_*`) uten DB-migrering.
 
+## Adaptive Coaching Engine v5
+
+v5 er closed-loop: immutable anbefalinger, faktisk gjennomføring, prospektiv validering og planlegging mot ekte tilgjengelighet.
+
+Historisk backtest ≠ recorded prospective recommendation ≠ observed execution ≠ observed outcome ≠ counterfactual.
+
+| Service | Rolle |
+|---------|-------|
+| `RecommendationLedgerService` | Persistent `RecommendationRecord` med modellproveniens. Preview/backtest persist=false |
+| `RecommendationOutcomeService.evaluate_recorded_recommendation` | Kanonisk prospektiv evaluering |
+| `RecommendationOutcomeService.simulate_as_of` | Eksplisitt backtest (regenererer dagens modell) |
+| `RecommendationExecutionService` | Kobler aktivitet til nærmeste anbefaling (`followed/modified/skipped/replaced/unplanned`) |
+| `WorkoutExecutionAnalysisService` | Plan vs FIT/laps. Adherence ≠ kvalitet |
+| `AthleteFeedback` / `PerceivedLoadService` | Valgfri RPE; mismatch mot TSS/EPOC |
+| `TrainingAvailability` / `WeeklyPlanOptimizer` | Kalender + scores, ikke faste rest-offsets |
+| `ProjectedAthleteStateService` | Fremtidige dager er `projected`, ikke observert HRV |
+| `PlanSimulationService` | Last/CTL/ATL/TSB-projeksjon uten VO2max-prediksjon |
+| `TrainingPlan` + `TrainingPlanVersion` | Planversjonering ved replanning |
+| `CalibrationSnapshot` / `PersonalizationStabilityService` | Hysteresis og drift (`stable/watch/unstable`) |
+| `CrossTrainingLoadService` | Kardio vs løpsspesifikk vs muskel/skjelett-last |
+| `MusculoskeletalReadinessService` | `good/caution/low` — ikke skadeprediksjon |
+| `DecisionRegretService` | `observational_counterfactual_proxy` |
+| `TrainingExperiment` | Starter aldri uten `user_confirmed` |
+
+`training_decision_brief` v5 legger til `current_recommendation_id`, `plan.id/version`, `decision_status`, `projected_week`, `recent_execution/feedback`, `personalization_stability` og `prospective_learning`.
+
 ## Migrering
 
 Kjør idempotent migrering:

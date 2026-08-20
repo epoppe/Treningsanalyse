@@ -85,6 +85,18 @@ API (additivt, bakoverkompatibelt):
 - `GET /api/sync/runs`
 - `GET /api/sync/lock`
 
+## Coaching v5 (ledger og planer)
+
+Migrasjon `e51eadc0a001` legger til:
+
+- `recommendation_records` — immutable anbefalings-snapshots med modellproveniens
+- `training_plans` / `training_plan_versions` — ukeplan med versjonering
+- `athlete_feedback` — valgfri RPE/session feel
+- `recommendation_executions` — kobling anbefaling ↔ aktivitet
+- `calibration_snapshots` — damped kalibreringsverdier
+- `training_availability` — ukedagsmal og dato-overrides
+- `training_experiments` — eksplisitt bekreftede coaching-eksperimenter
+
 ## Query-ytelse (indekser)
 
 Migrasjon `d4b2e8c17a01` legger til:

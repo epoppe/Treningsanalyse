@@ -14,6 +14,7 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .next_best_workout_service import NextBestWorkoutService
 from .ppap_metrics_service import PpapMetricsService
+from .recommendation_ledger_service import RecommendationLedgerService
 from .session_classifier_service import SessionClassifierService
 from .session_quality_service import SessionQualityService
 
@@ -42,9 +43,20 @@ class RecommendationOutcomeService:
         self._next = NextBestWorkoutService(db, storage, self._ppap)
         self._classifier = SessionClassifierService(db, storage)
         self._quality = SessionQualityService(db, storage, self._ppap)
+        self._ledger = RecommendationLedgerService(db)
+
+    def simulate_as_of(self, recommendation_date: date) -> Dict[str, Any]:
+        """Backtest: regenerer dagens modell mot historiske data. Ikke prospective."""
+        payload = self.evaluate_as_of(recommendation_date)
+        payload["evaluation_kind"] = "backtest"
+        payload["note"] = (
+            "Backtest regenerates the current model as-of the date. "
+            "It is not what the live model recorded at the time."
+        )
+        return payload
 
     def evaluate_as_of(self, recommendation_date: date) -> Dict[str, Any]:
-        """Kun data tilgjengelig på recommendation_date for anbefalingen."""
+        """Backtest-hjelper. Canonical backtest-navn er simulate_as_of()."""
         recommendation = self._next.recommend(recommendation_date)
         recommended = recommendation.get("workout_type")
 
@@ -82,6 +94,55 @@ class RecommendationOutcomeService:
             "limitations": [
                 "observational_not_causal",
                 "adherence_independent_of_outcome_quality",
+                "backtest_not_prospective",
+            ],
+        }
+
+    def evaluate_recorded_recommendation(self, record_id: int) -> Dict[str, Any]:
+        """Prospective: bruk lagret anbefaling — regenerer ikke dagens modell."""
+        record = self._ledger.get_recommendation(record_id)
+        if record is None:
+            return {"status": "not_found", "record_id": record_id, "evaluation_kind": "prospective"}
+        as_of = date.fromisoformat(record["as_of_date"])
+        recommended = record["recommended_workout_type"]
+        next_activity = self._next_running_activity(as_of)
+        actual_type = None
+        actual_load = None
+        session_quality = None
+        if next_activity is not None:
+            classification = self._classifier.classify_activity(
+                next_activity,
+                end_date=next_activity.start_time.date() if next_activity.start_time else as_of,
+            )
+            actual_type = classification.get("session_type")
+            actual_load = next_activity.training_stress_score or next_activity.epoc
+            session_quality = self._quality.evaluate(next_activity).get("quality_score")
+        adherence = self._adherence(recommended, actual_type)
+        short_term = self._short_term_response(as_of, session_quality)
+        medium_term = self._medium_term_response(as_of)
+        return {
+            "evaluation_kind": "prospective",
+            "record_id": record_id,
+            "recorded_model_version": record["model_version"],
+            "recorded_config_hash": record["config_hash"],
+            "recommendation_date": record["as_of_date"],
+            "recommended": recommended,
+            "actual": actual_type,
+            "adherence": adherence,
+            "actual_load": float(actual_load) if actual_load is not None else None,
+            "short_term_response": short_term,
+            "medium_term_response": medium_term,
+            "outcome": self._outcome_label(adherence, short_term, medium_term),
+            "did_not_regenerate_model": True,
+            "counterfactual_uncertainty": (
+                "Cannot infer whether the recommendation was optimal when actual session differs — "
+                "alternative outcomes are unobserved."
+            ),
+            "recommendation_confidence": record.get("recommendation_confidence"),
+            "limitations": [
+                "observational_not_causal",
+                "adherence_independent_of_outcome_quality",
+                "uses_recorded_recommendation_not_current_code",
             ],
         }
 
@@ -110,12 +171,39 @@ class RecommendationOutcomeService:
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "step_days": step_days,
+            "evaluation_kind": "backtest",
             "evaluations": rows,
             "summary": {
                 "count": len(rows),
                 "adherence_rate": adherence_rate,
-                "note": "Adherence ≠ recommendation correctness.",
+                "note": "Backtest only. Adherence ≠ recommendation correctness.",
             },
+        }
+
+    def evaluate_recorded_period(
+        self,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, Any]:
+        from ..database.models.coaching_v5 import RecommendationRecord
+
+        rows = (
+            self.db.query(RecommendationRecord)
+            .filter(
+                RecommendationRecord.as_of_date >= start_date,
+                RecommendationRecord.as_of_date <= end_date,
+            )
+            .order_by(RecommendationRecord.as_of_date.asc())
+            .all()
+        )
+        evaluations = [self.evaluate_recorded_recommendation(row.id) for row in rows]
+        return {
+            "evaluation_kind": "prospective",
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "evaluations": evaluations,
+            "summary": {"count": len(evaluations), "note": "Uses recorded recommendations only."},
         }
 
     def _next_running_activity(self, after: date) -> Optional[Activity]:

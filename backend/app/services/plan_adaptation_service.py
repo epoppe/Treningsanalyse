@@ -14,6 +14,7 @@ from ..utils.activity_filters import is_running_activity
 from .athlete_calibration_service import AthleteCalibrationService
 from .ppap_metrics_service import PpapMetricsService
 from .session_quality_service import SessionQualityService
+from .training_plan_store import TrainingPlanStore
 from .weekly_plan_service import WeeklyPlanService
 
 
@@ -31,6 +32,7 @@ class PlanAdaptationService:
         self._calibration = AthleteCalibrationService(db, storage, self._ppap)
         self._quality = SessionQualityService(db, storage, self._ppap)
         self._weekly = WeeklyPlanService(db, storage, self._ppap, goal=goal)
+        self._store = TrainingPlanStore(db)
 
     def assess(
         self,
@@ -38,9 +40,11 @@ class PlanAdaptationService:
         *,
         plan: Optional[Dict[str, Any]] = None,
         goal: Optional[Dict[str, Any]] = None,
+        persist: bool = False,
     ) -> Dict[str, Any]:
         day = day or date.today()
-        plan = plan or self._weekly.build(day, goal=goal)
+        stored = self._store.get_active_plan(day) if persist or plan is None else None
+        plan = plan or stored or self._weekly.build(day, goal=goal)
         params = self._calibration.resolve_parameters(end_date=day)
         hrv_warn = params["hrv_drop_warning_pct"]
         rhr_warn = params["rhr_rise_warning_bpm"]
@@ -84,11 +88,39 @@ class PlanAdaptationService:
             reasons.append("no_quality_conflict")
 
         confidence = 0.7 if hrv is not None or rhr is not None else 0.4
+        previous_plan_id = plan.get("plan_id")
+        new_plan_id = previous_plan_id
+        new_version = plan.get("version")
+        if persist and status != "keep" and previous_plan_id:
+            adapted = self._apply_changes(plan, changes)
+            stored = self._store.append_version(
+                previous_plan_id,
+                sessions=adapted,
+                week_objective=plan.get("week_objective"),
+                changes=changes,
+                reason=reasons,
+                simulation=plan.get("simulation"),
+                scores=plan.get("scores"),
+            )
+            new_plan_id = stored["plan_id"]
+            new_version = stored["version"]
+            plan = {**plan, **stored, "sessions": adapted}
         return {
             "plan_status": status,
-            "changes": changes,
+            "changes": [
+                {
+                    "date": (day + timedelta(days=1)).isoformat(),
+                    "from": c.get("from_type"),
+                    "to": c.get("to_type"),
+                    **{k: v for k, v in c.items() if k not in {"from_type", "to_type"}},
+                }
+                for c in changes
+            ],
             "reason": reasons,
             "confidence": round(confidence, 2),
+            "previous_plan_id": previous_plan_id,
+            "new_plan_id": new_plan_id,
+            "version": new_version,
             "signals": {
                 "hrv_delta_pct": hrv,
                 "rhr_delta_bpm": rhr,
@@ -98,8 +130,21 @@ class PlanAdaptationService:
                 "hrv": hrv_warn,
                 "rhr": rhr_warn,
             },
-            "note": "Does not change permanent athlete preferences.",
+            "note": "Does not change permanent athlete preferences. Original plan version is retained.",
         }
+
+    @staticmethod
+    def _apply_changes(plan: Dict[str, Any], changes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        sessions = [dict(s) for s in (plan.get("sessions") or [])]
+        for change in changes:
+            target = change.get("from_type")
+            to_type = change.get("to_type") or "easy_run"
+            for session in sessions:
+                if session.get("type") == target and session.get("day_offset") in {0, 1}:
+                    session["type"] = to_type
+                    session["prescription"] = None
+                    break
+        return sessions
 
     def _yesterdays_quality(self, day: date) -> Optional[float]:
         yesterday = day - timedelta(days=1)

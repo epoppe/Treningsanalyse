@@ -175,12 +175,14 @@ def coaching_decision_snapshot(target_date: Optional[str] = None) -> dict:
 def recommend_next_session(
     target_date: Optional[str] = None,
     include_treadmill: bool = False,
+    persist: Optional[bool] = None,
 ) -> dict:
     """Recommend next running session with duration, HR targets, rationale and alternative."""
     return _call_tool(
         training_tools.recommend_next_session,
         target_date=target_date,
         include_treadmill=include_treadmill,
+        persist=persist,
     )
 
 
@@ -213,9 +215,9 @@ def coaching_backtest_summary(
 
 
 @mcp.tool()
-def training_decision_brief(target_date: Optional[str] = None) -> dict:
+def training_decision_brief(target_date: Optional[str] = None, persist: Optional[bool] = None) -> dict:
     """Compact executive coaching package: goal, phase, prescription, candidates, weekly plan."""
-    return _call_tool(training_tools.training_decision_brief, target_date=target_date)
+    return _call_tool(training_tools.training_decision_brief, target_date=target_date, persist=persist)
 
 
 @mcp.tool()

@@ -131,6 +131,14 @@ class AlembicMigrationTests(unittest.TestCase):
         activity_indexes = {idx["name"] for idx in inspector.get_indexes("activities")}
         self.assertIn("idx_activities_missing_training_effect", activity_indexes)
 
+        tables = set(inspector.get_table_names())
+        self.assertIn("recommendation_records", tables)
+        self.assertIn("training_plans", tables)
+        self.assertIn("training_plan_versions", tables)
+        self.assertIn("athlete_feedback", tables)
+        self.assertIn("training_availability", tables)
+        self.assertIn("training_experiments", tables)
+
 
 if __name__ == "__main__":
     unittest.main()

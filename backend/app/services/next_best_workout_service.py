@@ -19,7 +19,9 @@ from .goal_context_service import GoalContextService
 from .intensity_prescription_service import IntensityPrescriptionService
 from .load_variability_service import LoadVariabilityService
 from .metric_evidence import confidence_from_sample_count
+from .musculoskeletal_readiness_service import MusculoskeletalReadinessService
 from .ppap_metrics_service import PpapMetricsService
+from .prospective_outcome_lookup import ProspectiveOutcomeLookup
 from .race_capability_service import RaceCapabilityService
 from .session_classifier_service import SessionClassifierService
 from .session_quality_service import EASY_TYPES
@@ -60,6 +62,8 @@ class NextBestWorkoutService:
         self._race = RaceCapabilityService(self.db, storage, self._ppap, goal=goal)
         self._ranker = WorkoutCandidateRanker()
         self._prescription = WorkoutPrescriptionService(self.db, storage, self._ppap)
+        self._ms = MusculoskeletalReadinessService(self.db, storage, self._ppap)
+        self._prospective = ProspectiveOutcomeLookup(self.db)
         self._cal_cache: Dict[date, Dict[str, Dict[str, Any]]] = {}
 
     def recommend(
@@ -69,6 +73,7 @@ class NextBestWorkoutService:
         include_treadmill: bool = False,
         engine: str = "auto",
         goal: Optional[Dict[str, Any]] = None,
+        model_health: Optional[str] = None,
     ) -> Dict[str, Any]:
         day = day or date.today()
         context = self._build_context(day, include_treadmill=include_treadmill, goal=goal)
@@ -76,7 +81,8 @@ class NextBestWorkoutService:
         evidence_strength = self._evidence_strength(context, contraindications)
         context["evidence_strength"] = evidence_strength
 
-        ranking = self._ranker.rank(context)
+        prospective = self._prospective.historical_by_type(as_of=day)
+        ranking = self._ranker.rank(context, prospective_outcomes=prospective)
         used_engine = "cascade"
         rec_conf = evidence_strength
         if engine in {"auto", "ranked"} and not ranking.get("use_rule_fallback"):
@@ -100,6 +106,15 @@ class NextBestWorkoutService:
         if ranking.get("close_race"):
             rec_conf = min(rec_conf, rec_conf * 0.85)
 
+        decision_status, safe_alts, workout_type, rec_conf = self._decision_status(
+            context,
+            ranking,
+            workout_type,
+            rec_conf,
+            evidence_strength,
+            model_health,
+        )
+
         phase_name = (context.get("training_phase") or {}).get("phase")
         prescription = self._prescription.prescribe(
             workout_type,
@@ -109,6 +124,7 @@ class NextBestWorkoutService:
         )
         duration_min, target_hr, target_pace = self._targets(workout_type, context, prescription)
         alternative = self._alternative(context)
+        ms = context.get("musculoskeletal") or {}
 
         return {
             "workout_type": workout_type,
@@ -119,6 +135,8 @@ class NextBestWorkoutService:
             "confidence": round(rec_conf, 2),
             "evidence_strength": round(evidence_strength, 2),
             "recommendation_confidence": round(rec_conf, 2),
+            "decision_status": decision_status,
+            "safe_alternatives": safe_alts,
             "rationale": rationale,
             "contraindications": contraindications,
             "decision_trace": decision_trace,
@@ -134,6 +152,7 @@ class NextBestWorkoutService:
                 "event": (context.get("race_capability") or {}).get("event"),
                 "primary_gap": (context.get("race_capability") or {}).get("primary_gap"),
             },
+            "musculoskeletal_readiness": ms,
             "context_summary": {
                 "readiness": context.get("readiness"),
                 "tsb": context.get("tsb"),
@@ -141,8 +160,55 @@ class NextBestWorkoutService:
                 "training_block": context.get("training_block"),
                 "top_limiter": context.get("top_limiter"),
                 "acwr_diagnostic": context.get("acwr"),
+                "hrv_delta_pct": context.get("hrv_delta_pct"),
+                "as_of_date": day.isoformat(),
+                "lookahead_bound": day.isoformat(),
             },
         }
+
+    @staticmethod
+    def _decision_status(
+        context: Dict[str, Any],
+        ranking: Dict[str, Any],
+        workout_type: str,
+        rec_conf: float,
+        evidence_strength: float,
+        model_health: Optional[str],
+    ) -> Tuple[str, List[Dict[str, str]], str, float]:
+        missing_hrv = context.get("hrv_delta_pct") is None
+        missing_critical = missing_hrv and context.get("readiness") is None
+        close = bool(ranking.get("close_race"))
+        health_degraded = model_health in {"degraded", "insufficient_data"}
+        ms = context.get("musculoskeletal") or {}
+        ms_low = ms.get("musculoskeletal_readiness") == "low"
+        eligible = ranking.get("ranked_eligible") or []
+        hard = {"threshold", "vo2_intervals", "race_pace"}
+        mixed = len(eligible) >= 2 and (eligible[0] in hard) != (eligible[1] in hard)
+        abstain = (
+            missing_critical
+            or health_degraded
+            or evidence_strength < 0.35
+            or missing_hrv
+            or (close and mixed)
+            or (close and evidence_strength < 0.55)
+            or ms_low
+        )
+        weak = close or evidence_strength < 0.5 or (context.get("readiness") is None)
+        if abstain:
+            status = "abstain"
+            rec_conf = min(rec_conf, 0.35)
+            safe_alts = [{"workout_type": "easy_run"}, {"workout_type": "recovery_run"}]
+            if workout_type in hard:
+                workout_type = "easy_run"
+        elif weak:
+            status = "weak_preference"
+            safe_alts = [{"workout_type": workout_type}]
+            alt = "recovery_run" if workout_type != "recovery_run" else "easy_run"
+            safe_alts.append({"workout_type": alt})
+        else:
+            status = "recommend"
+            safe_alts = []
+        return status, safe_alts, workout_type, rec_conf
 
     def _params(self, day: date) -> Dict[str, Dict[str, Any]]:
         if day not in self._cal_cache:
@@ -208,6 +274,10 @@ class NextBestWorkoutService:
             hard_blocked = True
         if rapid_ratio is not None and float(rapid_ratio) >= float(load_inc["value"]):
             hard_blocked = True
+        ms = self._ms.assess(day)
+        if ms.get("musculoskeletal_readiness") == "low":
+            hard_blocked = True
+            recovery_required = True
 
         return {
             "day": day,
@@ -241,6 +311,7 @@ class NextBestWorkoutService:
             "tsb_lo": tsb_lo,
             "tsb_hi": tsb_hi,
             "easy_volume_7d": self._easy_volume_minutes(day, 7, include_treadmill=include_treadmill),
+            "musculoskeletal": ms,
         }
 
     def _decide(self, ctx: Dict[str, Any]) -> Tuple[str, List[str], List[str], List[Dict[str, Any]]]:
