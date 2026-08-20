@@ -313,6 +313,20 @@ Alembic: `f62b1c9d0e02` (idempotency + registry + shadow).
 
 Alembic head: `a71c2e8f0b03` (validation_runs + registry FK).
 
+## Coaching v8 — simplify / verify / monitor
+
+Se `docs/COACHING_V8_AUDIT.md` og `docs/COACHING_MODEL_GOVERNANCE.md`.
+
+| Komponent | Rolle |
+|-----------|-------|
+| `MetricRegistry` | Canonical producer/units/freshness (ingen ny DB-tabell) |
+| `DecisionExplanation` + reason codes | Stabil forklaring uten verbose dump |
+| `DecisionConsistencyService` | Perturbasjon → stable/sensitive/unstable |
+| `CoachingHealthService` / `CoachingIntegrityService` | Observability + integrity (ingen auto-destruktiv repair) |
+| `PersonalizationEvidencePolicy` | Én evidence-budget (+ decay) |
+| `RecoveryCostService` / `session_dose` / plan stability | Coaching economics uten ny ML |
+| Model health | Ledger-histogram — ikke recursive `recommend()` |
+
 ## Migrering
 
 Kjør idempotent migrering:
