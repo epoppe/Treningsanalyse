@@ -13,6 +13,11 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .adaptive_threshold_service import AdaptiveThresholdService
 from .athlete_calibration_service import AthleteCalibrationService
+from .coaching_constants import (
+    HARD_DAYS_7D_MAX,
+    READINESS_REST_FLOOR,
+    TSB_RECOVERY_FLOOR,
+)
 from .coaching_decision_metrics_service import CoachingDecisionMetricsService
 from .coaching_session_types import HARD_SESSION_TYPES, HARD_WORKOUT_TYPES
 from .goal_context_service import GoalContextService
@@ -258,8 +263,8 @@ class NextBestWorkoutService:
         tsb_lo, tsb_hi = self._range_values(tsb_range)
         load_inc = params["load_increase_ratio_caution"]
 
-        rest_required = readiness is not None and readiness < 35
-        recovery_required = tsb is not None and tsb < -25
+        rest_required = readiness is not None and readiness < READINESS_REST_FLOOR
+        recovery_required = tsb is not None and tsb < TSB_RECOVERY_FLOOR
         hard_blocked = False
         if hours_since is not None and hours_since < float(spacing["value"]):
             hard_blocked = True
@@ -267,7 +272,7 @@ class NextBestWorkoutService:
             hard_blocked = True
         if rhr_delta is not None and rhr_delta > float(rhr_warn["value"]):
             hard_blocked = True
-        if hard_days_7d >= 3:
+        if hard_days_7d >= HARD_DAYS_7D_MAX:
             hard_blocked = True
         flags = load_variability.get("flags") or []
         if "high_hard_session_density" in flags or "inadequate_recovery_spacing" in flags:
@@ -336,13 +341,13 @@ class NextBestWorkoutService:
 
         if readiness is not None:
             effect = "supports_training" if readiness >= 55 else "limits_intensity"
-            if readiness < 35:
+            if readiness < READINESS_REST_FLOOR:
                 effect = "requires_rest"
             trace.append({"factor": "readiness", "value": readiness, "effect": effect})
 
         if tsb is not None:
             effect = "supports_quality" if tsb_lo <= tsb <= tsb_hi else "limits_hard_work"
-            if tsb < -25:
+            if tsb < TSB_RECOVERY_FLOOR:
                 effect = "requires_recovery"
             tsb_param = params.get("tsb_hard_session_range") or {}
             trace.append(self._trace("tsb", tsb, tsb_param, effect))
@@ -444,7 +449,7 @@ class NextBestWorkoutService:
                 )
                 return "easy_run", rationale, contraindications, trace
 
-        if ctx.get("hard_days_7d", 0) >= 3:
+        if ctx.get("hard_days_7d", 0) >= HARD_DAYS_7D_MAX:
             rationale.append(f"{ctx['hard_days_7d']} hard days in last 7 — consolidate")
             return "easy_run", rationale, contraindications, trace
 

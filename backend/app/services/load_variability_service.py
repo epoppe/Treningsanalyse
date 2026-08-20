@@ -14,13 +14,12 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .metric_evidence import confidence_from_sample_count
 from .coaching_session_types import HARD_SESSION_TYPES
+from .coaching_constants import HARD_DAYS_7D_MAX, MONOTONY_HIGH, RAPID_LOAD_RATIO
 from .ppap_metrics_service import PpapMetricsService
 from .session_classifier_service import SessionClassifierService
 from .training_stress_service import TrainingStressService
 
-MONOTONY_HIGH = 2.0
-HARD_DENSITY_7D_HIGH = 3
-RAPID_LOAD_RATIO = 1.5
+HARD_DENSITY_7D_HIGH = HARD_DAYS_7D_MAX
 
 
 class LoadVariabilityService:
