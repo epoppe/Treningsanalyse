@@ -13,6 +13,7 @@ from .plan_simulation_service import PlanSimulationService
 from .ppap_metrics_service import PpapMetricsService
 from .training_availability_service import TrainingAvailabilityService
 from .workout_prescription_service import WorkoutPrescriptionService
+from .execution_pattern_service import ExecutionPatternService
 
 HARD = {"threshold", "vo2_intervals", "race_pace"}
 CROSS = {"strength", "cycling", "swimming", "tennis", "other"}
@@ -42,6 +43,7 @@ class WeeklyPlanOptimizer:
         self._avail = TrainingAvailabilityService(db)
         self._sim = PlanSimulationService(db, storage, self._ppap)
         self._rx = WorkoutPrescriptionService(db, storage, self._ppap)
+        self._execution_patterns = ExecutionPatternService(db)
 
     def optimize(
         self,
@@ -67,9 +69,13 @@ class WeeklyPlanOptimizer:
             self._build_schedule(day, next_rec, constraints, phase, first, hard_budget, spacing, want_long, "easy_biased"),
         ]
         scored = []
+        patterns = self._execution_patterns.analyze(as_of=day)
+        preferred_hard = set((patterns.get("feasibility") or {}).get("preferred_hard_weekdays") or [])
         for schedule in candidates:
             sim = self._sim.simulate(schedule["sessions"], origin=day)
-            scores = self._score(schedule, sim, constraints, phase, want_long, next_rec)
+            scores = self._score(
+                schedule, sim, constraints, phase, want_long, next_rec, preferred_hard=preferred_hard
+            )
             schedule["simulation"] = sim
             schedule["scores"] = scores
             schedule["total_score"] = round(sum(scores.values()), 1)
@@ -87,12 +93,14 @@ class WeeklyPlanOptimizer:
                 "Respect availability and date overrides",
                 "If HRV drops beyond calibrated warning, delay quality 24–48h",
                 "Projected future readiness is not observed",
+                "Prefer historically adhered hard-session weekdays when evidence exists",
             ],
             "phase": phase,
             "availability_constraints": constraints,
             "selected_strategy": chosen["strategy"],
             "scores": chosen["scores"],
             "simulation": chosen["simulation"],
+            "execution_feasibility": patterns.get("feasibility"),
             "alternatives": [
                 {
                     "strategy": s["strategy"],
@@ -228,6 +236,7 @@ class WeeklyPlanOptimizer:
         phase: str,
         want_long: bool,
         next_rec: Dict[str, Any],
+        preferred_hard: Optional[set] = None,
     ) -> Dict[str, float]:
         sessions = schedule["sessions"]
         types = [s.get("type") for s in sessions]
@@ -260,12 +269,20 @@ class WeeklyPlanOptimizer:
             if constraint.get("avoid_hard") and session.get("type") in HARD:
                 schedule_fit -= 25
         monotony_penalty = -20.0 if "monotonous_loading" in (sim.get("risk_flags") or []) else 0.0
+        execution_feasibility = 50.0
+        preferred_hard = preferred_hard or set()
+        if preferred_hard:
+            hard_offsets = [int(s["day_offset"]) for s in sessions if s.get("type") in HARD]
+            # day_offset 0 = Monday-aligned week start weekday of origin; use offset as proxy
+            hits = sum(1 for off in hard_offsets if off in preferred_hard or ((off % 7) in preferred_hard))
+            execution_feasibility = 50.0 + 20.0 * hits
         return {
             "goal_alignment": round(goal_alignment, 1),
             "recovery_spacing": round(recovery_spacing, 1),
             "volume_alignment": round(volume, 1),
             "specificity": round(specificity, 1),
             "schedule_fit": round(max(0.0, schedule_fit), 1),
+            "execution_feasibility": round(execution_feasibility, 1),
             "monotony_penalty": monotony_penalty,
         }
 

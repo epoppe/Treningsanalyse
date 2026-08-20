@@ -272,6 +272,8 @@ class CoachingHardeningTests(unittest.TestCase):
         self.assertEqual(evidence_band(sample_count=30, effect_size=0.3, stable_folds=2), "strong")
 
     def test_model_registry_promotion_gate(self):
+        from app.database.models.coaching_v5 import ValidationRun
+
         reg = CoachingModelRegistry(self.db)
         reg.register(model_key="ranker", version="exp-1")
         with self.assertRaises(ValueError):
@@ -280,18 +282,29 @@ class CoachingHardeningTests(unittest.TestCase):
                 version="exp-1",
                 gate={"walk_forward": {}, "baseline_delta": -0.1, "sample_size": 5, "stability": "unstable", "guardrails_pass": False},
             )
-        promoted = reg.promote(
+        run = ValidationRun(
             model_key="ranker",
-            version="exp-1",
-            gate={
-                "walk_forward": {"folds": 3},
+            model_version="exp-1",
+            config_hash="h",
+            data_start=date(2026, 1, 1),
+            data_end=date(2026, 6, 1),
+            metrics_json={
+                "walk_forward": True,
                 "baseline_delta": 0.05,
+                "utility_delta": 0.05,
                 "sample_size": 40,
                 "stability": "stable",
                 "guardrails_pass": True,
             },
+            sample_size=40,
+            validation_code_version="v7.0.0",
+            status="completed",
         )
+        self.db.add(run)
+        self.db.commit()
+        promoted = reg.promote(model_key="ranker", version="exp-1", validation_run_id=run.id)
         self.assertEqual(promoted["status"], "active")
+        self.assertEqual(promoted["validation_run_id"], run.id)
 
     def test_export_and_mesocycle_taper_deload(self):
         self.ledger.record_recommendation(_rec_payload(), as_of_date=date(2026, 5, 19), persist=True)

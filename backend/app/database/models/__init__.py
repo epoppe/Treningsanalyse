@@ -30,6 +30,7 @@ from .coaching_v5 import (
     TrainingExperiment,
     CoachingModelRegistryEntry,
     ShadowRecommendation,
+    ValidationRun,
 )
 
 __all__ = [
@@ -70,4 +71,5 @@ __all__ = [
     'TrainingExperiment',
     'CoachingModelRegistryEntry',
     'ShadowRecommendation',
+    'ValidationRun',
 ]

@@ -107,6 +107,13 @@ Migrasjon `f62b1c9d0e02` legger til:
 - `coaching_model_registry`
 - `shadow_recommendations`
 
+## Coaching v7
+
+Migrasjon `a71c2e8f0b03` legger til:
+
+- `validation_runs` — immutable walk-forward evidence (metrics, baseline, reproducibility bundle)
+- `validation_run_id` FK på `coaching_model_registry`
+
 ## Query-ytelse (indekser)
 
 Migrasjon `d4b2e8c17a01` legger til:

@@ -64,9 +64,16 @@ class AthleteCalibrationService:
         *,
         end_date: Optional[date] = None,
         lookback_days: int = 365,
+        training_context=None,
     ) -> Dict[str, Any]:
-        end = end_date or date.today()
+        from .as_of_training_context import resolve_history_end
+
+        end = resolve_history_end(end_date, training_context=training_context)
         start = end - timedelta(days=lookback_days)
+        if training_context is not None and hasattr(training_context, "train_start"):
+            start = max(start, training_context.train_start)
+        elif training_context is not None and hasattr(training_context, "history_start"):
+            start = max(start, training_context.history_start)
         parameters = [
             self.calibrate_hrv_drop(start, end),
             self.calibrate_rhr_rise(start, end),
@@ -82,6 +89,7 @@ class AthleteCalibrationService:
             "lookback_days": lookback_days,
             "parameters": parameters,
             "personalized_count": sum(1 for p in parameters if p.get("use_personalized")),
+            "training_context_applied": training_context is not None,
         }
 
     def calibrate_hrv_drop(self, start: date, end: date) -> Dict[str, Any]:
