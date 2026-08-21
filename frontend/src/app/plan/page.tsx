@@ -4,6 +4,35 @@ import Link from "next/link";
 import { WeeklyTrainingPlan } from "@/components/coaching/WeeklyTrainingPlan";
 import { EmptyState, ErrorState, Skeleton, StatusBadge } from "@/components/coaching/ui-states";
 import { usePlanSummary } from "@/hooks/useCoachingDashboard";
+import { workoutLabel } from "@/lib/coachingLabels";
+
+function phaseLabel(phase: unknown): string | null {
+  if (phase == null) return null;
+  if (typeof phase === "string") return phase;
+  if (typeof phase === "object" && phase !== null && "phase" in phase) {
+    const p = (phase as { phase?: unknown }).phase;
+    return typeof p === "string" ? p : null;
+  }
+  return null;
+}
+
+function goalSummary(goal: Record<string, unknown> | null | undefined): string {
+  if (!goal) return "";
+  const event =
+    (typeof goal.event === "string" && goal.event) ||
+    (typeof goal.target_event === "string" && goal.target_event) ||
+    (typeof goal.goal_type === "string" && goal.goal_type.replace(/_/g, " ")) ||
+    null;
+  const date = typeof goal.target_date === "string" ? goal.target_date : null;
+  const feasibility =
+    goal.goal_feasibility &&
+    typeof goal.goal_feasibility === "object" &&
+    goal.goal_feasibility !== null &&
+    "status" in goal.goal_feasibility
+      ? String((goal.goal_feasibility as { status?: string }).status)
+      : null;
+  return [event, date, feasibility].filter(Boolean).join(" · ");
+}
 
 export default function PlanPage() {
   const { data, isLoading, isError, error, refetch } = usePlanSummary();
@@ -34,7 +63,12 @@ export default function PlanPage() {
     );
   }
 
-  const goal = data.goal as { event?: string; target?: string; date?: string } | null;
+  const phase = phaseLabel(data.training_phase) || phaseLabel(data.training_phase_detail);
+  const detail = data.training_phase_detail;
+  const objectives = detail?.primary_objectives || [];
+  const stability =
+    typeof data.plan_stability === "string" ? data.plan_stability.replace(/_/g, " ") : null;
+  const goalText = goalSummary(data.goal as Record<string, unknown> | null);
 
   return (
     <div className="space-y-6">
@@ -46,19 +80,20 @@ export default function PlanPage() {
       </header>
 
       <div className="flex flex-wrap gap-2">
-        {data.training_phase ? <StatusBadge status="info" label={`Fase: ${data.training_phase}`} /> : null}
-        {data.plan_stability ? (
-          <StatusBadge status="neutral" label={`Stabilitet: ${data.plan_stability}`} />
-        ) : null}
+        {phase ? <StatusBadge status="info" label={`Fase: ${phase}`} /> : null}
+        {stability ? <StatusBadge status="neutral" label={`Stabilitet: ${stability}`} /> : null}
       </div>
 
-      {goal ? (
+      {objectives.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Fokus: {objectives.map((o) => workoutLabel(o) === o ? o : o).join(" · ")}
+        </p>
+      ) : null}
+
+      {goalText ? (
         <section className="rounded-2xl border border-border bg-surface p-5">
           <h2 className="text-lg font-semibold">Mål</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {[goal.event, goal.target, goal.date].filter(Boolean).join(" · ") ||
-              "Mål konfigurert — se detaljer i backend goal context."}
-          </p>
+          <p className="mt-2 text-sm text-muted-foreground">{goalText}</p>
         </section>
       ) : (
         <EmptyState title="Ingen mål satt" description="Planen følger generelle treningsfaser." />
@@ -73,10 +108,10 @@ export default function PlanPage() {
           nærmeste dager.
         </p>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {["Base", "Build", "Build", "Recovery"].map((phase, i) => (
-            <div key={`${phase}-${i}`} className="rounded-xl bg-surface-muted px-3 py-4 text-center">
+          {["Base", "Build", "Build", "Recovery"].map((blockPhase, i) => (
+            <div key={`${blockPhase}-${i}`} className="rounded-xl bg-surface-muted px-3 py-4 text-center">
               <p className="text-xs text-muted-foreground">Uke {i + 1}</p>
-              <p className="mt-1 font-medium">{phase}</p>
+              <p className="mt-1 font-medium">{blockPhase}</p>
             </div>
           ))}
         </div>

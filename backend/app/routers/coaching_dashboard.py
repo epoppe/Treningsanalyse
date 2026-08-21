@@ -56,6 +56,21 @@ def get_today_dashboard(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+def _phase_label(training_phase: Any) -> Optional[str]:
+    """Presentation-friendly phase string; orchestrator may return dict or str."""
+    if training_phase is None:
+        return None
+    if isinstance(training_phase, str):
+        return training_phase
+    if isinstance(training_phase, dict):
+        return (
+            training_phase.get("phase")
+            or training_phase.get("training_block")
+            or training_phase.get("backwards_compatible_block")
+        )
+    return str(training_phase)
+
+
 @router.get("/plan")
 def get_plan_summary(
     target_date: Optional[date] = Query(None),
@@ -65,6 +80,7 @@ def get_plan_summary(
     day = _day(target_date)
     try:
         brief = CoachingOrchestrator(db, storage).preview_decision(day, detail="standard")
+        training_phase = brief.get("training_phase")
         return {
             "date": day.isoformat(),
             "plan": brief.get("plan"),
@@ -72,7 +88,10 @@ def get_plan_summary(
             "plan_stability_detail": brief.get("plan_stability_detail"),
             "plan_adaptation": brief.get("plan_adaptation"),
             "goal": brief.get("goal"),
-            "training_phase": brief.get("training_phase"),
+            "training_phase": _phase_label(training_phase),
+            "training_phase_detail": training_phase
+            if isinstance(training_phase, dict)
+            else None,
             "projected_week": brief.get("projected_week"),
         }
     except Exception as exc:

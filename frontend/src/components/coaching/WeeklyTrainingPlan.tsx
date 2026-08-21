@@ -2,7 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { WeeklyPlan, WeeklyPlanSession } from "@/types/coaching";
-import { workoutLabel } from "@/lib/coachingLabels";
+import { formatDuration, workoutLabel } from "@/lib/coachingLabels";
 
 const DAY_NAMES = ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
 
@@ -67,11 +67,9 @@ export function WeeklyTrainingPlan({
               <p className="mt-2 text-sm font-semibold text-foreground">
                 {workoutLabel(type)}
               </p>
-              {s?.duration_min != null ? (
-                <p className="mt-1 text-xs text-muted-foreground">{s.duration_min} min</p>
-              ) : (
-                <p className="mt-1 text-xs text-muted-foreground">—</p>
-              )}
+              <p className="mt-1 text-xs text-muted-foreground">
+                {s?.duration_min != null ? formatDuration(s.duration_min) : "—"}
+              </p>
             </li>
           );
         })}

@@ -77,8 +77,20 @@ export interface NextWorkout {
 export interface WeeklyPlanSession {
   day_offset?: number;
   type?: string;
-  duration_min?: number;
+  duration_min?: number | number[] | null;
   status?: "planned" | "completed" | "modified" | "missed" | string;
+}
+
+export interface TrainingPhaseDetail {
+  phase?: string;
+  confidence?: number;
+  days_to_event?: number | null;
+  primary_objectives?: string[];
+  secondary_objectives?: string[];
+  training_block?: string;
+  goal_type?: string;
+  reasons?: string[];
+  [key: string]: unknown;
 }
 
 export interface WeeklyPlan {
@@ -110,7 +122,7 @@ export interface CoachingBrief {
     quality_factors?: string[];
   };
   goal?: Record<string, unknown> | null;
-  training_phase?: string | null;
+  training_phase?: string | TrainingPhaseDetail | null;
   key_evidence?: Array<Record<string, unknown>>;
 }
 
@@ -133,6 +145,7 @@ export interface PlanSummary {
   plan_adaptation?: Record<string, unknown>;
   goal?: Record<string, unknown> | null;
   training_phase?: string | null;
+  training_phase_detail?: TrainingPhaseDetail | null;
   projected_week?: Record<string, unknown>;
 }
 

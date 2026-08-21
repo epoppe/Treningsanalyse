@@ -5,6 +5,7 @@ import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { WhyThisWorkout } from "@/components/coaching/WhyThisWorkout";
 import { NextWorkoutCard } from "@/components/coaching/NextWorkoutCard";
+import { WeeklyTrainingPlan } from "@/components/coaching/WeeklyTrainingPlan";
 
 describe("WhyThisWorkout", () => {
   it("shows Norwegian reason chips from backend codes", () => {
@@ -32,7 +33,23 @@ describe("WhyThisWorkout", () => {
       />
     );
     fireEvent.click(screen.getByRole("button", { name: /Vis mer/i }));
+    expect(screen.getByTestId("why-details")).toBeTruthy();
     expect(screen.getByText(/0\.81/)).toBeTruthy();
+  });
+});
+
+describe("WeeklyTrainingPlan", () => {
+  it("formats duration ranges without concatenating numbers", () => {
+    render(
+      <WeeklyTrainingPlan
+        plan={{
+          week_objective: "test",
+          sessions: [{ day_offset: 0, type: "easy_run", duration_min: [45, 60] }],
+        }}
+      />
+    );
+    expect(screen.getByText("45–60 min")).toBeTruthy();
+    expect(screen.queryByText(/4560/)).toBeNull();
   });
 });
 
