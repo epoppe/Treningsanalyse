@@ -46,29 +46,38 @@ export function NextWorkoutCard({
   return (
     <section
       aria-labelledby="next-workout-heading"
-      className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-session-threshold/10 via-surface-elevated to-surface p-6 shadow-sm"
+      className="relative overflow-hidden rounded-xl border border-border bg-gradient-to-br from-session-threshold/10 via-surface-elevated to-surface px-3 py-3"
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-session-threshold" aria-hidden />
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        Neste økt
-      </p>
-      <h2 id="next-workout-heading" className="mt-1 text-3xl font-semibold tracking-tight text-foreground">
-        {workoutLabel(type)}
-      </h2>
-      {structure ? <p className="mt-2 text-lg text-foreground/90">{structure}</p> : null}
-      <p className="mt-1 text-sm text-muted-foreground">{formatDuration(duration)}</p>
+      <div className="absolute inset-x-0 top-0 h-0.5 bg-session-threshold" aria-hidden />
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Neste økt
+          </p>
+          <h2 id="next-workout-heading" className="text-xl font-semibold tracking-tight text-foreground">
+            {workoutLabel(type)}
+          </h2>
+          <p className="mt-0.5 text-sm text-foreground/90">
+            {[structure, formatDuration(duration)].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1">
+          <StatusBadge status={conf.status} label={conf.label} />
+          <StatusBadge status={evidence.status} label={`evidens: ${evidence.label}`} />
+        </div>
+      </div>
 
       {!isRest ? (
-        <dl className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="rounded-xl bg-surface/80 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Puls</dt>
-            <dd className="text-sm font-medium">{formatHrRange(hr)}</dd>
+        <dl className="mt-2.5 grid grid-cols-2 gap-1.5">
+          <div className="rounded-lg bg-surface/80 px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Puls</dt>
+            <dd className="text-sm font-medium tabular-nums">{formatHrRange(hr)}</dd>
           </div>
-          <div className="rounded-xl bg-surface/80 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Tempo</dt>
+          <div className="rounded-lg bg-surface/80 px-2 py-1.5">
+            <dt className="text-[10px] text-muted-foreground">Tempo</dt>
             <dd className="text-sm font-medium">
               {uncertainPace
-                ? "Bruk puls/RPE i dag"
+                ? "HR/RPE i dag"
                 : Array.isArray(pace)
                   ? `${formatPace(pace[0])}–${formatPace(pace[pace.length - 1])}`
                   : formatPace(pace as number)}
@@ -78,31 +87,21 @@ export function NextWorkoutCard({
       ) : null}
 
       {uncertainPace && !isRest ? (
-        <p className="mt-3 text-sm text-status-warning">
-          Tempoestimat usikkert — bruk HR/RPE i dag.
-        </p>
+        <p className="mt-1.5 text-xs text-status-warning">Tempoestimat usikkert — bruk HR/RPE.</p>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        <StatusBadge status={conf.status} label={conf.label} />
-        <StatusBadge status={evidence.status} label={`evidens: ${evidence.label}`} />
-        {recommendation?.decision_status ? (
-          <StatusBadge status="info" label={String(recommendation.decision_status)} />
-        ) : null}
-      </div>
-
-      <div className="mt-6 flex flex-wrap gap-3">
+      <div className="mt-2.5 flex flex-wrap gap-2">
         <Link
           href="#why-workout"
-          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background"
+          className="rounded-md bg-foreground px-3 py-1.5 text-xs font-medium text-background"
         >
-          Hvorfor denne økten?
+          Hvorfor?
         </Link>
         <Link
           href="/plan"
-          className="rounded-md border border-border bg-surface px-4 py-2 text-sm font-medium text-foreground"
+          className="rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-medium text-foreground"
         >
-          Se ukeplan
+          Ukeplan
         </Link>
       </div>
     </section>

@@ -1,7 +1,6 @@
 "use client";
 
 import type { AthleteStateSummary } from "@/types/coaching";
-import { StatusBadge } from "./ui-states";
 
 function trendIcon(trend?: string | null): { icon: string; label: string } {
   const t = (trend || "").toLowerCase();
@@ -9,13 +8,6 @@ function trendIcon(trend?: string | null): { icon: string; label: string } {
   if (t.includes("down") || t.includes("declin") || t === "↓") return { icon: "↓", label: "nedgang" };
   if (t.includes("uncertain") || t === "?") return { icon: "?", label: "usikker" };
   return { icon: "→", label: "stabil" };
-}
-
-function dimStatus(name: string, value: unknown): "positive" | "neutral" | "warning" | "muted" {
-  if (value == null) return "muted";
-  if (name === "recovery" && typeof value === "number" && value < 40) return "warning";
-  if (name === "fatigue" && typeof value === "number" && value > 70) return "warning";
-  return "neutral";
 }
 
 const LABELS: Record<string, string> = {
@@ -34,7 +26,6 @@ export function AthleteStateCard({ state }: { state?: AthleteStateSummary | null
       label: LABELS[key] || key,
       value: d?.value,
       trend,
-      status: dimStatus(key, d?.value),
     };
   });
 
@@ -49,37 +40,32 @@ export function AthleteStateCard({ state }: { state?: AthleteStateSummary | null
   return (
     <section
       aria-labelledby="athlete-state-heading"
-      className="rounded-2xl border border-border bg-surface-elevated p-5 shadow-sm"
+      className="rounded-xl border border-border bg-surface-elevated px-3 py-2.5"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">I dag</p>
-          <h2 id="athlete-state-heading" className="mt-1 text-xl font-semibold text-foreground">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">I dag</p>
+          <h2 id="athlete-state-heading" className="text-base font-semibold leading-tight text-foreground">
             {headline}
           </h2>
         </div>
-        <StatusBadge status="info" label="Athlete state" />
       </div>
-      <ul className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <ul className="mt-2 grid grid-cols-3 gap-1.5">
         {dims.map((d) => (
-          <li key={d.key} className="rounded-xl bg-surface-muted/80 px-3 py-3">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>{d.label}</span>
+          <li key={d.key} className="rounded-lg bg-surface-muted/80 px-2 py-1.5">
+            <div className="flex items-center justify-between gap-1 text-[11px] text-muted-foreground">
+              <span className="truncate">{d.label}</span>
               <span aria-label={d.trend.label} title={d.trend.label}>
                 {d.trend.icon}
               </span>
             </div>
-            <p className="mt-1 text-base font-medium text-foreground">
+            <p className="text-sm font-semibold tabular-nums text-foreground">
               {d.value == null
-                ? "Mangler"
+                ? "—"
                 : typeof d.value === "number"
                   ? Math.round(d.value)
                   : String(d.value)}
             </p>
-            <StatusBadge
-              status={d.value == null ? "muted" : d.status}
-              label={d.value == null ? "missing" : d.trend.label}
-            />
           </li>
         ))}
       </ul>

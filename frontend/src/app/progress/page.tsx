@@ -30,25 +30,23 @@ export default function ProgressPage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Fremgang</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Trender først — spesialistsider for grafer.
-        </p>
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Fremgang</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">Trender først — grafer via drill-down.</p>
       </header>
 
       <FormTrendStrip state={data.athlete_state_summary} />
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-1.5 lg:grid-cols-4">
         {cards.map((c) => (
           <Link
             key={c.label}
             href={c.href || "/training-stress"}
-            className="rounded-2xl border border-border bg-surface p-4 transition hover:border-foreground/30"
+            className="rounded-xl border border-border bg-surface px-2.5 py-2 transition hover:border-foreground/30"
           >
-            <p className="text-xs text-muted-foreground">{c.label}</p>
-            <p className="mt-2 text-2xl font-semibold">
+            <p className="text-[10px] text-muted-foreground">{c.label}</p>
+            <p className="mt-0.5 text-lg font-semibold tabular-nums">
               {c.value == null ? "—" : typeof c.value === "number" ? c.value.toFixed(1) : String(c.value)}
             </p>
             <StatusBadge status={c.value == null ? "muted" : "neutral"} label="drill-down" />
@@ -56,9 +54,9 @@ export default function ProgressPage() {
         ))}
       </section>
 
-      <section className="rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-lg font-semibold">Spesialistsider</h2>
-        <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+        <h2 className="text-sm font-semibold">Spesialistsider</h2>
+        <ul className="mt-1.5 grid grid-cols-2 gap-1 sm:grid-cols-3">
           {[
             ["VO₂max", "/vo2max"],
             ["Løpeanalyse", "/analytics"],
@@ -68,7 +66,7 @@ export default function ProgressPage() {
             ["Statistikk", "/statistikk"],
           ].map(([label, href]) => (
             <li key={href}>
-              <Link href={href} className="text-sm text-status-info underline-offset-2 hover:underline">
+              <Link href={href} className="text-xs text-status-info underline-offset-2 hover:underline">
                 {label}
               </Link>
             </li>

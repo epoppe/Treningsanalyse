@@ -23,23 +23,23 @@ export default function InsightsPage() {
   const pros = data.prospective?.recommendations as { count?: number; executed?: number } | undefined;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Innsikt</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Lesbare oppsummeringer fra backend — ikke lokal spekulasjon.
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Innsikt</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Oppsummeringer fra backend — ikke lokal spekulasjon.
         </p>
       </header>
 
-      <section className="rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-lg font-semibold">Treningsrespons</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
+      <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+        <h2 className="text-sm font-semibold">Treningsrespons</h2>
+        <div className="mt-1.5 flex flex-wrap gap-1">
           <StatusBadge
             status={overall === "confirmed_drift" ? "warning" : overall === "stable" ? "positive" : "muted"}
             label={`Konseptdrift: ${overall}`}
           />
         </div>
-        <p className="mt-3 text-sm text-muted-foreground">
+        <p className="mt-1.5 text-xs text-muted-foreground">
           {overall === "insufficient_data"
             ? "For lite evidens til å si at responsen er stabil eller endret."
             : overall === "confirmed_drift"
@@ -48,19 +48,19 @@ export default function InsightsPage() {
         </p>
       </section>
 
-      <section className="rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-lg font-semibold">Prospektiv læring</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Anbefalinger i perioden: {pros?.count ?? 0}. Utført: {pros?.executed ?? 0}.
+      <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+        <h2 className="text-sm font-semibold">Prospektiv læring</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Anbefalinger: {pros?.count ?? 0} · Utført: {pros?.executed ?? 0}
         </p>
-        <p className="mt-2 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-[11px] text-muted-foreground">
           Kun registrerte anbefalinger — ikke rekonstruerte backtests.
         </p>
       </section>
 
-      <section className="rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-lg font-semibold">Dypere innsikt</h2>
-        <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+        <h2 className="text-sm font-semibold">Dypere innsikt</h2>
+        <ul className="mt-1.5 grid grid-cols-2 gap-1 sm:grid-cols-3">
           {[
             ["HRV", "/hrv"],
             ["Søvn", "/sovn"],
@@ -71,7 +71,7 @@ export default function InsightsPage() {
             ["System", "/system"],
           ].map(([label, href]) => (
             <li key={href}>
-              <Link href={href} className="text-sm text-status-info underline-offset-2 hover:underline">
+              <Link href={href} className="text-xs text-status-info underline-offset-2 hover:underline">
                 {label}
               </Link>
             </li>

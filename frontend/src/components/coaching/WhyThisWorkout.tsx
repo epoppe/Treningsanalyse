@@ -36,14 +36,25 @@ export function WhyThisWorkout({
   const freshnessEntries = Object.entries(explanation?.data_freshness || {}).slice(0, 6);
 
   return (
-    <section id="why-workout" aria-labelledby="why-heading" className="rounded-2xl border border-border bg-surface p-5">
-      <h2 id="why-heading" className="text-lg font-semibold text-foreground">
-        Hvorfor
-      </h2>
+    <section id="why-workout" aria-labelledby="why-heading" className="rounded-xl border border-border bg-surface px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <h2 id="why-heading" className="text-sm font-semibold text-foreground">
+          Hvorfor
+        </h2>
+        <button
+          type="button"
+          className="inline-flex min-h-8 items-center rounded-md px-2 py-1 text-xs font-medium text-status-info hover:underline"
+          aria-expanded={open}
+          aria-controls="why-details"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "Skjul" : "Vis mer"}
+        </button>
+      </div>
       {unique.length === 0 ? (
-        <p className="mt-2 text-sm text-muted-foreground">Ingen begrunnelseskoder tilgjengelig.</p>
+        <p className="mt-1 text-xs text-muted-foreground">Ingen begrunnelseskoder tilgjengelig.</p>
       ) : (
-        <ul className="mt-3 flex flex-wrap gap-2">
+        <ul className="mt-1.5 flex flex-wrap gap-1">
           {unique.map((code) => {
             const isWarn =
               guards.includes(code) ||
@@ -55,8 +66,8 @@ export function WhyThisWorkout({
                 key={code}
                 className={
                   isWarn
-                    ? "rounded-full border border-status-warning/40 bg-status-warning/10 px-3 py-1 text-sm text-foreground"
-                    : "rounded-full border border-status-positive/30 bg-status-positive/10 px-3 py-1 text-sm text-foreground"
+                    ? "rounded-md border border-status-warning/40 bg-status-warning/10 px-2 py-0.5 text-xs text-foreground"
+                    : "rounded-md border border-status-positive/30 bg-status-positive/10 px-2 py-0.5 text-xs text-foreground"
                 }
               >
                 <span aria-hidden>{isWarn ? "! " : "✓ "}</span>
@@ -66,19 +77,10 @@ export function WhyThisWorkout({
           })}
         </ul>
       )}
-      <button
-        type="button"
-        className="mt-4 inline-flex min-h-10 items-center rounded-md border border-border bg-surface-muted px-3 py-2 text-sm font-medium text-foreground hover:bg-surface"
-        aria-expanded={open}
-        aria-controls="why-details"
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? "Skjul detaljer" : "Vis mer"}
-      </button>
       {open ? (
         <div
           id="why-details"
-          className="mt-3 space-y-2 rounded-xl bg-surface-muted p-3 text-sm text-muted-foreground"
+          className="mt-2 space-y-1 rounded-lg bg-surface-muted p-2 text-xs text-muted-foreground"
           data-testid="why-details"
         >
           <p>
@@ -100,7 +102,7 @@ export function WhyThisWorkout({
           {guards.length ? (
             <div>
               <p className="font-medium text-foreground">Guardrails</p>
-              <ul className="mt-1 list-disc space-y-1 pl-5">
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4">
                 {guards.map((g) => (
                   <li key={g}>{reasonLabel(g)}</li>
                 ))}
@@ -108,7 +110,7 @@ export function WhyThisWorkout({
             </div>
           ) : null}
           {freshnessEntries.length ? (
-            <ul className="mt-2 space-y-1 border-t border-border pt-2">
+            <ul className="mt-1 space-y-0.5 border-t border-border pt-1">
               {freshnessEntries.map(([key, entry]) => (
                 <li key={key}>
                   {key}: {entry.status || entry.freshness || "—"}

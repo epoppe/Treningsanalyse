@@ -16,10 +16,10 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-border bg-surface p-8 text-center" role="status">
-      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
-      {description ? <p className="mt-2 text-sm text-muted-foreground">{description}</p> : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+    <div className="rounded-xl border border-border bg-surface px-3 py-4 text-center" role="status">
+      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
+      {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
+      {action ? <div className="mt-2">{action}</div> : null}
     </div>
   );
 }
@@ -35,16 +35,16 @@ export function ErrorState({
 }) {
   return (
     <div
-      className="rounded-xl border border-status-critical/30 bg-status-critical/5 p-6"
+      className="rounded-xl border border-status-critical/30 bg-status-critical/5 px-3 py-3"
       role="alert"
     >
-      <h2 className="text-lg font-semibold text-status-critical">{title}</h2>
-      {description ? <p className="mt-2 text-sm text-muted-foreground">{description}</p> : null}
+      <h2 className="text-sm font-semibold text-status-critical">{title}</h2>
+      {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
       {onRetry ? (
         <button
           type="button"
           onClick={onRetry}
-          className="mt-4 rounded-md bg-foreground px-3 py-2 text-sm text-background"
+          className="mt-2 rounded-md bg-foreground px-2.5 py-1.5 text-xs text-background"
         >
           Prøv igjen
         </button>
@@ -56,7 +56,7 @@ export function ErrorState({
 export function StaleDataState({ message }: { message: string }) {
   return (
     <div
-      className="rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm text-foreground"
+      className="rounded-md border border-status-warning/40 bg-status-warning/10 px-2.5 py-1.5 text-xs text-foreground"
       role="status"
     >
       <span className="font-medium">Utdatert data · </span>

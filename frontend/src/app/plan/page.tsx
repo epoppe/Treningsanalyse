@@ -71,11 +71,11 @@ export default function PlanPage() {
   const goalText = goalSummary(data.goal as Record<string, unknown> | null);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Plan</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Ukeplan og fase — detaljerte metrikk-sider ligger som drill-down.
+        <h1 className="text-xl font-semibold tracking-tight md:text-2xl">Plan</h1>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Ukeplan og fase — metrikk-sider som drill-down.
         </p>
       </header>
 
@@ -91,9 +91,9 @@ export default function PlanPage() {
       ) : null}
 
       {goalText ? (
-        <section className="rounded-2xl border border-border bg-surface p-5">
-          <h2 className="text-lg font-semibold">Mål</h2>
-          <p className="mt-2 text-sm text-muted-foreground">{goalText}</p>
+        <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+          <h2 className="text-sm font-semibold">Mål</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{goalText}</p>
         </section>
       ) : (
         <EmptyState title="Ingen mål satt" description="Planen følger generelle treningsfaser." />
@@ -101,23 +101,22 @@ export default function PlanPage() {
 
       <WeeklyTrainingPlan plan={data.plan} />
 
-      <section className="rounded-2xl border border-border bg-surface p-5">
-        <h2 className="text-lg font-semibold">Treningsblokk</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Mesosyklus-visning kommer som kompakt volum/fokus per uke. Bruk ukeplanen over for
-          nærmeste dager.
+      <section className="rounded-xl border border-border bg-surface px-3 py-2.5">
+        <h2 className="text-sm font-semibold">Treningsblokk</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Mesosyklus kommer som kompakt volum/fokus per uke.
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-4 gap-1">
           {["Base", "Build", "Build", "Recovery"].map((blockPhase, i) => (
-            <div key={`${blockPhase}-${i}`} className="rounded-xl bg-surface-muted px-3 py-4 text-center">
-              <p className="text-xs text-muted-foreground">Uke {i + 1}</p>
-              <p className="mt-1 font-medium">{blockPhase}</p>
+            <div key={`${blockPhase}-${i}`} className="rounded-md bg-surface-muted px-2 py-2 text-center">
+              <p className="text-[10px] text-muted-foreground">Uke {i + 1}</p>
+              <p className="text-xs font-medium">{blockPhase}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <p className="text-sm text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Se også{" "}
         <Link href="/training-status" className="underline">
           treningstatus

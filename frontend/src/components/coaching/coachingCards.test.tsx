@@ -48,7 +48,7 @@ describe("WeeklyTrainingPlan", () => {
         }}
       />
     );
-    expect(screen.getByText("45–60 min")).toBeTruthy();
+    expect(screen.getByText("45–60m")).toBeTruthy();
     expect(screen.queryByText(/4560/)).toBeNull();
   });
 });
@@ -73,7 +73,7 @@ describe("NextWorkoutCard", () => {
     );
     expect(screen.getByText("Terskel")).toBeTruthy();
     expect(screen.getByText(/3 × 10 min/)).toBeTruthy();
-    expect(screen.getByText(/Bruk puls\/RPE/i)).toBeTruthy();
+    expect(screen.getAllByText(/HR\/RPE/i).length).toBeGreaterThan(0);
   });
 
   it("renders rest without intensity targets", () => {

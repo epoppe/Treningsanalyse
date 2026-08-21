@@ -34,19 +34,19 @@ export function WeeklyTrainingPlan({
   const sessions = plan?.sessions || [];
 
   return (
-    <section aria-labelledby="week-heading" className="rounded-2xl border border-border bg-surface p-5">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="week-heading" className="text-lg font-semibold text-foreground">
+    <section aria-labelledby="week-heading" className="rounded-xl border border-border bg-surface px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <h2 id="week-heading" className="text-sm font-semibold text-foreground">
           Denne uken
         </h2>
         {adjusted ? (
-          <span className="text-xs font-medium text-status-info">Plan justert</span>
+          <span className="text-[10px] font-medium text-status-info">Plan justert</span>
         ) : null}
       </div>
       {plan?.week_objective ? (
-        <p className="mt-1 text-sm text-muted-foreground">{plan.week_objective}</p>
+        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{plan.week_objective}</p>
       ) : null}
-      <ol className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+      <ol className="mt-2 grid grid-cols-7 gap-1">
         {DAY_NAMES.map((name, offset) => {
           const s = sessionForDay(sessions, offset);
           const isToday = offset === todayOffset;
@@ -55,20 +55,20 @@ export function WeeklyTrainingPlan({
             <li
               key={name}
               className={cn(
-                "rounded-xl border px-2 py-3 text-center",
+                "rounded-md border px-0.5 py-1.5 text-center",
                 SESSION_CLASS[type] || "bg-surface-muted border-border",
-                isToday && "ring-2 ring-foreground/40"
+                isToday && "ring-1 ring-foreground/50"
               )}
             >
-              <p className="text-xs font-medium text-muted-foreground">
+              <p className="text-[10px] font-medium leading-none text-muted-foreground">
                 {name}
-                {isToday ? " · i dag" : ""}
+                {isToday ? "*" : ""}
               </p>
-              <p className="mt-2 text-sm font-semibold text-foreground">
+              <p className="mt-1 text-[10px] font-semibold leading-tight text-foreground sm:text-xs">
                 {workoutLabel(type)}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {s?.duration_min != null ? formatDuration(s.duration_min) : "—"}
+              <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground sm:text-[10px]">
+                {s?.duration_min != null ? formatDuration(s.duration_min).replace(" min", "m") : "—"}
               </p>
             </li>
           );

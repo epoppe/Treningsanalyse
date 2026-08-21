@@ -27,11 +27,11 @@ export default function TodayPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-4" aria-busy="true" aria-label="Laster dagens coaching">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
-        <Skeleton className="h-56 w-full" />
-        <Skeleton className="h-32 w-full" />
+      <div className="space-y-2.5" aria-busy="true" aria-label="Laster dagens coaching">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-36 w-full" />
+        <Skeleton className="h-24 w-full" />
       </div>
     );
   }
@@ -73,18 +73,16 @@ export default function TodayPage() {
     : false;
 
   return (
-    <div className="space-y-6">
-      <header className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+    <div className="space-y-3">
+      <header className="space-y-0.5">
+        <p className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
           {data?.date || "I dag"}
           {isFetching ? " · oppdaterer…" : ""}
         </p>
-        <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-foreground md:text-4xl">
+        <h1 className="max-w-3xl text-xl font-semibold tracking-tight text-foreground md:text-2xl">
           {sentence}
         </h1>
-        <p className="max-w-2xl text-sm text-muted-foreground">
-          Beslutning fra coaching-motoren — ikke en lokal frontend-regel.
-        </p>
+        <p className="text-xs text-muted-foreground">Fra coaching-motoren — ikke lokal frontend-logikk.</p>
       </header>
 
       {data?.system_attention ? (
@@ -100,8 +98,8 @@ export default function TodayPage() {
         <StaleDataState message="Terskel eller andre nøkkeldata er gamle — tilliten er redusert." />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        <div className="space-y-6 lg:col-span-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+        <div className="space-y-3 lg:col-span-3">
           <AthleteStateCard state={brief.athlete_state_summary} />
           <NextWorkoutCard
             recommendation={brief.recommendation}
@@ -113,7 +111,7 @@ export default function TodayPage() {
             guardrails={brief.guardrails}
           />
         </div>
-        <div className="space-y-6 lg:col-span-2">
+        <div className="space-y-3 lg:col-span-2">
           <WeeklyTrainingPlan
             plan={brief.plan}
             todayOffset={todayOffsetFromIso(data?.date)}
@@ -121,14 +119,14 @@ export default function TodayPage() {
           />
           <FormTrendStrip state={brief.athlete_state_summary} />
           {(brief.warnings || []).length > 0 ? (
-            <section className="rounded-2xl border border-status-warning/30 bg-status-warning/5 p-4">
-              <h2 className="text-sm font-semibold text-foreground">Å følge med på</h2>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+            <section className="rounded-xl border border-status-warning/30 bg-status-warning/5 px-3 py-2">
+              <h2 className="text-xs font-semibold text-foreground">Å følge med på</h2>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
                 {(brief.warnings || []).slice(0, 5).map((w) => (
                   <li key={w}>{reasonLabel(w)}</li>
                 ))}
               </ul>
-              <Link href="/system" className="mt-3 inline-block text-sm text-status-info underline">
+              <Link href="/system" className="mt-1.5 inline-block text-xs text-status-info underline">
                 Diagnostikk
               </Link>
             </section>

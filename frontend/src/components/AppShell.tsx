@@ -29,7 +29,7 @@ function NavItem({
     <Link
       href={href}
       className={cn(
-        "rounded-md px-3 py-2 text-sm font-medium transition-colors",
+        "rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors",
         active
           ? "bg-foreground text-background"
           : "text-muted-foreground hover:bg-surface-muted hover:text-foreground"
@@ -46,15 +46,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-cockpit text-foreground">
-      {/* Desktop sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-56 flex-col border-r border-border bg-surface/95 px-3 py-6 backdrop-blur md:flex">
-        <div className="px-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-44 flex-col border-r border-border bg-surface/95 px-2 py-4 backdrop-blur md:flex">
+        <div className="px-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
             Treningsanalyse
           </p>
-          <p className="mt-1 text-lg font-semibold">Cockpit</p>
+          <p className="text-base font-semibold leading-tight">Cockpit</p>
         </div>
-        <nav className="mt-8 flex flex-1 flex-col gap-1" aria-label="Hovednavigasjon">
+        <nav className="mt-5 flex flex-1 flex-col gap-0.5" aria-label="Hovednavigasjon">
           {PRIMARY.map((item) => (
             <NavItem
               key={item.href}
@@ -64,7 +63,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             />
           ))}
         </nav>
-        <nav className="flex flex-col gap-1 border-t border-border pt-4" aria-label="System">
+        <nav className="flex flex-col gap-0.5 border-t border-border pt-3" aria-label="System">
           {SECONDARY.map((item) => (
             <NavItem
               key={item.href}
@@ -76,23 +75,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
       </aside>
 
-      {/* Mobile top brand */}
-      <div className="border-b border-border bg-surface/90 px-4 py-3 backdrop-blur md:hidden">
+      <div className="border-b border-border bg-surface/90 px-3 py-2 backdrop-blur md:hidden">
         <p className="text-sm font-semibold">Treningsanalyse</p>
       </div>
 
-      <div className="md:pl-56">
-        <main className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 md:pb-10 md:pt-8">
+      <div className="md:pl-44">
+        <main className="mx-auto w-full max-w-5xl px-3 pb-20 pt-4 md:px-4 md:pb-6 md:pt-5">
           {children}
         </main>
       </div>
 
-      {/* Mobile bottom nav */}
       <nav
-        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-2 py-2 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-1 py-1 backdrop-blur md:hidden"
         aria-label="Mobilnavigasjon"
       >
-        <ul className="grid grid-cols-5 gap-1">
+        <ul className="grid grid-cols-5 gap-0.5">
           {[...PRIMARY.slice(0, 4), { href: "/insights", label: "Mer", match: (p: string) => p.startsWith("/insights") || p.startsWith("/system") }].map(
             (item) => {
               const active = item.match(pathname);
@@ -101,7 +98,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   <Link
                     href={item.href}
                     className={cn(
-                      "flex flex-col items-center rounded-md px-1 py-2 text-[11px] font-medium",
+                      "flex flex-col items-center rounded-md px-1 py-1.5 text-[10px] font-medium",
                       active ? "text-foreground" : "text-muted-foreground"
                     )}
                     aria-current={active ? "page" : undefined}

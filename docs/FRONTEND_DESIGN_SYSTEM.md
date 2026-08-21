@@ -32,6 +32,17 @@ Always pair color with text/icon:
 - freshness: fresh / aging / stale / missing  
 - confidence: high / medium / low  
 
+## Density (compact cockpit)
+
+Coaching surfaces prefer **dense information** over airy marketing layout:
+
+- Section gaps: `space-y-3` / `gap-3` (not 6)
+- Card padding: `px-3 py-2.5` (not `p-5`/`p-6`)
+- Page titles: `text-xl`–`text-2xl` (not `text-3xl`/`text-4xl`)
+- Chips / meta: `text-xs`–`text-[10px]`
+- Sidebar: `w-44`, tighter nav `py-1.5`
+- Keep touch targets ≥ ~32px for primary controls; do not crush mobile bottom nav
+
 ## Typography
 
 Root layout keeps Inter for continuity with legacy pages. Coaching surfaces use clear hierarchy (title → decision → meta) without competing display fonts.
