@@ -51,6 +51,27 @@ const config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          elevated: "hsl(var(--surface-elevated))",
+          muted: "hsl(var(--surface-muted))",
+        },
+        status: {
+          positive: "hsl(var(--status-positive))",
+          neutral: "hsl(var(--status-neutral))",
+          warning: "hsl(var(--status-warning))",
+          critical: "hsl(var(--status-critical))",
+          info: "hsl(var(--status-info))",
+        },
+        session: {
+          easy: "hsl(var(--session-easy))",
+          long: "hsl(var(--session-long))",
+          threshold: "hsl(var(--session-threshold))",
+          vo2: "hsl(var(--session-vo2))",
+          race: "hsl(var(--session-race))",
+          strength: "hsl(var(--session-strength))",
+          rest: "hsl(var(--session-rest))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

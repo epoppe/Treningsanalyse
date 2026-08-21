@@ -3,20 +3,20 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import StoreProvider from "./StoreProvider";
 import StyledComponentsRegistry from "./registry";
-import Navbar from "../components/Navbar";
+import AppShell from "../components/AppShell";
 import QueryProvider from "./QueryProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Treningsapp",
-  description: "Analyse av treningsdata fra Garmin",
+  title: "Treningsanalyse",
+  description: "Treningsbeslutninger basert på Garmin-data",
 };
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html lang="no">
@@ -24,10 +24,7 @@ export default function RootLayout({
         <StyledComponentsRegistry>
           <QueryProvider>
             <StoreProvider>
-              <Navbar />
-              <main>
-                {children}
-              </main>
+              <AppShell>{children}</AppShell>
             </StoreProvider>
           </QueryProvider>
         </StyledComponentsRegistry>
