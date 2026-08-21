@@ -70,6 +70,9 @@ function UtviklingPanel() {
           <div className="mt-2">
             <AnalysisError
               title="Kunne ikke hente utvikling"
+              description={
+                development.error instanceof Error ? development.error.message : undefined
+              }
               onRetry={() => development.refetch()}
             />
           </div>
