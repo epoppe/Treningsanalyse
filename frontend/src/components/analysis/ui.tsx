@@ -39,14 +39,17 @@ export function AnalysisEmpty({ title, description }: { title: string; descripti
 
 export function AnalysisError({
   title,
+  description,
   onRetry,
 }: {
   title: string;
+  description?: string;
   onRetry?: () => void;
 }) {
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3" role="alert">
       <p className="text-sm font-medium text-red-800">{title}</p>
+      {description ? <p className="mt-1 text-xs text-red-700/80">{description}</p> : null}
       {onRetry ? (
         <button type="button" onClick={onRetry} className="mt-2 text-xs font-medium text-red-700 underline">
           Prøv igjen
