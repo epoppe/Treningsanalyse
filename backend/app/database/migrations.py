@@ -48,6 +48,20 @@ def get_head_revision(database_url: Optional[str] = None) -> Optional[str]:
     return script.get_current_head()
 
 
+def get_all_heads(database_url: Optional[str] = None) -> list[str]:
+    """Alle Alembic heads — mer enn én er en CI-feil."""
+    cfg = get_alembic_config(database_url)
+    script = ScriptDirectory.from_config(cfg)
+    return list(script.get_heads())
+
+
+def assert_single_alembic_head(database_url: Optional[str] = None) -> str:
+    heads = get_all_heads(database_url)
+    if len(heads) != 1:
+        raise RuntimeError(f"Expected exactly one Alembic head, found {heads}")
+    return heads[0]
+
+
 def _has_application_tables(connection: Connection) -> bool:
     """True hvis databasen allerede har app-tabeller (pre-Alembic DB)."""
     inspector = inspect(connection)
