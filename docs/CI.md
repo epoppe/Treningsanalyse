@@ -23,6 +23,7 @@ Kjører på push/PR mot `main`. Feiler ved lint-, test-, type- eller build-feil.
 - `test_coaching_v9_operational.py` — sufficiency, restore, prospective, monitors, alembic step-upgrade
 - `test_adaptive_coaching_v5.py` — preview no-persist, no-lookahead
 - `test_adaptive_coaching_v7.py` — shadow isolation, promotion gate
+- `test_analysis_workspace_api.py` — `/api/analysis/development|timeseries|relationships` wrappers
 
 Required coaching invariants (fail CI on break):
 

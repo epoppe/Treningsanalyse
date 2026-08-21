@@ -153,6 +153,11 @@ test_*.py
 !docs/COACHING_V9_OPERATIONAL_AUDIT.md
 !docs/COACHING_MODEL_GOVERNANCE.md
 !docs/COACHING_OPERATIONS.md
+!docs/FRONTEND_ANALYTICS_UX_AUDIT.md
+
+# Next.js helpers under frontend/src/lib (Python lib/ still ignored)
+!frontend/src/lib/
+!frontend/src/lib/**
 !backend/requirements.txt
 !backend/requirements-dev.txt
 !README.md
