@@ -113,6 +113,7 @@ test_*.py
 !backend/tests/test_coaching_v8.py
 !backend/tests/test_coaching_correctness.py
 !backend/tests/test_coaching_v9_operational.py
+!backend/tests/test_analysis_workspace_api.py
 !backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
