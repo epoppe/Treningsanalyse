@@ -113,6 +113,7 @@ test_*.py
 !backend/tests/test_coaching_v8.py
 !backend/tests/test_coaching_correctness.py
 !backend/tests/test_coaching_v9_operational.py
+!backend/tests/test_coaching_dashboard_api.py
 !backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
@@ -153,6 +154,12 @@ test_*.py
 !docs/COACHING_V9_OPERATIONAL_AUDIT.md
 !docs/COACHING_MODEL_GOVERNANCE.md
 !docs/COACHING_OPERATIONS.md
+!docs/FRONTEND_UX_V1_AUDIT.md
+!docs/FRONTEND_DESIGN_SYSTEM.md
+
+# Next.js shared helpers live under frontend/src/lib (Python lib/ is still ignored)
+!frontend/src/lib/
+!frontend/src/lib/**
 !backend/requirements.txt
 !backend/requirements-dev.txt
 !README.md

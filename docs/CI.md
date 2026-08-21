@@ -42,6 +42,7 @@ Required coaching invariants (fail CI on break):
 | Install | `npm ci` |
 | Lint | `npm run lint` (ESLint / next lint) |
 | Types | `npx tsc --noEmit` |
+| Tests | `npm test` (Jest — coaching labels/components) |
 | Build | `npm run build` |
 
 ## Lokalt

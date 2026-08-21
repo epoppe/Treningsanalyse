@@ -1,0 +1,93 @@
+"use client";
+
+import { cn } from "@/lib/utils";
+
+export function Skeleton({ className }: { className?: string }) {
+  return <div className={cn("animate-pulse rounded-md bg-surface-muted", className)} aria-hidden />;
+}
+
+export function EmptyState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-surface p-8 text-center" role="status">
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      {description ? <p className="mt-2 text-sm text-muted-foreground">{description}</p> : null}
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
+  );
+}
+
+export function ErrorState({
+  title = "Noe gikk galt",
+  description,
+  onRetry,
+}: {
+  title?: string;
+  description?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-status-critical/30 bg-status-critical/5 p-6"
+      role="alert"
+    >
+      <h2 className="text-lg font-semibold text-status-critical">{title}</h2>
+      {description ? <p className="mt-2 text-sm text-muted-foreground">{description}</p> : null}
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-4 rounded-md bg-foreground px-3 py-2 text-sm text-background"
+        >
+          Prøv igjen
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function StaleDataState({ message }: { message: string }) {
+  return (
+    <div
+      className="rounded-lg border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-sm text-foreground"
+      role="status"
+    >
+      <span className="font-medium">Utdatert data · </span>
+      {message}
+    </div>
+  );
+}
+
+export function StatusBadge({
+  status,
+  label,
+}: {
+  status: "positive" | "neutral" | "warning" | "critical" | "info" | "muted";
+  label: string;
+}) {
+  const styles: Record<string, string> = {
+    positive: "bg-status-positive/15 text-status-positive",
+    neutral: "bg-status-neutral/15 text-status-neutral",
+    warning: "bg-status-warning/15 text-status-warning",
+    critical: "bg-status-critical/15 text-status-critical",
+    info: "bg-status-info/15 text-status-info",
+    muted: "bg-muted text-muted-foreground",
+  };
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium",
+        styles[status]
+      )}
+    >
+      {label}
+    </span>
+  );
+}
