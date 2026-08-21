@@ -12,6 +12,7 @@ from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
 from .personalization_evidence_policy import PersonalizationEvidencePolicy
 from .ppap_metrics_service import PpapMetricsService
+from .evidence_hierarchy import EvidenceHierarchy
 from .status_semantics import SourceType
 
 
@@ -45,6 +46,7 @@ class RecoveryCostService:
         self.db = db
         self._ppap = ppap or PpapMetricsService(db, None)
         self._policy = PersonalizationEvidencePolicy()
+        self._hierarchy = EvidenceHierarchy()
 
     def estimate(self, workout_type: str, *, as_of: Optional[date] = None) -> Dict[str, Any]:
         as_of = as_of or date.today()
@@ -54,23 +56,33 @@ class RecoveryCostService:
             )
         )
         observed = self._observed_recovery_days(workout_type, as_of)
+        hierarchy = self._hierarchy.resolve(
+            domain="recovery_cost",
+            prospective_n=observed.get("prospective_n", 0),
+            historical_n=observed.get("historical_n", 0),
+            prospective_dates=observed.get("prospective_dates"),
+            historical_dates=observed.get("historical_dates"),
+            as_of=as_of,
+        )
         level = self._policy.assess(
             sample_count=observed["sample_count"],
             evidence_strength=observed.get("evidence_strength", 0.0),
-            prospective=observed["source"] == "prospective",
+            prospective=hierarchy["source"] == "prospective",
             as_of=as_of,
             last_supporting_observation=observed.get("last_observation"),
         )
 
-        if level["may_override_defaults"] and observed.get("range") and observed["source"] != "default":
+        if hierarchy["personalized"] and level["may_override_defaults"] and observed.get("range"):
             return {
                 "workout_type": workout_type,
                 "expected_recovery_days": observed["range"],
                 "range": observed["range"],
                 "confidence": "high" if level["level"] == "PERSONAL_STRONG" else "moderate",
-                "source": observed["source"],
+                "source": hierarchy["source"],
                 "personalized": True,
                 "sample_count": observed["sample_count"],
+                "effective_sample_count": hierarchy["effective_sample_count"],
+                "evidence_level": hierarchy["evidence_level"],
                 "evidence_strength": level["evidence_strength"],
                 "personalization_level": level["level"],
                 "ci": observed.get("ci"),
@@ -86,11 +98,13 @@ class RecoveryCostService:
             "source": "default",
             "personalized": False,
             "sample_count": observed["sample_count"],
+            "effective_sample_count": hierarchy["effective_sample_count"],
+            "evidence_level": hierarchy["evidence_level"],
             "evidence_strength": level["evidence_strength"],
             "personalization_level": level["level"],
             "ci": None,
             "source_type": SourceType.CONFIG.value,
-            "note": "Default recovery envelope — not personalized until sufficient observed evidence.",
+            "note": "Default recovery envelope — not personalized until SampleSufficiencyPolicy allows.",
         }
 
     def summary(self, *, as_of: Optional[date] = None) -> Dict[str, Any]:
@@ -109,7 +123,8 @@ class RecoveryCostService:
             .all()
         )
         days_list: List[float] = []
-        prospective = 0
+        prospective_dates: List[date] = []
+        historical_dates: List[date] = []
         last_obs: Optional[date] = None
 
         for exec_row, rec, activity in rows:
@@ -125,9 +140,13 @@ class RecoveryCostService:
             days_list.append(float(recovery_days))
             last_obs = act_day if last_obs is None else max(last_obs, act_day)
             if exec_row.recommendation_id is not None:
-                prospective += 1
+                prospective_dates.append(act_day)
+            else:
+                historical_dates.append(act_day)
 
         n = len(days_list)
+        prospective_n = len(prospective_dates)
+        historical_n = len(historical_dates)
         if n < 3:
             return {
                 "sample_count": n,
@@ -136,16 +155,19 @@ class RecoveryCostService:
                 "evidence_strength": 0.1 * n,
                 "last_observation": last_obs,
                 "ci": None,
+                "prospective_n": prospective_n,
+                "historical_n": historical_n,
+                "prospective_dates": prospective_dates,
+                "historical_dates": historical_dates,
             }
 
         days_list.sort()
         lo = int(max(0, days_list[0]))
         hi = int(max(lo + 1, round(days_list[-1])))
         mid = median(days_list)
-        # Simple percentile-ish CI from sample spread
         p25 = days_list[max(0, n // 4)]
         p75 = days_list[min(n - 1, (3 * n) // 4)]
-        source = "prospective" if prospective >= max(3, n // 2) else "historical"
+        source = "prospective" if prospective_n >= max(3, n // 2) else "historical"
         strength = min(0.85, 0.25 + 0.05 * n)
         return {
             "sample_count": n,
@@ -154,6 +176,10 @@ class RecoveryCostService:
             "evidence_strength": strength,
             "last_observation": last_obs,
             "ci": {"p25": round(p25, 2), "median": round(mid, 2), "p75": round(p75, 2)},
+            "prospective_n": prospective_n,
+            "historical_n": historical_n,
+            "prospective_dates": prospective_dates,
+            "historical_dates": historical_dates,
         }
 
     def _estimate_days_to_recover(

@@ -17,6 +17,7 @@ class PersonalizationEvidencePolicy:
     """
     Canonical policy for when personal evidence may override defaults.
 
+    Prefer SampleSufficiencyPolicy for domain-specific floors + temporal spread.
     Decay reduces weight for old evidence without deleting history.
     """
 

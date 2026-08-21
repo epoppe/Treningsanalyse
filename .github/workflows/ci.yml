@@ -47,6 +47,8 @@ jobs:
           PYTHONPATH: .
         run: |
           rm -f /tmp/ci-migrate.db
+          # Fail on multiple heads / broken chain
+          python -c "from app.database.migrations import assert_single_alembic_head; print(assert_single_alembic_head())"
           DATABASE_URL="sqlite:////tmp/ci-migrate.db" alembic upgrade head
           DATABASE_URL="sqlite:////tmp/ci-migrate.db" alembic current
           python -m pytest tests/test_alembic_migrations.py -v
@@ -56,8 +58,8 @@ jobs:
           PYTHONPATH: .
           SKIP_GARMIN_INIT: "true"
         run: |
-          # Kjører stabile, trackede tester. Kjente app-logic-feil (performance metrics m.m.)
-          # er bevisst utenfor denne suiten — se AGENTS.md.
+          # Platform + coaching invariant / operational suites.
+          # Kjente app-logic-feil (performance metrics m.m.) er bevisst utenfor — se AGENTS.md.
           python -m pytest \
             tests/test_alembic_migrations.py \
             tests/test_garmin_auth.py \
@@ -65,12 +67,25 @@ jobs:
             tests/test_activity_data_validation.py \
             tests/test_metric_catalog_units.py \
             tests/test_garmin_client_sync.py \
+            tests/test_coaching_hardening.py \
+            tests/test_coaching_v8.py \
+            tests/test_coaching_correctness.py \
+            tests/test_coaching_v9_operational.py \
+            tests/test_adaptive_coaching_v5.py \
+            tests/test_adaptive_coaching_v7.py \
             -v --tb=short
 
       - name: API smoke test
         env:
           SKIP_GARMIN_INIT: "true"
         run: bash scripts/ci_smoke_api.sh
+
+      - name: Import / startup smoke
+        env:
+          PYTHONPATH: .
+          SKIP_GARMIN_INIT: "true"
+        run: |
+          python -c "from app.main import app; assert app.title"
 
   frontend:
     name: Frontend (eslint · tsc · build)

@@ -109,6 +109,13 @@ class AlembicMigrationTests(unittest.TestCase):
         self.assertEqual(schema["schema_version"], revision)
         self.assertTrue(schema["schema_at_head"])
 
+    def test_single_alembic_head(self):
+        from app.database.migrations import assert_single_alembic_head, get_all_heads
+
+        heads = get_all_heads()
+        self.assertEqual(len(heads), 1)
+        self.assertEqual(assert_single_alembic_head(), heads[0])
+
     def test_query_performance_indexes_exist(self):
         """Fase 4: FK-/query-indekser for laps, PR, sync og TE-backfill."""
         url = "sqlite:///:memory:"

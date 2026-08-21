@@ -112,6 +112,7 @@ test_*.py
 !backend/tests/test_adaptive_coaching_v7.py
 !backend/tests/test_coaching_v8.py
 !backend/tests/test_coaching_correctness.py
+!backend/tests/test_coaching_v9_operational.py
 !backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
@@ -149,7 +150,9 @@ test_*.py
 !docs/CI.md
 !docs/DATA_LAYERS.md
 !docs/COACHING_V8_AUDIT.md
+!docs/COACHING_V9_OPERATIONAL_AUDIT.md
 !docs/COACHING_MODEL_GOVERNANCE.md
+!docs/COACHING_OPERATIONS.md
 !backend/requirements.txt
 !backend/requirements-dev.txt
 !README.md

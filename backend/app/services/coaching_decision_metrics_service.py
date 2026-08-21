@@ -403,11 +403,11 @@ class CoachingDecisionMetricsService:
         return NextBestWorkoutService(self.db, None, self._ppap).recommend(target)
 
     def get_fueling_score(self, day: date) -> Optional[float]:
-        """Placeholder — krever ernæringsdata som ikke finnes i dag."""
+        """DEPRECATED placeholder — always None. Do not treat as a real metric (V9)."""
         return None
 
     def get_recovery_model_accuracy(self, day: date) -> Optional[float]:
-        """Placeholder — krever historisk validering mot faktisk prestasjon."""
+        """DEPRECATED placeholder — always None. Prefer ProspectiveEvidenceReportService."""
         return None
 
     def build_coaching_snapshot(self, day: Optional[date] = None) -> Dict[str, Any]:
