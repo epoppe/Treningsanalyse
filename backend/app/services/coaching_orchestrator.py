@@ -30,7 +30,7 @@ from .decision_explanation_service import DecisionExplanationService
 from .coaching_health_service import CoachingHealthService
 from .plan_stability import PlanRobustnessService, PlanStabilityService
 from .personalization_evidence_policy import PersonalizationEvidencePolicy
-from .freshness_policy import FreshnessPolicy
+from .evidence_quality_propagation import apply_data_quality_to_evidence
 
 
 class CoachingOrchestrator:
@@ -176,6 +176,20 @@ class CoachingOrchestrator:
             or recommendation.get("confidence")
             or 0.0
         )
+        system_health = get_or_set(
+            "system_health",
+            key,
+            lambda: CoachingHealthService(self.db, self._ppap).report(day),
+        )
+        freshness = (system_health.get("checks") or {}).get("data_freshness") or {}
+        quality_adj = apply_data_quality_to_evidence(
+            evidence_strength,
+            decision_confidence,
+            freshness,
+            data_quality_score=data_quality if isinstance(data_quality, (int, float)) else None,
+        )
+        evidence_strength = quality_adj["evidence_strength"]
+        decision_confidence = quality_adj["decision_confidence"]
         recommendation = {
             **recommendation,
             "data_quality": data_quality,
@@ -184,6 +198,11 @@ class CoachingOrchestrator:
             # compatibility aliases
             "recommendation_confidence": decision_confidence,
             "confidence": decision_confidence,
+            "quality_propagation": {
+                "decision_changed": quality_adj["decision_changed"],
+                "confidence_reduced": quality_adj["confidence_reduced"],
+                "quality_factors": quality_adj["quality_factors"],
+            },
         }
 
         if persist and update_calibration:
@@ -264,14 +283,15 @@ class CoachingOrchestrator:
                 "hrv_delta_pct": (recommendation.get("context_summary") or {}).get("hrv_delta_pct"),
                 "as_of_date": day,
                 "metric_ages": {},
+                "data_freshness": freshness,
+                "data_quality": data_quality,
+                "evidence_strength": evidence_strength,
+                "decision_confidence": decision_confidence,
             },
             as_of=day.isoformat(),
         )
         robustness = PlanRobustnessService().score(weekly.get("sessions") or [])
-        plan_stability = PlanStabilityService().classify(
-            int((adaptation.get("plan_change_count_14d") or 0)),
-            material_changes=len(adaptation.get("changes") or []),
-        )
+        plan_stability = PlanStabilityService().from_history(self.db, as_of=day)
 
         load_var = None
         trends = None
@@ -338,19 +358,23 @@ class CoachingOrchestrator:
                 ],
             },
             "plan_stability": plan_stability.get("status"),
+            "plan_stability_detail": plan_stability,
             "plan_robustness": robustness.get("robustness_score"),
+            "system_health": system_health.get("status"),
             "key_evidence": (recommendation.get("decision_trace") or [])[:5],
-            "warnings": list(health.get("warnings") or []),
+            "warnings": list(health.get("warnings") or []) + list(system_health.get("issues") or []),
             "model_provenance": (recorded or {}).get("provenance"),
             "active_model": registry,
             "model_health": health.get("status"),
-            "data_freshness": explanation.get("data_freshness"),
+            "data_freshness": explanation.get("data_freshness") or freshness,
             "personalization_stability": stability.get("status"),
             "evidence": {
                 "data_quality": data_quality,
                 "personalization_level": personalization_level.get("level"),
                 "decision_confidence": decision_confidence,
                 "evidence_strength": evidence_strength,
+                "confidence_reduced": quality_adj["confidence_reduced"],
+                "quality_factors": quality_adj["quality_factors"],
             },
             "availability_constraints": [
                 {

@@ -1,4 +1,4 @@
-"""Compact DecisionExplanation — explainability without verbose internals."""
+"""Compact DecisionExplanation — stable contract for live recommendations."""
 
 from __future__ import annotations
 
@@ -7,6 +7,17 @@ from typing import Any, Dict, List, Optional
 from .coaching_reason_codes import REASON_DOCS, ReasonCode, map_trace_item
 from .freshness_policy import FreshnessPolicy
 from .metric_registry import lineage
+
+
+REQUIRED_FIELDS = (
+    "decision",
+    "reason_codes",
+    "guardrails",
+    "alternatives",
+    "data_quality",
+    "evidence_strength",
+    "decision_confidence",
+)
 
 
 class DecisionExplanationService:
@@ -48,7 +59,6 @@ class DecisionExplanationService:
             if "unavailable" in text:
                 guardrails.append(ReasonCode.UNAVAILABLE_DAY.value)
 
-        # Deduplicate preserving order
         seen = set()
         top = []
         for r in reasons:
@@ -57,6 +67,7 @@ class DecisionExplanationService:
             seen.add(r["code"])
             top.append(r)
         guardrails = list(dict.fromkeys(guardrails))
+        reason_codes = [r["code"] for r in top]
 
         alternatives = []
         for cand in (recommendation.get("candidate_workouts") or [])[:5]:
@@ -73,7 +84,12 @@ class DecisionExplanationService:
 
         data_freshness = {}
         for metric, age in (context.get("metric_ages") or {}).items():
-            data_freshness[metric] = FreshnessPolicy.assess(metric, as_of=context.get("as_of_date"), age_days=age)
+            data_freshness[metric] = FreshnessPolicy.assess(
+                metric, as_of=context.get("as_of_date") or date_today_safe(as_of), age_days=age
+            )
+        for metric, payload in (context.get("data_freshness") or {}).items():
+            if isinstance(payload, dict):
+                data_freshness[metric] = payload
 
         inputs = []
         for metric in ("tsb", "readiness", "hrv_delta_pct", "lt2"):
@@ -83,20 +99,48 @@ class DecisionExplanationService:
                         metric,
                         value=context.get(metric),
                         observed_at=as_of,
-                        freshness=(data_freshness.get(metric) or {}).get("freshness"),
+                        freshness=(data_freshness.get(metric) or {}).get("freshness")
+                        or (data_freshness.get(metric) or {}).get("status"),
                     )
                 )
 
+        data_quality = recommendation.get("data_quality")
+        if data_quality is None:
+            data_quality = context.get("data_quality")
+        evidence_strength = recommendation.get("evidence_strength")
+        if evidence_strength is None:
+            evidence_strength = context.get("evidence_strength")
+        decision_confidence = (
+            recommendation.get("decision_confidence")
+            or recommendation.get("recommendation_confidence")
+            or recommendation.get("confidence")
+            or context.get("decision_confidence")
+        )
+
         return {
+            # Canonical contract
             "decision": recommendation.get("workout_type"),
+            "reason_codes": reason_codes,
+            "guardrails": guardrails,
+            "alternatives": alternatives,
+            "data_quality": data_quality,
+            "evidence_strength": evidence_strength,
+            "decision_confidence": decision_confidence,
+            # Compatibility aliases
             "decision_status": status,
             "top_reasons": top[:6],
-            "alternatives": alternatives,
             "guardrails_triggered": guardrails,
             "inputs": inputs,
             "data_freshness": data_freshness,
+            "contract_fields": list(REQUIRED_FIELDS),
             "note": "Stable reason codes for explainability — not a full debug dump.",
         }
+
+    @staticmethod
+    def assert_contract(explanation: Dict[str, Any]) -> None:
+        missing = [f for f in REQUIRED_FIELDS if f not in explanation]
+        if missing:
+            raise AssertionError(f"DecisionExplanation missing contract fields: {missing}")
 
     @staticmethod
     def _impact_from_effect(effect: Optional[str]) -> float:
@@ -127,3 +171,14 @@ class DecisionExplanationService:
             return True
         e = str(effect or "").lower()
         return any(k in e for k in ("block", "required", "rest_required", "recovery_required"))
+
+
+def date_today_safe(as_of: Optional[str]):
+    from datetime import date, datetime
+
+    if not as_of:
+        return date.today()
+    try:
+        return datetime.fromisoformat(str(as_of).replace("Z", "+00:00")).date()
+    except ValueError:
+        return date.today()

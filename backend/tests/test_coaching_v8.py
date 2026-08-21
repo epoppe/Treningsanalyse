@@ -201,14 +201,19 @@ class CoachingV8Tests(unittest.TestCase):
 
     def test_health_integrity_recovery_dose_plan(self):
         health = CoachingHealthService(self.db).report(date(2026, 5, 1))
-        self.assertIn(health["status"], {"healthy", "degraded", "attention_required"})
+        self.assertIn(health["status"], {"healthy", "degraded", "attention_required", "critical"})
+        # Empty SQLite via create_all has no alembic stamp → migration check is real, not a placeholder
+        self.assertIn("current_revision", health["checks"]["db_migration"])
+        self.assertIn("expected_head", health["checks"]["db_migration"])
+        self.assertNotEqual(health["checks"]["db_migration"].get("current_revision"), "alembic_head_runtime")
         integrity = CoachingIntegrityService(self.db).check()
-        self.assertIn(integrity["status"], {"ok", "repairable", "attention"})
+        self.assertIn(integrity["status"], {"healthy", "warnings", "attention_required", "critical"})
         repair = CoachingIntegrityService(self.db).repair_plan(dry_run=True)
         self.assertTrue(repair["dry_run"])
 
         cost = RecoveryCostService(self.db, self.ppap).estimate("threshold")
         self.assertIn("expected_recovery_days", cost)
+        self.assertEqual(cost["source"], "default")
         dose = dose_from_prescription(
             "threshold",
             {"total_duration_min": 55, "main_set": {"repetitions": 3, "work_duration_min": 10}},
@@ -235,7 +240,9 @@ class CoachingV8Tests(unittest.TestCase):
         replan = ReplanningPolicy().decide(hrv_delta=-7.0, recent_plan_changes=0)
         self.assertEqual(replan["action"], "do_not_replan")
         stability = PlanStabilityService().classify(1)
-        self.assertEqual(stability["status"], "stable")
+        self.assertEqual(stability["status"], "insufficient_data")
+        stable = PlanStabilityService().classify(1, history_points=5, material_changes=0)
+        self.assertEqual(stable["status"], "stable")
 
     def test_reason_code_mapping(self):
         self.assertEqual(
