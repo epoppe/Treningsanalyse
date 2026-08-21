@@ -98,7 +98,14 @@ export function WhyThisWorkout({
             </span>
           </p>
           {guards.length ? (
-            <p>Guardrails: {guards.map(reasonLabel).join(" · ")}</p>
+            <div>
+              <p className="font-medium text-foreground">Guardrails</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5">
+                {guards.map((g) => (
+                  <li key={g}>{reasonLabel(g)}</li>
+                ))}
+              </ul>
+            </div>
           ) : null}
           {freshnessEntries.length ? (
             <ul className="mt-2 space-y-1 border-t border-border pt-2">
