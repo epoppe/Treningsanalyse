@@ -116,10 +116,11 @@ def get_development(
     end = end_date or date.today()
     days = _period_days(period)
     window = _window_key(min(days, 365))
+    window_days = int(window.replace("d", ""))
     try:
         trends = TrendAnalysisService(db, storage).analyze_all(
             end_date=end,
-            windows=(7, 28, 90, 365),
+            windows=(window_days,),
         )
         metrics = trends.get("metrics") or {}
         domains: List[Dict[str, Any]] = []
@@ -362,11 +363,12 @@ def get_period_comparison(
     end = end_date or date.today()
     days = min(_period_days(period), 365)
     window = _window_key(days)
+    window_days = int(window.replace("d", ""))
     try:
         svc = TrendAnalysisService(db, storage)
-        current = svc.analyze_all(end_date=end, windows=(28, 90, 365))
+        current = svc.analyze_all(end_date=end, windows=(window_days,))
         previous_end = end - timedelta(days=days)
-        previous = svc.analyze_all(end_date=previous_end, windows=(28, 90, 365))
+        previous = svc.analyze_all(end_date=previous_end, windows=(window_days,))
         rows: List[Dict[str, Any]] = []
         for metric in sorted(METRIC_FETCHERS.keys()):
             a = ((current.get("metrics") or {}).get(metric) or {}).get(window) or {}
@@ -482,7 +484,11 @@ def get_highlights(
 ) -> Dict[str, Any]:
     end = end_date or date.today()
     try:
-        trends = TrendAnalysisService(db, storage).analyze_all(end_date=end)
+        window_days = 90 if _period_days(period) >= 90 else 28
+        trends = TrendAnalysisService(db, storage).analyze_all(
+            end_date=end,
+            windows=(window_days,),
+        )
         highlights: List[Dict[str, Any]] = []
         for metric, windows in (trends.get("metrics") or {}).items():
             block = windows.get("90d") or windows.get("28d") or windows.get("365d")
