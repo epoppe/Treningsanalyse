@@ -1,15 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useMemo, useState } from "react";
 import {
   AnalysisFiltersBar,
   AnalysisTabs,
   useAnalysisUrlState,
 } from "@/components/analysis/AnalysisShell";
+import { AnalysisPresets } from "@/components/analysis/AnalysisPresets";
+import { BestPeriodBacktracePanel } from "@/components/analysis/BestPeriodBacktracePanel";
 import { DevelopmentTimeline } from "@/components/analysis/DevelopmentTimeline";
+import {
+  DurationCurvePanel,
+  IntensityDistributionPanel,
+} from "@/components/analysis/DurationCurvePanel";
 import { HistoryTimeline } from "@/components/analysis/HistoryTimeline";
+import { MetricPicker } from "@/components/analysis/MetricPicker";
 import { PeriodComparison } from "@/components/analysis/PeriodComparison";
 import { RelationshipCard } from "@/components/analysis/RelationshipCard";
+import { RelationshipMatrixView } from "@/components/analysis/RelationshipMatrixView";
+import { TrainingResponsePanel } from "@/components/analysis/TrainingResponsePanel";
 import { TrendSummaryCard } from "@/components/analysis/TrendSummaryCard";
 import {
   AnalysisEmpty,
@@ -17,29 +27,31 @@ import {
   AnalysisSkeleton,
 } from "@/components/analysis/ui";
 import {
+  useAnalysisCatalog,
+  useBestPeriodBacktrace,
   useDevelopment,
+  useDurationCurveHistory,
   useHistory,
+  useIntensityDistribution,
   usePeriodComparison,
+  useRelationshipMatrix,
   useRelationships,
   useTimeseries,
+  useTrainingResponse,
 } from "@/hooks/useAnalysisWorkspace";
+import type { AnalysisPreset } from "@/types/analysis";
 
-const DEFAULT_METRICS = [
-  "ctl",
-  "hrv_rmssd",
-  "easy_run_efficiency",
-  "vo2max",
-  "lactate_threshold_pace",
-  "durability",
-  "resting_hr",
-  "critical_speed",
-];
+const DEFAULT_METRICS = ["fitness.ctl", "cardio.hrv_7d", "fitness.ef_30d", "running.durability_score"];
 
 function UtviklingPanel() {
   const { state, setParams } = useAnalysisUrlState();
+  const catalog = useAnalysisCatalog();
   const development = useDevelopment(state.period);
   const timeseries = useTimeseries(state.period, state.metrics);
   const comparison = usePeriodComparison(state.period);
+  const intensity = useIntensityDistribution(state.period);
+  const durationCurve = useDurationCurveHistory(state.period);
+  const backtrace = useBestPeriodBacktrace(state.period === "28d" ? "2y" : state.period, state.backtrace);
 
   const toggleMetric = (metric: string) => {
     const set = new Set(state.metrics);
@@ -52,12 +64,14 @@ function UtviklingPanel() {
     setParams({ metrics: Array.from(set).join(",") });
   };
 
+  const metrics = catalog.data?.metrics || [];
+
   return (
     <div className="space-y-4">
       <section>
         <h2 className="text-sm font-semibold text-slate-900">Utviklingssammendrag</h2>
         <p className="mt-0.5 text-xs text-slate-500">
-          Hvordan utvikler nøkkelområder seg i valgt periode?
+          Stimulus → restitusjon → adaptasjon — hvordan utvikler nøkkelområder seg?
         </p>
         {development.isLoading ? (
           <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
@@ -89,15 +103,30 @@ function UtviklingPanel() {
         ) : null}
       </section>
 
-      <DevelopmentTimeline
-        data={timeseries.data}
-        selected={state.metrics}
-        onToggleMetric={toggleMetric}
-        available={development.data?.available_metrics || DEFAULT_METRICS}
-      />
+      <div className="grid gap-3 lg:grid-cols-[240px_1fr]">
+        <MetricPicker metrics={metrics} selected={state.metrics} onToggle={toggleMetric} />
+        <DevelopmentTimeline
+          data={timeseries.data}
+          selected={state.metrics}
+          onToggleMetric={toggleMetric}
+          available={
+            state.metrics.length
+              ? state.metrics
+              : development.data?.available_metrics?.slice(0, 8) || DEFAULT_METRICS
+          }
+        />
+      </div>
       {timeseries.isError ? (
         <AnalysisError title="Tidsserie feilet" onRetry={() => timeseries.refetch()} />
       ) : null}
+
+      <IntensityDistributionPanel data={intensity.data} />
+      <DurationCurvePanel data={durationCurve.data} />
+      <BestPeriodBacktracePanel
+        data={backtrace.data}
+        metric={state.backtrace}
+        onMetricChange={(m) => setParams({ backtrace: m })}
+      />
 
       {comparison.isLoading ? <AnalysisSkeleton className="h-40" /> : null}
       {comparison.data ? (
@@ -123,36 +152,87 @@ function UtviklingPanel() {
 }
 
 function SammenhengerPanel() {
-  const { state } = useAnalysisUrlState();
+  const { state, setParams } = useAnalysisUrlState();
+  const catalog = useAnalysisCatalog();
   const query = useRelationships(state.period);
+  const [advanced, setAdvanced] = useState(false);
+  const matrix = useRelationshipMatrix(state.period, advanced);
+  const training = useTrainingResponse(state.period, state.outcome);
 
-  if (query.isLoading) {
-    return (
-      <div className="grid gap-2 md:grid-cols-2">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <AnalysisSkeleton key={i} className="h-32" />
-        ))}
-      </div>
-    );
-  }
-  if (query.isError) {
-    return <AnalysisError title="Kunne ikke hente sammenhenger" onRetry={() => query.refetch()} />;
-  }
-  if (!query.data?.cards?.length) {
-    return <AnalysisEmpty title="Ingen sammenhenger" description="Backend returnerte ingen kort." />;
-  }
+  const presets = catalog.data?.presets || [];
 
-  const bySection = query.data.sections.map((section) => ({
-    section,
-    cards: query.data!.cards.filter((c) => c.section === section),
-  }));
+  const onSelectPreset = (preset: AnalysisPreset) => {
+    const metrics = [preset.outcome, ...(preset.predictors || [])]
+      .filter((k) => !k.startsWith("stimulus."))
+      .slice(0, 4);
+    setParams({
+      tab: "sammenhenger",
+      preset: preset.id,
+      outcome: preset.outcome,
+      metrics: metrics.join(",") || null,
+    });
+  };
+
+  const bySection = useMemo(() => {
+    if (!query.data?.cards?.length) return [];
+    return query.data.sections.map((section) => ({
+      section,
+      cards: query.data!.cards.filter((c) => c.section === section),
+    }));
+  }, [query.data]);
 
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-slate-200 bg-amber-50/60 px-3 py-2 text-xs text-slate-700">
         Sammenhengene er observasjonelle (assosiert med / fulgt av) — ikke årsaksforklaringer.
-        {query.data.disclaimer ? ` ${query.data.disclaimer}` : ""}
+        Matematisk avhengige par undertrykkes som standard.
+        {query.data?.disclaimer ? ` ${query.data.disclaimer}` : ""}
       </div>
+
+      <AnalysisPresets presets={presets} onSelect={onSelectPreset} />
+
+      <TrainingResponsePanel
+        outcome={state.outcome}
+        onOutcomeChange={(key) => setParams({ outcome: key })}
+        data={training.data}
+        isLoading={training.isLoading}
+      />
+
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-900">Matrise</h2>
+        <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+          <input
+            type="checkbox"
+            checked={advanced}
+            onChange={(e) => setAdvanced(e.target.checked)}
+          />
+          Avansert (vis advarsler for delte komponenter)
+        </label>
+      </div>
+      {matrix.isLoading ? <AnalysisSkeleton className="h-40" /> : null}
+      {matrix.data ? (
+        <RelationshipMatrixView
+          predictors={matrix.data.predictors}
+          outcomes={matrix.data.outcomes}
+          cells={matrix.data.cells}
+          disclaimer={matrix.data.disclaimer}
+        />
+      ) : null}
+
+      {query.isLoading ? (
+        <div className="grid gap-2 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <AnalysisSkeleton key={i} className="h-32" />
+          ))}
+        </div>
+      ) : null}
+      {query.isError ? (
+        <AnalysisError title="Kunne ikke hente sammenhenger" onRetry={() => query.refetch()} />
+      ) : null}
+      {!query.isLoading && !query.isError && !query.data?.cards?.length ? (
+        <AnalysisEmpty title="Ingen sammenhenger" description="Backend returnerte ingen kort." />
+      ) : null}
+
       {bySection.map((group) => (
         <section key={group.section} className="space-y-2">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -194,7 +274,7 @@ function HistorikkPanel() {
       <header>
         <h2 className="text-sm font-semibold text-slate-900">Treningshistorikk</h2>
         <p className="text-xs text-slate-500">
-          År → måned. Ukeutforsker og blokkhistorikk kommer senere.
+          År → måned. Bruk Utvikling for duration curve og beste-periode tilbakeblikk.
         </p>
       </header>
       <HistoryTimeline data={query.data} />
@@ -219,8 +299,8 @@ export default function AnalyseWorkspace() {
         </p>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Analyse</h1>
         <p className="max-w-2xl text-sm text-slate-600">
-          Longitudinell treningsanalyse: utvikling, sammenhenger og historikk — uten å hoppe
-          mellom metrikk-sider.
+          Kuratert longitudinell analyse: stimulus → restitusjon → adaptasjon → prestasjon — uten
+          å flate ut hele MCP-katalogen.
         </p>
       </header>
 

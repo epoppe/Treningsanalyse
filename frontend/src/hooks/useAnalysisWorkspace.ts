@@ -3,6 +3,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { analysisApi } from "@/analysis/analysisApi";
 
+export function useAnalysisCatalog() {
+  return useQuery({
+    queryKey: ["analysis", "catalog"],
+    queryFn: () => analysisApi.catalog(),
+    staleTime: 300_000,
+    retry: 1,
+  });
+}
+
 export function useDevelopment(period: string) {
   return useQuery({
     queryKey: ["analysis", "development", period],
@@ -31,6 +40,55 @@ export function useRelationships(period: string) {
   });
 }
 
+export function useRelationshipMatrix(period: string, advanced = false) {
+  return useQuery({
+    queryKey: ["analysis", "relationship-matrix", period, advanced],
+    queryFn: () => analysisApi.relationshipMatrix(period, advanced),
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useTrainingResponse(period: string, outcome: string) {
+  return useQuery({
+    queryKey: ["analysis", "training-response", period, outcome],
+    queryFn: () => analysisApi.trainingResponse(period, outcome),
+    enabled: Boolean(outcome),
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useIntensityDistribution(period: string, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "intensity-distribution", period],
+    queryFn: () => analysisApi.intensityDistribution(period),
+    enabled,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useDurationCurveHistory(period: string, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "duration-curve", period],
+    queryFn: () => analysisApi.durationCurveHistory(period),
+    enabled,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useBestPeriodBacktrace(period: string, metric: string, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "best-period", period, metric],
+    queryFn: () => analysisApi.bestPeriodBacktrace(period, metric),
+    enabled: enabled && Boolean(metric),
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
 export function useHistory(period: string) {
   return useQuery({
     queryKey: ["analysis", "history", period],
@@ -41,8 +99,6 @@ export function useHistory(period: string) {
 }
 
 export function usePeriodComparison(period: string) {
-  // Cap comparison cost: long periods still compare adjacent windows of the same length,
-  // but never longer than 365d (backend also caps).
   return useQuery({
     queryKey: ["analysis", "period-comparison", period],
     queryFn: () => analysisApi.periodComparison(period),

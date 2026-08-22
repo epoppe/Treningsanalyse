@@ -14,6 +14,56 @@ export type AnalysisTab = "utvikling" | "sammenhenger" | "historikk";
 export type EvidenceBand = "strong" | "supported" | "emerging" | "insufficient";
 export type TrendDirection = "improving" | "stable" | "declining" | "uncertain" | string;
 
+export type RelationshipType =
+  | "SAME_TIME_ASSOCIATION"
+  | "LAGGED_ASSOCIATION"
+  | "TRAINING_RESPONSE"
+  | "MATHEMATICAL_DEPENDENCY"
+  | "PROSPECTIVE_EVIDENCE";
+
+export interface AnalyticsMetric {
+  key: string;
+  label: string;
+  analytic_role?: string;
+  category?: string;
+  scope?: string;
+  unit?: string;
+  direction?: string;
+  selectable_x?: boolean;
+  selectable_y?: boolean;
+  supports_lag?: boolean;
+  supports_trend?: boolean;
+  supports_period_comparison?: boolean;
+  minimum_samples?: number;
+  source_type?: string;
+  dependencies?: string[];
+  recommended_lags_days?: number[];
+  group?: string;
+  explanation?: string;
+  expose_default?: boolean;
+  aggregation_days?: number;
+  stimulus_kind?: string;
+}
+
+export interface AnalysisPreset {
+  id: string;
+  title: string;
+  outcome: string;
+  predictors: string[];
+  lags?: number[];
+  mode?: RelationshipType | string;
+}
+
+export interface AnalysisCatalogPayload {
+  metrics: AnalyticsMetric[];
+  groups: Record<string, string[]>;
+  presets: AnalysisPreset[];
+  matrix: { predictors: string[]; outcomes: string[] };
+  lag_families: Record<string, number[]>;
+  relationship_types: string[];
+  disclaimer?: string;
+}
+
 export interface DevelopmentDomain {
   domain: string;
   metric: string;
@@ -54,10 +104,15 @@ export interface TimeseriesPayload {
     string,
     {
       metric: string;
+      label?: string;
       points: TimeseriesPoint[];
       sample_count: number;
       missing_days_approx?: number;
       unit_note?: string;
+      scope?: string;
+      unit?: string;
+      alignment?: string;
+      note?: string;
     }
   >;
   note?: string;
@@ -72,6 +127,7 @@ export interface RelationshipCardData {
   status: string;
   association: string;
   strength: string;
+  relationship_type?: RelationshipType | string;
   lag_days?: number | null;
   sample_count: number;
   evidence: string;
@@ -87,6 +143,98 @@ export interface RelationshipsPayload {
   advanced_scatter?: string;
   disclaimer?: string;
   ranking_eligible_count?: number;
+}
+
+export interface MatrixCell {
+  predictor: string;
+  outcome: string;
+  status: string;
+  relationship_type?: string;
+  association?: string;
+  effect?: number | null;
+  lag_days?: number | null;
+  sample_count?: number;
+  evidence?: string;
+  warning?: string | null;
+  note?: string;
+}
+
+export interface RelationshipMatrixPayload {
+  date: string;
+  period: string;
+  predictors: string[];
+  outcomes: string[];
+  cells: MatrixCell[];
+  disclaimer?: string;
+}
+
+export interface TrainingResponsePayload {
+  date: string;
+  period: string;
+  outcome: string;
+  mode: string;
+  suggested_predictors: string[];
+  relationships: Array<{
+    stimulus?: string;
+    outcome?: string;
+    association?: string;
+    lag_days?: number | null;
+    effect_size?: number | null;
+    sample_count?: number;
+    evidence?: string;
+    relationship_type?: string;
+    wording?: string;
+  }>;
+  disclaimer?: string;
+  multiple_testing?: Record<string, unknown>;
+}
+
+export interface DurationCurvePayload {
+  start_date: string;
+  end_date: string;
+  period: string;
+  curves: Array<{
+    metric: string;
+    duration_label: string;
+    current?: number | null;
+    previous_year?: number | null;
+    rolling_best?: number | null;
+    sample_count: number;
+    points: TimeseriesPoint[];
+  }>;
+  disclaimer?: string;
+}
+
+export interface BestPeriodBacktracePayload {
+  metric: string;
+  status: string;
+  period?: string;
+  best_periods: Array<{
+    peak_date: string;
+    peak_value: number;
+    wording?: string;
+    preceding_blocks: Array<{
+      weeks: number;
+      status: string;
+      sample_weeks: number;
+      total_duration_seconds?: number;
+      total_tss?: number;
+      total_distance_meters?: number;
+      activity_count?: number;
+      avg_weekly_duration_seconds?: number;
+    }>;
+  }>;
+  note?: string;
+  disclaimer?: string;
+}
+
+export interface IntensityDistributionPayload {
+  start_date: string;
+  end_date: string;
+  period: string;
+  requested_windows_days: number[];
+  series: TimeseriesPayload["series"];
+  note?: string;
 }
 
 export interface HistoryMonth {
@@ -130,4 +278,6 @@ export interface AnalysisFilters {
   sport: AnalysisSport;
   session: AnalysisSession;
   metrics: string[];
+  outcome?: string;
+  preset?: string;
 }

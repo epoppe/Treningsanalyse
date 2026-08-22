@@ -17,6 +17,19 @@ from ..database.models.summaries import MonthlySummary, WeeklySummary
 from ..dependencies import get_db, get_data_storage
 from ..services.trend_analysis_service import METRIC_FETCHERS, TrendAnalysisService
 from ..services.training_response_service import TrainingResponseService
+from ..services.mcp_derived_metrics_service import McpDerivedMetricsService
+from ..services.analytics_metric_registry import (
+    ANALYSIS_PRESETS,
+    MATRIX_OUTCOMES,
+    MATRIX_PREDICTORS,
+    STIMULUS_AGGREGATES,
+    catalog_payload,
+    dependency_relation,
+    get_analytics_metric,
+    list_analytics_metrics,
+    recommended_outcomes_for,
+    should_suppress_correlation,
+)
 from ..storage import DataStorage
 
 router = APIRouter(tags=["Analysis Workspace"])
@@ -31,13 +44,13 @@ PERIOD_DAYS = {
 }
 
 DOMAIN_METRICS = [
-    {"domain": "fitness", "metric": "ctl", "label": "Form (CTL)"},
-    {"domain": "threshold", "metric": "lactate_threshold_pace", "label": "Terskel"},
-    {"domain": "aerobic_efficiency", "metric": "easy_run_efficiency", "label": "Aerob effektivitet"},
-    {"domain": "durability", "metric": "durability", "label": "Holdbarhet"},
-    {"domain": "training_load", "metric": "ctl", "label": "Treningsbelastning"},
-    {"domain": "recovery", "metric": "hrv_rmssd", "label": "Restitusjon (HRV)"},
-    {"domain": "consistency", "metric": "vo2max", "label": "VO₂max"},
+    {"domain": "fitness", "metric": "ctl", "mcp_key": "fitness.ctl", "label": "Form (CTL)"},
+    {"domain": "threshold", "metric": "critical_speed", "mcp_key": "running.critical_speed", "label": "Critical speed"},
+    {"domain": "aerobic_efficiency", "metric": "easy_run_efficiency", "mcp_key": "fitness.ef_30d", "label": "Aerobic efficiency"},
+    {"domain": "durability", "metric": "durability", "mcp_key": "running.durability_score", "label": "Holdbarhet"},
+    {"domain": "training_load", "metric": "ctl", "mcp_key": "fitness.atl", "label": "Akutt belastning (ATL)"},
+    {"domain": "recovery", "metric": "hrv_rmssd", "mcp_key": "cardio.hrv_7d", "label": "Restitusjon (HRV)"},
+    {"domain": "consistency", "metric": "vo2max", "mcp_key": "consistency.score", "label": "Konsistens"},
 ]
 
 RELATIONSHIP_PRESETS = [
@@ -174,7 +187,11 @@ def get_development(
             "domains": domains,
             "raw_metrics": metrics,
             "disclaimer": "Trends are observational summaries — not causal claims.",
-            "available_metrics": sorted(METRIC_FETCHERS.keys()),
+            "available_metrics": [
+                m["key"]
+                for m in list_analytics_metrics(include_stimulus=False)
+                if m.get("supports_trend")
+            ],
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -182,7 +199,10 @@ def get_development(
 
 @router.get("/timeseries")
 def get_timeseries(
-    metrics: str = Query("ctl,hrv_rmssd", description="Comma-separated metric keys"),
+    metrics: str = Query(
+        "fitness.ctl,cardio.hrv_7d",
+        description="Comma-separated analytics/MCP metric keys (max 4)",
+    ),
     period: str = Query("90d"),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
@@ -192,30 +212,286 @@ def get_timeseries(
     days = _period_days(period)
     start = end - timedelta(days=days - 1)
     keys = [m.strip() for m in metrics.split(",") if m.strip()][:4]
-    invalid = [k for k in keys if k not in METRIC_FETCHERS]
-    if invalid:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown metrics: {invalid}. Allowed: {sorted(METRIC_FETCHERS)}",
-        )
+    if not keys:
+        raise HTTPException(status_code=400, detail="At least one metric required")
+
+    short_to_mcp = {
+        "ctl": "fitness.ctl",
+        "hrv_rmssd": "cardio.hrv_7d",
+        "easy_run_efficiency": "fitness.ef_30d",
+        "durability": "running.durability_score",
+        "critical_speed": "running.critical_speed",
+        "resting_hr": "cardio.rhr_7d",
+    }
+    resolved = [short_to_mcp.get(k, k) for k in keys]
+
     try:
-        svc = TrendAnalysisService(db, storage)
+        derived = McpDerivedMetricsService(db, storage)
+        trend = TrendAnalysisService(db, storage)
         series: Dict[str, Any] = {}
-        for key in keys:
-            points = svc.series_for_metric(key, start_date=start, end_date=end)
-            series[key] = {
-                "metric": key,
-                "unit_note": "native units — not cross-normalized",
-                "points": points,
-                "sample_count": len(points),
-                "missing_days_approx": max(0, days - len(points)),
-            }
+        for original, key in zip(keys, resolved):
+            spec = get_analytics_metric(key) or {}
+            if key.startswith("stimulus.") or key in STIMULUS_AGGREGATES:
+                points = _stimulus_aggregate_series(db, storage, key, start, end)
+                series[original] = {
+                    "metric": key,
+                    "label": spec.get("label") or key,
+                    "points": points,
+                    "sample_count": len(points),
+                    "scope": spec.get("scope") or "weekly",
+                    "unit": spec.get("unit"),
+                    "unit_note": "server-side stimulus aggregation (weekly samples)",
+                    "alignment": "weekly_end_date",
+                }
+                continue
+            if derived.metric_definition(key):
+                result = derived.query_timeseries(
+                    key, start_date=start, end_date=end, limit=days + 5
+                )
+                points = [
+                    {
+                        "date": str(p.get("date") or p.get("activity_date"))[:10],
+                        "value": round(float(p["value"]), 4),
+                    }
+                    for p in (result.get("points") or [])
+                    if p.get("value") is not None
+                ]
+                series[original] = {
+                    "metric": key,
+                    "label": spec.get("label") or key,
+                    "unit": (derived.metric_definition(key) or {}).get("unit"),
+                    "unit_note": "native units — not cross-normalized",
+                    "scope": (derived.metric_definition(key) or {}).get("scope"),
+                    "points": points,
+                    "sample_count": len(points),
+                    "missing_days_approx": max(0, days - len(points)),
+                }
+                continue
+            if original in METRIC_FETCHERS or key in METRIC_FETCHERS:
+                fetch_key = original if original in METRIC_FETCHERS else key
+                points = trend.series_for_metric(fetch_key, start_date=start, end_date=end)
+                series[original] = {
+                    "metric": fetch_key,
+                    "points": points,
+                    "sample_count": len(points),
+                    "unit_note": "native units — not cross-normalized",
+                    "missing_days_approx": max(0, days - len(points)),
+                }
+            else:
+                raise HTTPException(status_code=400, detail=f"Unknown metric: {original}")
         return {
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
             "period": period,
             "series": series,
-            "note": "Metrics keep native units; plot on separate panels when incompatible.",
+            "note": "Metrics keep native units and scopes; plot incompatible units on separate panels.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/catalog")
+def get_analysis_catalog() -> Dict[str, Any]:
+    """Curated analytics metric registry for /analyse pickers and presets."""
+    return catalog_payload()
+
+
+@router.get("/dependency-check")
+def get_dependency_check(
+    x: str = Query(...),
+    y: str = Query(...),
+    advanced: bool = Query(False),
+) -> Dict[str, Any]:
+    rel = dependency_relation(x, y)
+    suppress, message = should_suppress_correlation(x, y, advanced=advanced)
+    return {
+        "x": x,
+        "y": y,
+        "relationship_kind": rel,
+        "relationship_type": "MATHEMATICAL_DEPENDENCY"
+        if rel == "DIRECT_DEPENDENCY"
+        else "SAME_TIME_ASSOCIATION",
+        "suppress_default": suppress and not advanced,
+        "warning": message or None,
+        "allow_advanced": rel == "SHARED_COMPONENT",
+    }
+
+
+@router.get("/presets")
+def get_analysis_presets() -> Dict[str, Any]:
+    return {"presets": ANALYSIS_PRESETS}
+
+
+@router.get("/relationship-matrix")
+def get_relationship_matrix(
+    period: str = Query("1y"),
+    end_date: Optional[date] = Query(None),
+    advanced: bool = Query(False),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    end = end_date or date.today()
+    lookback = _period_days(period)
+    stimulus_map = {
+        "stimulus.easy_minutes_28d": "easy_volume",
+        "stimulus.threshold_minutes_14d": "threshold_volume",
+        "stimulus.tss_28d": "weekly_tss",
+        "stimulus.tss_7d": "weekly_tss",
+    }
+    outcome_map = {
+        "fitness.ef_30d": "easy_efficiency",
+        "running.critical_speed": "critical_speed",
+        "running.durability_score": "durability",
+        "recovery.hrv_delta_pct": "hrv",
+        "cardio.hrv_7d": "hrv",
+    }
+    try:
+        raw = TrainingResponseService(db, storage).analyze_responses(
+            end_date=end,
+            lookback_days=lookback,
+        )
+        by_pair = {
+            (r.get("stimulus"), r.get("outcome")): r for r in (raw.get("relationships") or [])
+        }
+        cells: List[Dict[str, Any]] = []
+        for pred in MATRIX_PREDICTORS:
+            for outcome in MATRIX_OUTCOMES:
+                suppress, msg = should_suppress_correlation(pred, outcome, advanced=advanced)
+                if suppress and not advanced:
+                    cells.append(
+                        {
+                            "predictor": pred,
+                            "outcome": outcome,
+                            "status": "suppressed",
+                            "relationship_type": "MATHEMATICAL_DEPENDENCY",
+                            "warning": msg,
+                        }
+                    )
+                    continue
+                stim = stimulus_map.get(pred)
+                out = outcome_map.get(outcome)
+                if not stim or not out:
+                    cells.append(
+                        {
+                            "predictor": pred,
+                            "outcome": outcome,
+                            "status": "insufficient",
+                            "relationship_type": "LAGGED_ASSOCIATION",
+                            "note": "No training-response mapping for this pair yet.",
+                        }
+                    )
+                    continue
+                hit = by_pair.get((stim, out))
+                if not hit:
+                    cells.append(
+                        {
+                            "predictor": pred,
+                            "outcome": outcome,
+                            "status": "insufficient",
+                            "relationship_type": "TRAINING_RESPONSE",
+                            "sample_count": 0,
+                        }
+                    )
+                    continue
+                cells.append(
+                    {
+                        "predictor": pred,
+                        "outcome": outcome,
+                        "status": "ok",
+                        "relationship_type": "TRAINING_RESPONSE",
+                        "association": hit.get("relationship"),
+                        "effect": hit.get("effect_size"),
+                        "lag_days": hit.get("lag_days"),
+                        "sample_count": hit.get("sample_count") or 0,
+                        "evidence": hit.get("statistical_support"),
+                        "warning": msg or None,
+                    }
+                )
+        return {
+            "date": end.isoformat(),
+            "period": period,
+            "predictors": MATRIX_PREDICTORS,
+            "outcomes": MATRIX_OUTCOMES,
+            "cells": cells,
+            "disclaimer": raw.get("disclaimer")
+            or "Observational associations — not causal claims.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/training-response")
+def get_training_response_mode(
+    outcome: str = Query("fitness.ef_30d"),
+    period: str = Query("1y"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    end = end_date or date.today()
+    lookback = _period_days(period)
+    outcome_map = {
+        "fitness.ef_30d": "easy_efficiency",
+        "running.critical_speed": "critical_speed",
+        "running.durability_score": "durability",
+        "recovery.hrv_delta_pct": "hrv",
+        "cardio.hrv_7d": "hrv",
+        "easy_efficiency": "easy_efficiency",
+        "critical_speed": "critical_speed",
+        "durability": "durability",
+        "hrv": "hrv",
+    }
+    tr_outcome = outcome_map.get(outcome)
+    if not tr_outcome:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported outcome for training-response mode: {outcome}",
+        )
+    try:
+        raw = TrainingResponseService(db, storage).analyze_responses(
+            end_date=end,
+            lookback_days=lookback,
+        )
+        matches = [r for r in (raw.get("relationships") or []) if r.get("outcome") == tr_outcome]
+        matches.sort(
+            key=lambda r: (
+                0 if r.get("statistical_support") in {"strong", "moderate"} else 1,
+                -(r.get("evidence_strength") or 0),
+            )
+        )
+        suggested: List[str] = []
+        for preset in ANALYSIS_PRESETS:
+            if preset.get("outcome") == outcome or outcome_map.get(preset.get("outcome", "")) == tr_outcome:
+                suggested = list(preset.get("predictors") or [])
+                break
+        return {
+            "date": end.isoformat(),
+            "period": period,
+            "outcome": outcome,
+            "mode": "TRAINING_RESPONSE",
+            "suggested_predictors": suggested,
+            "relationships": [
+                {
+                    "stimulus": r.get("stimulus"),
+                    "outcome": r.get("outcome"),
+                    "association": r.get("relationship"),
+                    "lag_days": r.get("lag_days"),
+                    "effect_size": r.get("effect_size"),
+                    "sample_count": r.get("sample_count"),
+                    "evidence": r.get("statistical_support"),
+                    "relationship_type": "TRAINING_RESPONSE",
+                    "wording": (
+                        f"{str(r.get('stimulus')).replace('_', ' ')} is historically linked to "
+                        f"{str(r.get('outcome')).replace('_', ' ')} "
+                        f"(observational association — not causation)."
+                    ),
+                }
+                for r in matches[:12]
+            ],
+            "disclaimer": raw.get("disclaimer"),
+            "multiple_testing": raw.get("multiple_testing"),
         }
     except HTTPException:
         raise
@@ -250,6 +526,7 @@ def get_relationships(
                         "status": "insufficient",
                         "association": "unclear",
                         "strength": "insufficient",
+                        "relationship_type": "TRAINING_RESPONSE",
                         "lag_days": None,
                         "sample_count": 0,
                         "evidence": "insufficient",
@@ -266,6 +543,7 @@ def get_relationships(
                     "status": "ok",
                     "association": association,
                     "strength": support,
+                    "relationship_type": "TRAINING_RESPONSE",
                     "lag_days": hit.get("lag_days"),
                     "lag_profile": None,
                     "sample_count": hit.get("sample_count") or 0,
@@ -473,6 +751,349 @@ def get_week(
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _stimulus_aggregate_series(
+    db: Session,
+    storage: DataStorage,
+    key: str,
+    start: date,
+    end: date,
+) -> List[Dict[str, Any]]:
+    """Build weekly samples for stimulus.* aggregates via TrainingResponseService."""
+    spec = STIMULUS_AGGREGATES.get(key) or get_analytics_metric(key) or {}
+    window = int(spec.get("aggregation_days") or 28)
+    kind = str(spec.get("stimulus_kind") or "")
+    stimulus_id = {
+        "easy_volume": "easy_volume",
+        "threshold_volume": "threshold_volume",
+        "vo2_volume": "high_intensity_volume",
+        "long_run_volume": "easy_volume",
+        "weekly_tss": "weekly_tss",
+    }.get(kind)
+    if not stimulus_id:
+        return []
+    tr = TrainingResponseService(db, storage)
+    points: List[Dict[str, Any]] = []
+    cursor = start + timedelta(days=window)
+    while cursor <= end:
+        win_start = cursor - timedelta(days=window - 1)
+        val = tr._stimulus_value(stimulus_id, win_start, cursor)  # noqa: SLF001
+        if val is not None:
+            points.append({"date": cursor.isoformat(), "value": round(float(val), 3)})
+        cursor += timedelta(days=7)
+    return points
+
+
+@router.get("/intensity-distribution")
+def get_intensity_distribution(
+    period: str = Query("1y"),
+    windows: str = Query("28,56,90"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Rolling zone1/2/3 % history for intensity-distribution questions."""
+    end = end_date or date.today()
+    days = _period_days(period)
+    start = end - timedelta(days=days - 1)
+    window_list = [int(w.strip()) for w in windows.split(",") if w.strip().isdigit()][:3]
+    if not window_list:
+        window_list = [28, 56, 90]
+    keys = ["coaching.zone1_pct", "coaching.zone2_pct", "coaching.zone3_pct"]
+    try:
+        derived = McpDerivedMetricsService(db, storage)
+        series: Dict[str, Any] = {}
+        for key in keys:
+            result = derived.query_timeseries(key, start_date=start, end_date=end, limit=days + 5)
+            points = [
+                {
+                    "date": str(p.get("date") or p.get("activity_date"))[:10],
+                    "value": round(float(p["value"]), 3),
+                }
+                for p in (result.get("points") or [])
+                if p.get("value") is not None
+            ]
+            series[key] = {
+                "metric": key,
+                "points": points,
+                "sample_count": len(points),
+                "scope": "rolling_daily",
+            }
+        return {
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "period": period,
+            "requested_windows_days": window_list,
+            "series": series,
+            "note": (
+                "Zone % series are daily coaching metrics (already rolling internally). "
+                "Use requested_windows_days as analysis presets when comparing eras."
+            ),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/duration-curve-history")
+def get_duration_curve_history(
+    period: str = Query("1y"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Historical duration-curve development via *_hist MCP metrics."""
+    end = end_date or date.today()
+    days = _period_days(period)
+    start = end - timedelta(days=days - 1)
+    hist_keys = [
+        "running.speed_5m_hist",
+        "running.speed_10m_hist",
+        "running.speed_20m_hist",
+        "running.speed_40m_hist",
+        "running.speed_60m_hist",
+    ]
+    try:
+        derived = McpDerivedMetricsService(db, storage)
+        curves: List[Dict[str, Any]] = []
+        for key in hist_keys:
+            if not derived.metric_definition(key):
+                continue
+            result = derived.query_timeseries(key, start_date=start, end_date=end, limit=days + 5)
+            points = [
+                {
+                    "date": str(p.get("date") or p.get("activity_date"))[:10],
+                    "value": round(float(p["value"]), 4),
+                }
+                for p in (result.get("points") or [])
+                if p.get("value") is not None
+            ]
+            current = points[-1]["value"] if points else None
+            year_ago_target = (end - timedelta(days=365)).isoformat()
+            prev_year = None
+            for p in reversed(points):
+                if p["date"] <= year_ago_target:
+                    prev_year = p["value"]
+                    break
+            best = max((p["value"] for p in points), default=None)
+            curves.append(
+                {
+                    "metric": key,
+                    "duration_label": key.replace("running.speed_", "").replace("_hist", ""),
+                    "current": current,
+                    "previous_year": prev_year,
+                    "rolling_best": best,
+                    "sample_count": len(points),
+                    "points": points[:: max(1, len(points) // 90)] if points else [],
+                }
+            )
+        return {
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "period": period,
+            "curves": curves,
+            "disclaimer": "Uses *_hist duration-curve series — observational performance development.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/best-period-backtrace")
+def get_best_period_backtrace(
+    metric: str = Query("fitness.ef_30d"),
+    period: str = Query("2y"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """What did training look like before best historical periods?"""
+    end = end_date or date.today()
+    days = _period_days(period)
+    start = end - timedelta(days=days - 1)
+    short_to_mcp = {
+        "ef": "fitness.ef_30d",
+        "critical_speed": "running.critical_speed",
+        "durability": "running.durability_score",
+        "lt2": "running.critical_speed",
+    }
+    key = short_to_mcp.get(metric, metric)
+    try:
+        derived = McpDerivedMetricsService(db, storage)
+        if not derived.metric_definition(key):
+            raise HTTPException(status_code=400, detail=f"Unsupported metric: {metric}")
+        result = derived.query_timeseries(key, start_date=start, end_date=end, limit=days + 5)
+        points = [
+            {
+                "date": date.fromisoformat(str(p.get("date") or p.get("activity_date"))[:10]),
+                "value": float(p["value"]),
+            }
+            for p in (result.get("points") or [])
+            if p.get("value") is not None
+        ]
+        if len(points) < 8:
+            return {
+                "metric": key,
+                "status": "insufficient",
+                "best_periods": [],
+                "note": "Too few samples for best-period backtrace.",
+            }
+        ranked = sorted(points, key=lambda p: p["value"], reverse=True)
+        selected: List[Dict[str, Any]] = []
+        for peak in ranked:
+            if any(abs((peak["date"] - s["peak_date"]).days) < 28 for s in selected):
+                continue
+            blocks = []
+            for weeks in (4, 8, 12):
+                block_end = peak["date"] - timedelta(days=1)
+                block_start = block_end - timedelta(days=weeks * 7 - 1)
+                weeks_rows = (
+                    db.query(WeeklySummary)
+                    .filter(
+                        WeeklySummary.week_start_date >= block_start - timedelta(days=7),
+                        WeeklySummary.week_end_date <= block_end + timedelta(days=7),
+                    )
+                    .order_by(WeeklySummary.week_start_date.asc())
+                    .all()
+                )
+                if not weeks_rows:
+                    blocks.append(
+                        {
+                            "weeks": weeks,
+                            "status": "insufficient",
+                            "sample_weeks": 0,
+                        }
+                    )
+                    continue
+                total_duration = sum(float(w.total_duration or 0) for w in weeks_rows)
+                total_tss = sum(float(w.total_tss or 0) for w in weeks_rows)
+                total_distance = sum(float(w.total_distance or 0) for w in weeks_rows)
+                activity_count = sum(int(w.total_activities or 0) for w in weeks_rows)
+                blocks.append(
+                    {
+                        "weeks": weeks,
+                        "status": "ok",
+                        "sample_weeks": len(weeks_rows),
+                        "total_duration_seconds": round(total_duration, 1),
+                        "total_tss": round(total_tss, 2),
+                        "total_distance_meters": round(total_distance, 1),
+                        "activity_count": activity_count,
+                        "avg_weekly_duration_seconds": round(
+                            total_duration / max(1, len(weeks_rows)), 1
+                        ),
+                    }
+                )
+            selected.append(
+                {
+                    "peak_date": peak["date"],
+                    "peak_value": round(peak["value"], 4),
+                    "preceding_blocks": blocks,
+                    "wording": (
+                        f"Training structure in the weeks before the {peak['date'].isoformat()} "
+                        f"peak — descriptive, not causal."
+                    ),
+                }
+            )
+            if len(selected) >= 3:
+                break
+        for s in selected:
+            s["peak_date"] = s["peak_date"].isoformat()
+        return {
+            "metric": key,
+            "status": "ok",
+            "period": period,
+            "best_periods": selected,
+            "disclaimer": (
+                "Shows preceding training structure before historically strong periods. "
+                "Not causal attribution."
+            ),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/change-aligned")
+def get_change_aligned(
+    metric: str = Query("fitness.ef_30d"),
+    period: str = Query("1y"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Compare training in 6 weeks before a fitness change vs prior 6 weeks."""
+    end = end_date or date.today()
+    days = _period_days(period)
+    window = _window_key(min(days, 365))
+    window_days = int(window.replace("d", ""))
+    legacy = {
+        "fitness.ef_30d": "easy_run_efficiency",
+        "running.critical_speed": "critical_speed",
+        "running.durability_score": "durability",
+        "fitness.ctl": "ctl",
+    }.get(metric, metric)
+    try:
+        trends = TrendAnalysisService(db, storage).analyze_all(
+            end_date=end, windows=(window_days,)
+        )
+        block = ((trends.get("metrics") or {}).get(legacy) or {}).get(window) or {}
+        if not block.get("change_point_detected"):
+            return {
+                "metric": metric,
+                "status": "no_change_point",
+                "wording": "No meaningful change point detected in the selected window.",
+                "comparison": None,
+            }
+        change_day = end - timedelta(days=window_days // 2)
+        before_end = change_day - timedelta(days=1)
+        before_start = before_end - timedelta(days=41)
+        prior_end = before_start - timedelta(days=1)
+        prior_start = prior_end - timedelta(days=41)
+
+        def _week_stats(a: date, b: date) -> Dict[str, Any]:
+            rows = (
+                db.query(WeeklySummary)
+                .filter(
+                    WeeklySummary.week_start_date >= a - timedelta(days=7),
+                    WeeklySummary.week_end_date <= b + timedelta(days=7),
+                )
+                .all()
+            )
+            if not rows:
+                return {"status": "insufficient", "sample_weeks": 0}
+            return {
+                "status": "ok",
+                "sample_weeks": len(rows),
+                "total_duration_seconds": round(
+                    sum(float(w.total_duration or 0) for w in rows), 1
+                ),
+                "total_tss": round(sum(float(w.total_tss or 0) for w in rows), 2),
+                "activity_count": sum(int(w.total_activities or 0) for w in rows),
+            }
+
+        return {
+            "metric": metric,
+            "status": "ok",
+            "change_approx_date": change_day.isoformat(),
+            "direction": block.get("direction"),
+            "comparison": {
+                "preceding_6_weeks": _week_stats(before_start, before_end),
+                "prior_6_weeks": _week_stats(prior_start, prior_end),
+            },
+            "wording": "Changes observed before the improvement — not causal attribution.",
+            "disclaimer": "Change date is approximate from trend window midpoint.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/recommend-outcomes")
+def get_recommend_outcomes(x: str = Query(...)) -> Dict[str, Any]:
+    return {
+        "predictor": x,
+        "recommended_outcomes": recommended_outcomes_for(x),
+        "metric": get_analytics_metric(x),
+    }
 
 
 @router.get("/highlights")

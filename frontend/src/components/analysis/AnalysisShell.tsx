@@ -48,11 +48,14 @@ export function useAnalysisUrlState() {
       period: parsePeriod(searchParams.get("period")),
       sport: parseSport(searchParams.get("sport")),
       session: parseSession(searchParams.get("session")),
-      metrics: (searchParams.get("metrics") || "ctl,hrv_rmssd")
+      metrics: (searchParams.get("metrics") || "fitness.ctl,cardio.hrv_7d")
         .split(",")
         .map((m) => m.trim())
         .filter(Boolean)
         .slice(0, 4),
+      outcome: searchParams.get("outcome") || "fitness.ef_30d",
+      preset: searchParams.get("preset") || "",
+      backtrace: searchParams.get("backtrace") || "fitness.ef_30d",
     }),
     [searchParams]
   );
