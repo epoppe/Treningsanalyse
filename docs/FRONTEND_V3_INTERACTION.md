@@ -1,35 +1,32 @@
 # Frontend V3 — Interaction, Interpretation & Daily-Usage Polish
 
-**Base:** `main` @ chart-shell merge  
-**Status:** In progress on `cursor/frontend-v3-interaction-polish-7cfd`  
+**Base:** `main` (merged PR #62)  
+**Follow-up:** `cursor/frontend-v3-depth-polish-7cfd`  
 **Constraint:** Coaching engine feature-frozen. No large redesign.
 
-## Review of current main (pre-V3)
+## Status after V3 + depth polish
 
-| Priority | Pre-status | V3 action |
-|----------|------------|-----------|
-| 1 Cross-filter brush | Missing | Brush + URL `from`/`to` + CLEAR |
-| 2 Period Inspector | Partial | New `PeriodInspector` |
-| 3 WeekExplorer | Done | Extended actions (following 4 weeks) |
-| 4 Year-over-year | Done | Already in Historikk |
-| 5 Best period backtrace | Partial | Kept; clickable periods deferred |
-| 6 Relationship detail | Done (basic) | Kept |
-| 7–8 Coaching ↔ analytics | Partial | AthleteState drill-downs with URL presets |
-| 9 Merged post-sync | Partial | `SinceLastUpdate` replaces dual cards |
-| 10 New activity experience | Partial | Merged into SinceLastUpdate |
-| 11 Activity detail V2 | Partial | Interpretation-first reorder |
-| 12 Plan vs actual | Done | `/plan` |
-| 13 Recommendation history | Done | `/plan` |
-| 14 Annotations | Done | Historikk |
-| 15 PWA | Missing | Manifest + icons + metadata |
-| 16 Connection status | Missing | Subtle Connected / unavailable |
-| 17 Analysis performance | Partial | Staggered fetches + selected-window context |
-| 18 Legacy consolidation | Partial | Mer-nav labeled drill-down/legacy |
-| 19 Tests | Partial | Range helpers, SinceLastUpdate, inspector, PWA |
+| Priority | Status |
+|----------|--------|
+| 1 Cross-filter brush | Done — Brush + URL `from`/`to` + CLEAR |
+| 2 Period Inspector | Done |
+| 3 WeekExplorer | Done — previous / similar / following 4 weeks |
+| 4 Year-over-year | Done — one-metric chart (duration/distance/sessions/TSS) |
+| 5 Best period backtrace | Done — clickable 4/8/12w opens URL range |
+| 6 Relationship detail | Done — lag + aligned timeline + scatter link |
+| 7–8 Coaching ↔ analytics | Done — drill-downs + historical support link |
+| 9–10 Post-sync / new session | Done — `SinceLastUpdate` |
+| 11 Activity detail V2 | Done — interpretation-first |
+| 12–14 Plan / ledger / annotations | Done — pre-existing |
+| 15 PWA | Done — manifest + SW offline shell |
+| 16 Connection status | Done |
+| 17 Analysis performance | Done — staggered + selected-window |
+| 18 Legacy consolidation | Done — labeled Mer-nav (no deletes) |
+| 19 Tests | Done — range / inspector / backtrace / PWA / SW |
 
-## Definition of done (target flow)
+## Definition of done flows
 
 TODAY → WHY → HISTORICAL SUPPORT → ANALYSIS → PERIOD → WEEK → SESSION  
 NEW SYNC → WHAT CHANGED → SESSION IMPACT → PLAN IMPACT → NEXT RECOMMENDATION
 
-Next major work after V3: deployment/local-runtime hardening — not another analytics feature wave.
+**Next major work:** deployment / local-runtime hardening — not another analytics feature wave.
