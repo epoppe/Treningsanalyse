@@ -16,23 +16,9 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
-import styled from 'styled-components';
+import { LegacyChartFrame } from '@/components/charts/ChartShell';
 import { Activity } from '../types';
 import { useEffect, useMemo, useState } from 'react';
-
-const ChartContainer = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
-  height: 400px;
-`;
-
-const Title = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
-`;
 
 interface MonthlyComparisonChartProps {
   activities: Activity[];
@@ -177,12 +163,12 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
   const showNoData = !useServerSummaries && activities.length === 0;
 
   return (
-    <ChartContainer>
-      <Title>{title}</Title>
-      {loading && <p>Henter serverdata...</p>}
+    <LegacyChartFrame title={title} height="400px">
+      {loading && <p className="mb-2 text-sm text-slate-500">Henter serverdata...</p>}
       {showNoData ? (
-        <p>Ingen data å vise for denne perioden.</p>
+        <p className="text-sm text-slate-500">Ingen data å vise for denne perioden.</p>
       ) : (
+        <div className="h-[320px]">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={finalChartData} margin={CHART_MARGIN.labeled}>
             <ThemedCartesianGrid />
@@ -232,7 +218,8 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
             ))}
           </BarChart>
         </ResponsiveContainer>
+        </div>
       )}
-    </ChartContainer>
+    </LegacyChartFrame>
   );
 } 

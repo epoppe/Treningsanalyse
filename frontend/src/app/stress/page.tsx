@@ -18,6 +18,7 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
+import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartShell';
 import { api } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
@@ -105,19 +106,6 @@ const QuickFilterButton = styled.button<{ $active?: boolean }>`
   &:hover {
     background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'};
   }
-`;
-
-const ChartContainer = styled.div`
-  background: white;
-  padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
-`;
-
-const ChartTitle = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
 `;
 
 const StatsContainer = styled.div`
@@ -429,17 +417,16 @@ export default function StressPage() {
         </LoadingContainer>
       ) : data.length > 0 ? (
         <>
-          <ChartContainer>
-            <ChartTitle>Overall Stress Level Over Time</ChartTitle>
-            <div style={{ marginBottom: '1rem' }}>
-              <QuickFilterButton
-                $active={showTrend}
-                onClick={() => setShowTrend(!showTrend)}
-              >
+          <LegacyChartFrame
+            title="Overall Stress Level Over Time"
+            controls={
+              <LegacyChartToggle active={showTrend} onClick={() => setShowTrend(!showTrend)}>
                 {showTrend ? 'Skjul' : 'Vis'} 7-dagers glidende gjennomsnitt
-              </QuickFilterButton>
-            </div>
-            <ResponsiveContainer width="100%" height={450}>
+              </LegacyChartToggle>
+            }
+          >
+            <div className="h-[450px]">
+            <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
                 data={chartData}
                 margin={CHART_MARGIN.labeled}
@@ -494,19 +481,19 @@ export default function StressPage() {
                 )}
               </ComposedChart>
             </ResponsiveContainer>
-          </ChartContainer>
-
-          <ChartContainer>
-            <ChartTitle>Total stressektid per dag</ChartTitle>
-            <div style={{ marginBottom: '1rem' }}>
-              <QuickFilterButton
-                $active={showTrend}
-                onClick={() => setShowTrend(!showTrend)}
-              >
-                {showTrend ? 'Skjul' : 'Vis'} 7-dagers snitt
-              </QuickFilterButton>
             </div>
-            <ResponsiveContainer width="100%" height={400}>
+          </LegacyChartFrame>
+
+          <LegacyChartFrame
+            title="Total stressektid per dag"
+            controls={
+              <LegacyChartToggle active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+                {showTrend ? 'Skjul' : 'Vis'} 7-dagers snitt
+              </LegacyChartToggle>
+            }
+          >
+            <div className="h-[400px]">
+            <ResponsiveContainer width="100%" height="100%">
               <ComposedChart data={chartData} margin={CHART_MARGIN.legacy}>
                 <ThemedCartesianGrid />
                 <ThemedXAxis
@@ -543,11 +530,12 @@ export default function StressPage() {
                 )}
               </ComposedChart>
             </ResponsiveContainer>
-          </ChartContainer>
+            </div>
+          </LegacyChartFrame>
 
-          <ChartContainer>
-            <ChartTitle>Stress-nivåer per dag (lav/middels/høy)</ChartTitle>
-            <ResponsiveContainer width="100%" height={400}>
+          <LegacyChartFrame title="Stress-nivåer per dag (lav/middels/høy)">
+            <div className="h-[400px]">
+            <ResponsiveContainer width="100%" height="100%">
               <BarChart data={chartData} margin={CHART_MARGIN.legacy}>
                 <ThemedCartesianGrid />
                 <ThemedXAxis
@@ -574,7 +562,8 @@ export default function StressPage() {
                 <Bar dataKey="high_stress_time" stackId="stress" fill="#dc2626" name="Høy stress" />
               </BarChart>
             </ResponsiveContainer>
-          </ChartContainer>
+            </div>
+          </LegacyChartFrame>
         </>
       ) : (
         <ErrorContainer>

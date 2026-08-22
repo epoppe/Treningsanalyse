@@ -15,6 +15,7 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
+import { LegacyChartFrame } from '@/components/charts/ChartShell';
 import { format, parseISO } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
@@ -121,30 +122,16 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title, moving
 
   if (dataForChart.length === 0) {
     return (
-      <div style={{
-        background: 'white',
-        borderRadius: '8px',
-        padding: '2rem',
-        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-        textAlign: 'center',
-        color: '#666'
-      }}>
-        <h3>{title}</h3>
-        <p>Ingen Body Battery-data tilgjengelig for valgt periode</p>
-      </div>
+      <LegacyChartFrame title={title}>
+        <p className="text-sm text-slate-500">Ingen Body Battery-data tilgjengelig for valgt periode</p>
+      </LegacyChartFrame>
     );
   }
 
   return (
-    <div style={{
-      background: 'white',
-      borderRadius: '8px',
-      padding: '1.5rem',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
-      marginBottom: '2rem'
-    }}>
-      <h3 style={{ margin: '0 0 1rem 0', color: '#2c3e50' }}>{title}</h3>
-      <ResponsiveContainer width="100%" height={400}>
+    <LegacyChartFrame title={title} height="480px">
+      <div className="h-[400px]">
+      <ResponsiveContainer width="100%" height="100%">
         <LineChart data={dataForChart} margin={CHART_MARGIN.legacy}>
           <ThemedCartesianGrid />
           <ThemedXAxis
@@ -204,7 +191,8 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title, moving
           />
         </LineChart>
       </ResponsiveContainer>
-    </div>
+      </div>
+    </LegacyChartFrame>
   );
 };
 

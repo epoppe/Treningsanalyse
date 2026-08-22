@@ -17,48 +17,14 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
-import styled from 'styled-components';
+import {
+  LegacyChartFrame,
+  LegacyChartToggle,
+  LegacyInfoPanel,
+} from '@/components/charts/ChartShell';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { nb } from 'date-fns/locale';
-
-const ChartContainer = styled.div`
-  background: white;
-  padding: 0.75rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1rem;
-  height: 600px;
-`;
-
-const ButtonContainer = styled.div`
-  margin-bottom: 1rem;
-  display: flex;
-  gap: 0.5rem;
-`;
-
-const Button = styled.button<{ $active: boolean }>`
-  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
-  color: ${props => (props.$active ? 'white' : '#2c3e50')};
-  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
-  }
-`;
-
-const InfoPanel = styled.div`
-  background: #f8f9fa;
-  padding: 0.75rem;
-  border-radius: 4px;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-  color: #495057;
-`;
 
 interface HrvData {
   date: string;
@@ -135,11 +101,11 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
 
   if (!data || data.length === 0) {
     return (
-      <ChartContainer>
-        <InfoPanel>
+      <LegacyChartFrame title={title}>
+        <LegacyInfoPanel>
           Ingen HRV-data tilgjengelig. HRV-data er kun tilgjengelig fra 2023 og fremover.
-        </InfoPanel>
-      </ChartContainer>
+        </LegacyInfoPanel>
+      </LegacyChartFrame>
     );
   }
 
@@ -226,30 +192,32 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
   const chartData = chartDataWithFilledBaselines;
 
   return (
-    <ChartContainer>
-      <InfoPanel style={{ marginBottom: '0.5rem' }}>
-        <div><strong>{title}</strong></div>
-        {subtitle && <div style={{ marginTop: '0.25rem' }}>{subtitle}</div>}
-      </InfoPanel>
-      <InfoPanel style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+    <LegacyChartFrame title={title} height="600px">
+      {subtitle ? (
+        <LegacyInfoPanel>{subtitle}</LegacyInfoPanel>
+      ) : null}
+      <LegacyInfoPanel>
+        <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <strong>Statistikk:</strong> 
-          Siste HRV: {latestHrv}ms | 
-          7-dagers snitt: {latestTrend?.toFixed(1)}ms | 
-          Gj.snitt alle dager: {avgHrv.toFixed(1)}ms | 
+          <strong>Statistikk:</strong>{' '}
+          Siste HRV: {latestHrv}ms |{' '}
+          7-dagers snitt: {latestTrend?.toFixed(1)}ms |{' '}
+          Gj.snitt alle dager: {avgHrv.toFixed(1)}ms |{' '}
           Antall målinger: {sortedData.length}
         </div>
-        <ButtonContainer style={{ marginBottom: 0 }}>
-          <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+        <div className="flex flex-wrap gap-2">
+          <LegacyChartToggle active={showTrend} onClick={() => setShowTrend(!showTrend)}>
             {showTrend ? 'Skjul' : 'Vis'} 7-dagers snitt
-          </Button>
-          <Button $active={showBaselines} onClick={() => setShowBaselines(!showBaselines)}>
+          </LegacyChartToggle>
+          <LegacyChartToggle active={showBaselines} onClick={() => setShowBaselines(!showBaselines)}>
             {showBaselines ? 'Skjul' : 'Vis'} normalområde
-          </Button>
-        </ButtonContainer>
-      </InfoPanel>
+          </LegacyChartToggle>
+        </div>
+        </div>
+      </LegacyInfoPanel>
 
-      <ResponsiveContainer width="100%" height="75%">
+      <div className="h-[420px]">
+      <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={chartData} margin={{ ...CHART_MARGIN.labeled, top: 20, right: 30, left: 30, bottom: 80 }}>
           <ThemedCartesianGrid vertical={false} />
           <ThemedXAxis 
@@ -328,6 +296,7 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
           )}
         </ComposedChart>
       </ResponsiveContainer>
-    </ChartContainer>
+      </div>
+    </LegacyChartFrame>
   );
 } 

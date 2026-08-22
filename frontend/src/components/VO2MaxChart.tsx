@@ -15,7 +15,7 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
-import styled from 'styled-components';
+import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartShell';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
@@ -24,40 +24,6 @@ const getEffectiveVo2Max = (activity: Activity): number | undefined => {
   const value = activity.vO2MaxPreciseValue ?? activity.vO2MaxValue;
   return value != null && value > 0 ? value : undefined;
 };
-
-const ChartContainer = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 2rem;
-  height: 400px;
-`;
-
-const Title = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #2c3e50;
-`;
-
-const ButtonContainer = styled.div`
-  margin-bottom: 1rem;
-  display: flex;
-  gap: 0.5rem;
-`;
-
-const Button = styled.button<{ $active: boolean }>`
-  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
-  color: ${props => (props.$active ? 'white' : '#2c3e50')};
-  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
-  }
-`;
 
 interface VO2MaxChartProps {
   activities: Activity[];
@@ -108,10 +74,9 @@ export default function VO2MaxChart({
 
   if (activities.length === 0) {
     return (
-      <ChartContainer>
-        <Title>{title}</Title>
-        <p>Ingen løpedata tilgjengelig for denne perioden.</p>
-      </ChartContainer>
+      <LegacyChartFrame title={title}>
+        <p className="text-sm text-slate-500">Ingen løpedata tilgjengelig for denne perioden.</p>
+      </LegacyChartFrame>
     );
   }
 
@@ -130,10 +95,9 @@ export default function VO2MaxChart({
 
   if (runningActivities.length === 0) {
     return (
-      <ChartContainer>
-        <Title>{title}</Title>
-        <p>Ingen VO2Max-data tilgjengelig for denne perioden.</p>
-      </ChartContainer>
+      <LegacyChartFrame title={title}>
+        <p className="text-sm text-slate-500">Ingen VO2Max-data tilgjengelig for denne perioden.</p>
+      </LegacyChartFrame>
     );
   }
 
@@ -265,14 +229,17 @@ export default function VO2MaxChart({
   };
 
   return (
-    <ChartContainer>
-      <Title>{title} {groupingTitle}</Title>
-      <ButtonContainer>
-        <Button $active={showTrend} onClick={() => setShowTrend(!showTrend)}>
+    <LegacyChartFrame
+      title={`${title} ${groupingTitle}`}
+      height="400px"
+      controls={
+        <LegacyChartToggle active={showTrend} onClick={() => setShowTrend(!showTrend)}>
           {showTrend ? 'Skjul' : 'Vis'} trendlinje
-        </Button>
-      </ButtonContainer>
-      <ResponsiveContainer width="100%" height="90%">
+        </LegacyChartToggle>
+      }
+    >
+      <div className="h-[320px]">
+      <ResponsiveContainer width="100%" height="100%">
         <LineChart data={dataWithMovingAverage}>
           <ThemedCartesianGrid />
           <ThemedXAxis 
@@ -320,6 +287,7 @@ export default function VO2MaxChart({
           )}
         </LineChart>
       </ResponsiveContainer>
-    </ChartContainer>
+      </div>
+    </LegacyChartFrame>
   );
 } 
