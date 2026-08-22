@@ -60,3 +60,41 @@ export interface RecommendationHistoryPayload {
   items: RecommendationHistoryItem[];
   count: number;
 }
+
+export interface HistoricalSupportItem {
+  kind?: string;
+  label?: string;
+  detail?: string;
+  evidence?: string;
+  relationship?: string;
+  sample_count?: number;
+}
+
+export interface HistoricalSupportPayload {
+  status?: string;
+  as_of?: string;
+  workout_type?: string;
+  items: HistoricalSupportItem[];
+  disclaimer?: string;
+}
+
+export interface ComparableSessionMatch {
+  activity_id?: string;
+  activity_name?: string;
+  date?: string;
+  similarity?: number;
+  quality_score?: number | null;
+  session_type?: string;
+}
+
+export interface ComparableSessionsPayload {
+  status?: string;
+  activity_id?: string;
+  current_quality?: Record<string, unknown>;
+  comparable_count?: number;
+  percentile_vs_comparable?: number | null;
+  rank?: number | null;
+  baseline_median_quality?: number | null;
+  matches?: ComparableSessionMatch[];
+  limitations?: string[];
+}

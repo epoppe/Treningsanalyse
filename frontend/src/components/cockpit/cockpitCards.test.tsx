@@ -1,11 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
 import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
+import { ComparableSessionsCard } from "@/components/cockpit/ComparableSessionsCard";
 import { PlanChangeTimeline } from "@/components/cockpit/PlanChangeTimeline";
 import { PlanVsActualTable } from "@/components/cockpit/PlanVsActualTable";
 import { MesocycleOverview } from "@/components/cockpit/MesocycleOverview";
+import { SavedAnalysisViews } from "@/components/analysis/SavedAnalysisViews";
 import type { TodayDashboardPayload } from "@/types/today";
+
+jest.mock("@/hooks/useDashboard", () => ({
+  useDecisionHistoricalSupport: jest.fn(() => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+  })),
+  useComparableSessions: jest.fn(() => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    refetch: jest.fn(),
+  })),
+}));
 
 const thresholdPayload: TodayDashboardPayload = {
   as_of: "2026-08-22",
@@ -98,6 +114,68 @@ describe("WhyThisWorkout", () => {
       />,
     );
     expect(screen.getByText(/Kvalitetsøkt er due etter god spacing/i)).toBeInTheDocument();
+  });
+
+  it("shows historical support at level 3", () => {
+    const { useDecisionHistoricalSupport } = jest.requireMock("@/hooks/useDashboard");
+    useDecisionHistoricalSupport.mockReturnValue({
+      data: {
+        items: [
+          {
+            kind: "ledger",
+            label: "Tidligere anbefalinger",
+            detail: "12 lagrede anbefalinger av threshold",
+            evidence: "supported",
+          },
+        ],
+        disclaimer: "Historical support describes past patterns.",
+      },
+      isLoading: false,
+      isError: false,
+    });
+
+    render(
+      <WhyThisWorkout
+        explanation={thresholdPayload.decision_explanation}
+        workoutType="threshold"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Evidens" }));
+    expect(screen.getByText(/Tidligere anbefalinger/i)).toBeInTheDocument();
+    expect(screen.getByText(/12 lagrede anbefalinger/i)).toBeInTheDocument();
+  });
+});
+
+describe("ComparableSessionsCard", () => {
+  it("renders percentile vs comparable sessions", () => {
+    render(
+      <ComparableSessionsCard
+        data={{
+          status: "ok",
+          comparable_count: 5,
+          percentile_vs_comparable: 72,
+          current_quality: { session_type: "threshold", quality_score: 81 },
+          matches: [{ activity_id: "999", activity_name: "Terskel løp" }],
+        }}
+      />,
+    );
+    expect(screen.getByText(/Vs\. dine lignende økter/i)).toBeInTheDocument();
+    expect(screen.getByText(/72%/)).toBeInTheDocument();
+  });
+});
+
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams("tab=utvikling&period=90d"),
+  useRouter: () => ({ replace: jest.fn() }),
+  usePathname: () => "/analyse",
+}));
+
+describe("SavedAnalysisViews", () => {
+  it("renders save bookmark UI", () => {
+    render(<SavedAnalysisViews />);
+    expect(screen.getByText(/Lagrede analyser/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Lagre visning/i })).toBeInTheDocument();
   });
 });
 
