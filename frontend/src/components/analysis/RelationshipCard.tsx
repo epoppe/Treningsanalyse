@@ -51,7 +51,7 @@ export function RelationshipCard({
         onClick={() => setOpen((v) => !v)}
         className="mt-2 text-xs font-medium text-slate-900 underline"
       >
-        {open ? "Skjul lag-profil" : "Vis lag-profil"}
+        {open ? "Skjul detalj" : "Åpne relationship detail"}
       </button>
       {open ? <RelationshipDetailPanel card={card} period={period} /> : null}
     </article>

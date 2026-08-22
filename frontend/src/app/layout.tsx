@@ -7,6 +7,7 @@ import AppShell from "../components/navigation/AppShell";
 import { CockpitSyncProvider } from "../components/cockpit/CockpitSyncProvider";
 import { SyncRefreshBridge } from "../components/SyncRefreshBridge";
 import QueryProvider from "./QueryProvider";
+import { PwaRegister } from "../components/PwaRegister";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -46,6 +47,7 @@ export default function RootLayout({
             <StoreProvider>
               <CockpitSyncProvider>
                 <SyncRefreshBridge />
+                <PwaRegister />
                 <AppShell>{children}</AppShell>
               </CockpitSyncProvider>
             </StoreProvider>

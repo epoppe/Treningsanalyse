@@ -29,6 +29,11 @@ export function WeekExplorer({
   if (!data) return null;
 
   const links = data.compare_links || {};
+  const similarWeek = (() => {
+    const start = new Date(`${data.week_start}T12:00:00Z`);
+    start.setUTCFullYear(start.getUTCFullYear() - 1);
+    return start.toISOString().slice(0, 10);
+  })();
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3">
@@ -47,6 +52,15 @@ export function WeekExplorer({
               className="text-xs font-medium text-slate-700 underline"
             >
               COMPARE PREVIOUS WEEK
+            </button>
+          ) : null}
+          {onPreviousWeek ? (
+            <button
+              type="button"
+              onClick={() => onPreviousWeek(similarWeek)}
+              className="text-xs font-medium text-slate-700 underline"
+            >
+              COMPARE SIMILAR WEEK
             </button>
           ) : null}
           {links.following_4_weeks_start &&

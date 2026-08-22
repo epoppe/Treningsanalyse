@@ -6,6 +6,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { SinceLastUpdate } from "@/components/cockpit/SinceLastUpdate";
 import { PeriodInspector } from "@/components/analysis/PeriodInspector";
 import { ConnectionStatus } from "@/components/cockpit/ConnectionStatus";
+import { BestPeriodBacktracePanel } from "@/components/analysis/BestPeriodBacktracePanel";
 
 describe("analysisRange helpers", () => {
   it("maps brush spans to period chips", () => {
@@ -86,6 +87,43 @@ describe("ConnectionStatus", () => {
   });
 });
 
+describe("BestPeriodBacktracePanel", () => {
+  it("invokes onSelectRange when a preceding block is clicked", () => {
+    const onSelectRange = jest.fn();
+    render(
+      <BestPeriodBacktracePanel
+        metric="fitness.ef_30d"
+        onMetricChange={jest.fn()}
+        onSelectRange={onSelectRange}
+        data={{
+          metric: "fitness.ef_30d",
+          status: "ok",
+          best_periods: [
+            {
+              peak_date: "2026-06-01",
+              peak_value: 1.2,
+              preceding_blocks: [
+                {
+                  weeks: 4,
+                  status: "ok",
+                  sample_weeks: 4,
+                  total_tss: 120,
+                  activity_count: 8,
+                  avg_weekly_duration_seconds: 18000,
+                },
+              ],
+            },
+          ],
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText(/4 uker før/i));
+    expect(onSelectRange).toHaveBeenCalled();
+    const [from, to] = onSelectRange.mock.calls[0];
+    expect(from <= to).toBe(true);
+  });
+});
+
 describe("PWA manifest", () => {
   it("is present as a static asset contract", () => {
     const fs = require("fs") as typeof import("fs");
@@ -97,4 +135,12 @@ describe("PWA manifest", () => {
     expect(json.name).toMatch(/Treningsanalyse/i);
     expect(json.icons?.length).toBeGreaterThan(0);
   });
+
+  it("ships an offline service worker shell", () => {
+    const fs = require("fs") as typeof import("fs");
+    const path = require("path") as typeof import("path");
+    const sw = fs.readFileSync(path.join(process.cwd(), "public", "sw.js"), "utf8");
+    expect(sw).toMatch(/Treningsanalyse-serveren er ikke tilgjengelig/);
+  });
 });
+

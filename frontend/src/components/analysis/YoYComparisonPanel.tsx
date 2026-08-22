@@ -1,47 +1,130 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  ResponsiveContainer,
+} from "recharts";
 import type { YoYPayload } from "@/types/analysis";
+import { yearComparisonColors, CHART_MARGIN } from "@/components/charts/chartTheme";
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from "@/components/charts/ThemedRecharts";
 import { AnalysisSkeleton } from "./ui";
 
-function fmtPct(value?: number | null) {
-  if (value == null) return "—";
-  return `${value > 0 ? "+" : ""}${value.toFixed(0)}%`;
+type YoYMetric = "duration" | "distance" | "activities" | "tss";
+
+const METRIC_OPTIONS: Array<{ id: YoYMetric; label: string }> = [
+  { id: "duration", label: "Running duration" },
+  { id: "distance", label: "Distance" },
+  { id: "activities", label: "Session count" },
+  { id: "tss", label: "TSS / load" },
+];
+
+function valueFor(
+  metric: YoYMetric,
+  side?: YoYPayload["rows"][number]["current"] | null,
+): number {
+  if (!side) return 0;
+  if (metric === "duration") return (side.duration_s || 0) / 3600;
+  if (metric === "distance") return (side.distance_m || 0) / 1000;
+  if (metric === "tss") return side.tss || 0;
+  return side.activities || 0;
 }
 
-export function YoYComparisonPanel({ data, isLoading }: { data?: YoYPayload; isLoading?: boolean }) {
-  if (isLoading) return <AnalysisSkeleton className="h-40" />;
-  const rows = data?.rows?.slice(-6) || [];
-  if (!rows.length) {
+function unitLabel(metric: YoYMetric) {
+  if (metric === "duration") return "timer";
+  if (metric === "distance") return "km";
+  if (metric === "tss") return "TSS";
+  return "økter";
+}
+
+export function YoYComparisonPanel({
+  data,
+  isLoading,
+}: {
+  data?: YoYPayload;
+  isLoading?: boolean;
+}) {
+  const [metric, setMetric] = useState<YoYMetric>("duration");
+
+  const chart = useMemo(() => {
+    const rows = data?.rows || [];
+    if (!rows.length) {
+      return { bars: [] as Array<Record<string, string | number>>, currentYear: 0, previousYear: 0 };
+    }
+    const currentYear = rows[rows.length - 1]?.year || new Date().getFullYear();
+    const previousYear = currentYear - 1;
+    const bars = rows.map((row) => ({
+      label: row.month_label || `${row.month}`,
+      [String(currentYear)]: valueFor(metric, row.current),
+      [String(previousYear)]: valueFor(metric, row.previous_year),
+    }));
+    return { bars, currentYear, previousYear };
+  }, [data, metric]);
+
+  if (isLoading) return <AnalysisSkeleton className="h-48" />;
+  if (!chart.bars.length) {
     return <p className="text-sm text-slate-500">Ingen YoY-data tilgjengelig.</p>;
   }
 
+  const colors = yearComparisonColors(2);
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3">
-      <h2 className="text-sm font-semibold text-slate-900">År-over-år (volum)</h2>
+      <h2 className="text-sm font-semibold text-slate-900">År-over-år</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">
-        Sammenligning mot samme måned i fjor — fra månedssammendrag.
+        Én metrikk om gangen ({chart.previousYear} vs {chart.currentYear}). EF / durability / LT2 /
+        VO2max: bruk Utvikling-fanen.
       </p>
-      <div className="mt-2 overflow-x-auto">
-        <table className="min-w-full text-left text-xs">
-          <thead className="text-slate-500">
-            <tr>
-              <th className="py-1.5 pr-3">Måned</th>
-              <th className="py-1.5 pr-3">Dist. YoY</th>
-              <th className="py-1.5 pr-3">Varighet YoY</th>
-              <th className="py-1.5 pr-3">Økter YoY</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.month_label} className="border-t border-slate-100">
-                <td className="py-1.5 pr-3 font-medium text-slate-800">{row.month_label}</td>
-                <td className="py-1.5 pr-3 tabular-nums">{fmtPct(row.deltas?.distance_pct)}</td>
-                <td className="py-1.5 pr-3 tabular-nums">{fmtPct(row.deltas?.duration_pct)}</td>
-                <td className="py-1.5 pr-3 tabular-nums">{fmtPct(row.deltas?.activities_pct)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {METRIC_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setMetric(opt.id)}
+            className={
+              metric === opt.id
+                ? "rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white"
+                : "rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700"
+            }
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3 h-56 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chart.bars} margin={CHART_MARGIN.compact}>
+            <ThemedCartesianGrid />
+            <ThemedXAxis dataKey="label" minTickGap={16} />
+            <ThemedYAxis width={40} />
+            <ThemedTooltip
+              formatter={(value: any) => [
+                typeof value === "number" ? value.toFixed(1) : value,
+                unitLabel(metric),
+              ]}
+            />
+            <ThemedLegend />
+            <Bar
+              dataKey={String(chart.previousYear)}
+              fill={colors[0]}
+              name={String(chart.previousYear)}
+              radius={[3, 3, 0, 0]}
+            />
+            <Bar
+              dataKey={String(chart.currentYear)}
+              fill={colors[1]}
+              name={String(chart.currentYear)}
+              radius={[3, 3, 0, 0]}
+            />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
       {data?.disclaimer ? <p className="mt-2 text-[10px] text-slate-500">{data.disclaimer}</p> : null}
     </section>

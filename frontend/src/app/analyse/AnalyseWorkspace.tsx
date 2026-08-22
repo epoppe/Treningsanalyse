@@ -187,6 +187,7 @@ function UtviklingPanel() {
         data={backtrace.data}
         metric={state.backtrace}
         onMetricChange={(m) => setParams({ backtrace: m })}
+        onSelectRange={(from, to) => setParams({ from, to, tab: "utvikling" })}
       />
 
       <div id="period-comparison">
