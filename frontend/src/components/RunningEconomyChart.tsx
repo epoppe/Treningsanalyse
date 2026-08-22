@@ -3,13 +3,19 @@
 import {
   LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  chartColor,
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
@@ -273,25 +279,18 @@ export default function RunningEconomyChart({
       </ButtonContainer>
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
-          <YAxis
+          <ThemedCartesianGrid vertical={false} />
+          <ThemedXAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
+          <ThemedYAxis
             label={{ value: 'Hastighet/Puls', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
             tickFormatter={(tick) => tick.toFixed(2)}
           />
-          <Tooltip
-            contentStyle={{ 
-              backgroundColor: 'white', 
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-              color: '#333'
-            }}
-            formatter={(value: number, name: string) => {
+          <ThemedTooltip
+            formatter={(value: any, name: any) => {
               const formattedName =
                 name === "movingAverage" ? "Gj.snitt" : "Verdi";
-              return [value.toFixed(2), formattedName];
+              return [typeof value === 'number' ? value.toFixed(2) : value, formattedName];
             }}
             labelFormatter={(label, payload) => {
               if (
@@ -305,7 +304,7 @@ export default function RunningEconomyChart({
               return `Dato: ${label}`;
             }}
           />
-          <Legend
+          <ThemedLegend
             formatter={(value) =>
               value === "movingAverage" ? "Gjennomsnitt" : "Hastighet/Puls"
             }
@@ -313,7 +312,7 @@ export default function RunningEconomyChart({
           <Line
             type="monotone"
             dataKey="economy"
-            stroke="#8884d8"
+            stroke={chartColor(0)}
             name="Løpsøkonomi"
             connectNulls
           />
@@ -321,7 +320,7 @@ export default function RunningEconomyChart({
             <Line
               type="monotone"
               dataKey="movingAverage"
-              stroke="#82ca9d"
+              stroke={LEGACY_SERIES_COLORS.form}
               name="Trend (6mnd snitt)"
               strokeWidth={2}
               dot={false}

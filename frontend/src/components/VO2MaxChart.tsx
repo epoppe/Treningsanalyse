@@ -3,13 +3,18 @@
 import {
   LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
@@ -269,19 +274,19 @@ export default function VO2MaxChart({
       </ButtonContainer>
       <ResponsiveContainer width="100%" height="90%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis 
+          <ThemedCartesianGrid />
+          <ThemedXAxis 
             dataKey="date" 
             tick={<CustomAxisTick data={dataWithMovingAverage} />}
             height={60}
           />
-          <YAxis 
+          <ThemedYAxis 
             domain={yAxisDomain()}
             label={{ value: 'VO2 Max', angle: -90, position: 'insideLeft' }}
           />
-          <Tooltip
+          <ThemedTooltip
             labelFormatter={(value) => `Dato: ${value}`}
-            formatter={(value: any, name: string) => {
+            formatter={(value: any, name: any) => {
               if (name === 'vo2Max') {
                 return [value ? `${value.toFixed(1)}` : 'N/A', 'VO2 Max'];
               }
@@ -291,13 +296,13 @@ export default function VO2MaxChart({
               return [value, name];
             }}
           />
-          <Legend />
+          <ThemedLegend />
           <Line
             type="monotone"
             dataKey="vo2Max"
-            stroke="#e74c3c"
+            stroke={LEGACY_SERIES_COLORS.vo2}
             strokeWidth={2}
-            dot={{ fill: '#e74c3c', strokeWidth: 2, r: 4 }}
+            dot={{ fill: LEGACY_SERIES_COLORS.vo2, strokeWidth: 2, r: 4 }}
             connectNulls={false}
             name="VO2 Max"
           />
@@ -305,7 +310,7 @@ export default function VO2MaxChart({
             <Line
               type="monotone"
               dataKey="movingAverage"
-              stroke="#3498db"
+              stroke={LEGACY_SERIES_COLORS.ctl}
               strokeWidth={2}
               strokeDasharray="5 5"
               dot={false}

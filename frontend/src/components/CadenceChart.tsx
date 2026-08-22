@@ -3,13 +3,18 @@
 import {
   LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
@@ -206,41 +211,34 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
       </ButtonContainer>
       <ResponsiveContainer width="100%" height="80%">
         <LineChart data={dataWithMovingAverage}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
-          <YAxis
+          <ThemedCartesianGrid vertical={false} />
+          <ThemedXAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
+          <ThemedYAxis
             label={{ value: 'Skritt/min', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
             tickFormatter={(tick) => String(Math.round(tick))}
           />
-          <Tooltip
-            contentStyle={{ 
-              backgroundColor: 'white', 
-              border: '1px solid #ccc',
-              borderRadius: '4px',
-              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-              color: '#333'
-            }}
-            formatter={(value: number, name: string) => {
+          <ThemedTooltip
+            formatter={(value: any, name: any) => {
               const formattedName = name === 'movingAverage' ? 'Gj.snitt' : 'Verdi';
-              return [value.toFixed(1), formattedName];
+              return [typeof value === 'number' ? value.toFixed(1) : value, formattedName];
             }}
             labelFormatter={(label) => `Dato: ${label}`}
           />
-          <Legend formatter={(value) => value === 'movingAverage' ? 'Gjennomsnitt' : 'Kadens'} />
+          <ThemedLegend formatter={(value) => value === 'movingAverage' ? 'Gjennomsnitt' : 'Kadens'} />
           <Line
             type="monotone"
             dataKey="cadence"
-            stroke="#8884d8"
+            stroke={LEGACY_SERIES_COLORS.cadence}
             name="Kadens"
-            dot={{ r: 4, fill: '#8884d8' }}
+            dot={{ r: 4, fill: LEGACY_SERIES_COLORS.cadence }}
             connectNulls
           />
           {showTrend && (
             <Line
               type="monotone"
               dataKey="movingAverage"
-              stroke="#e74c3c"
+              stroke={LEGACY_SERIES_COLORS.vo2}
               name="movingAverage"
               dot={false}
             />

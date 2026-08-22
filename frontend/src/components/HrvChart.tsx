@@ -3,14 +3,20 @@
 import {
   ComposedChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
   ReferenceArea,
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
@@ -244,21 +250,21 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
       </InfoPanel>
 
       <ResponsiveContainer width="100%" height="75%">
-        <ComposedChart data={chartData} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis 
+        <ComposedChart data={chartData} margin={{ ...CHART_MARGIN.labeled, top: 20, right: 30, left: 30, bottom: 80 }}>
+          <ThemedCartesianGrid vertical={false} />
+          <ThemedXAxis 
             dataKey="date" 
             tick={<CustomAxisTick />}
             interval={Math.max(1, Math.floor(chartData.length / 15))}
             height={80}
           />
-          <YAxis
+          <ThemedYAxis
             label={{ value: 'HRV (ms)', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
             tickFormatter={(tick) => String(Math.round(tick))}
           />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend />
+          <ThemedTooltip content={<CustomTooltip />} />
+          <ThemedLegend />
           
           {/* Normalområde (skyggelagt) */}
           {showBaselines && avgBaselineLower !== null && avgBaselineUpper !== null && (
@@ -277,7 +283,7 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
             dataKey="last_night_avg"
             stroke="none"
             strokeWidth={0}
-            dot={{ fill: '#e74c3c', strokeWidth: 1, r: 2.5 }}
+            dot={{ fill: LEGACY_SERIES_COLORS.vo2, strokeWidth: 1, r: 2.5 }}
             name="HRV (natt gj.snitt)"
             connectNulls={false}
           />
@@ -287,7 +293,7 @@ export default function HrvChart({ data, title, subtitle }: HrvChartProps) {
             <Line
               type="monotone"
               dataKey="rolling_avg_7d"
-              stroke="#3b82f6"
+              stroke={LEGACY_SERIES_COLORS.ctl}
               strokeWidth={3}
               dot={false}
               name="7-dagers snitt"

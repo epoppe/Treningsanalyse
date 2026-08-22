@@ -3,13 +3,20 @@
 import {
   LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  chartColor,
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
@@ -202,27 +209,27 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
       </ButtonContainer>
 
       <ResponsiveContainer width="100%" height={300}>
-        <LineChart data={dataWithMovingAverage} margin={{ top: 5, right: 20, left: -10, bottom: 40 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis 
+        <LineChart data={dataWithMovingAverage} margin={{ ...CHART_MARGIN.labeled, left: -10, bottom: 40 }}>
+          <ThemedCartesianGrid vertical={false} />
+          <ThemedXAxis 
             dataKey="date" 
             tick={<CustomAxisTick data={dataWithMovingAverage} />}
             interval={0}
             />
-          <YAxis 
+          <ThemedYAxis 
             yAxisId="left" 
             domain={yAxisDomain()}
             tickFormatter={(value) => value.toFixed(2)}
             />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend />
+          <ThemedTooltip content={<CustomTooltip />} />
+          <ThemedLegend />
           <Line 
             yAxisId="left" 
             type="monotone" 
             dataKey="strideLength" 
             name="Skrittlengde (m)" 
-            stroke="#8884d8" 
-            dot={{ r: 4, fill: '#8884d8' }}
+            stroke={chartColor(0)} 
+            dot={{ r: 4, fill: chartColor(0) }}
             connectNulls
             />
           {showTrend && <Line 
@@ -230,7 +237,7 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
             type="monotone" 
             dataKey="movingAverage" 
             name="Trend (4 punkter)" 
-            stroke="#82ca9d" 
+            stroke={LEGACY_SERIES_COLORS.form} 
             strokeWidth={2}
             dot={false}
             connectNulls
