@@ -3,15 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import {
-  LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
+  LineChart,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  chartColor,
+  yearComparisonColors,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import PlotlyChart from '../../components/PlotlyChart';
 import {
   analyticsApi,
@@ -194,8 +201,6 @@ const DURATION_CURVE_SECONDS = [30, 60, 180, 300, 600, 1200, 2400, 3600] as cons
 const CRITICAL_SPEED_TABLE_DURATIONS = [180, 360, 720, 1200, 1800, 3600] as const;
 const CRITICAL_SPEED_TABLE_YEARS = [2024, 2025, 2026] as const;
 const PACE_AXIS_STEP_SEC = 30;
-const YEAR_LINE_COLORS = ['#c0392b', '#2980b9', '#27ae60', '#8e44ad', '#d35400'];
-
 type ActivityFlag =
   | 'good_aerobic_stability'
   | 'high_drift'
@@ -794,34 +799,33 @@ export default function AnalyticsPage() {
                     <ResponsiveContainer width="100%" height={340}>
                       <LineChart
                         data={speedYearChartData.rows}
-                        margin={{ top: 12, right: 24, left: 4, bottom: 8 }}
+                        margin={CHART_MARGIN.labeled}
                       >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="duration_label" />
-                        <YAxis
+                        <ThemedCartesianGrid />
+                        <ThemedXAxis dataKey="duration_label" />
+                        <ThemedYAxis
                           reversed
                           width={76}
                           domain={speedYearChartData.paceAxis.domain}
                           ticks={speedYearChartData.paceAxis.ticks}
                           allowDecimals={false}
-                          tick={{ fontSize: 12 }}
                           tickFormatter={(value) => formatPaceFromSecPerKm(Number(value))}
                         />
-                        <Tooltip
-                          formatter={(value: number, name: string) => [
+                        <ThemedTooltip
+                          formatter={(value: any, name: any) => [
                             formatPaceFromSecPerKm(Number(value)),
                             String(name).replace('pace_', ''),
                           ]}
                           labelFormatter={(label) => `Varighet: ${label}`}
                         />
-                        <Legend />
+                        <ThemedLegend />
                         {speedYearChartData.yearKeys.map((year, index) => (
                           <Line
                             key={year}
                             type="monotone"
                             dataKey={`pace_${year}`}
                             name={String(year)}
-                            stroke={YEAR_LINE_COLORS[index % YEAR_LINE_COLORS.length]}
+                            stroke={yearComparisonColors(speedYearChartData.yearKeys.length)[index]}
                             strokeWidth={2}
                             dot={{ r: 3 }}
                             connectNulls
@@ -860,21 +864,21 @@ export default function AnalyticsPage() {
                   </SmallMeta>
                   <ChartBox>
                     <ResponsiveContainer width="100%" height={320}>
-                      <LineChart data={durationChartData}>
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="duration_label" />
-                        <YAxis
+                      <LineChart data={durationChartData} margin={CHART_MARGIN.labeled}>
+                        <ThemedCartesianGrid />
+                        <ThemedXAxis dataKey="duration_label" />
+                        <ThemedYAxis
                           domain={['auto', 'auto']}
                           tickFormatter={(value) => `${Math.round(Number(value))} W`}
                         />
-                        <Tooltip
-                          formatter={(value: number) => [`${Math.round(value)} W`, 'Power']}
+                        <ThemedTooltip
+                          formatter={(value: any) => [`${Math.round(Number(value))} W`, 'Power']}
                           labelFormatter={(label) => `Varighet: ${label}`}
                         />
                         <Line
                           type="monotone"
                           dataKey="value"
-                          stroke="#3498db"
+                          stroke={chartColor(1)}
                           strokeWidth={2}
                           dot={{ r: 4 }}
                         />
