@@ -284,6 +284,8 @@ export interface AnalysisFilters {
   preset?: string;
   backtrace?: string;
   week?: string;
+  from?: string;
+  to?: string;
 }
 
 export interface WeekExplorerPayload {
@@ -293,6 +295,7 @@ export interface WeekExplorerPayload {
     total_duration?: number | null;
     total_distance?: number | null;
     activity_count?: number | null;
+    avg_heart_rate?: number | null;
   } | null;
   sessions: Array<{
     activity_id?: string;
@@ -302,7 +305,12 @@ export interface WeekExplorerPayload {
     distance_m?: number;
     duration_s?: number;
   }>;
-  compare_links?: { previous_week?: string };
+  compare_links?: {
+    previous_week?: string;
+    following_week?: string;
+    following_4_weeks_start?: string;
+    following_4_weeks_end?: string;
+  };
 }
 
 export interface HighlightsPayload {

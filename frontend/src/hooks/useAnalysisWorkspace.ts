@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { analysisApi } from "@/analysis/analysisApi";
+import { analysisApi, type AnalysisRangeOpts } from "@/analysis/analysisApi";
 
 export function useAnalysisCatalog() {
   return useQuery({
@@ -12,78 +12,97 @@ export function useAnalysisCatalog() {
   });
 }
 
-export function useDevelopment(period: string, multiHorizon = true) {
+export function useDevelopment(
+  period: string,
+  multiHorizon = true,
+  range?: AnalysisRangeOpts,
+) {
   return useQuery({
-    queryKey: ["analysis", "development", period, multiHorizon],
-    queryFn: () => analysisApi.development(period, multiHorizon),
+    queryKey: ["analysis", "development", period, multiHorizon, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.development(period, multiHorizon, range),
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useTimeseries(period: string, metrics: string[]) {
+export function useTimeseries(period: string, metrics: string[], range?: AnalysisRangeOpts) {
   return useQuery({
-    queryKey: ["analysis", "timeseries", period, metrics.join(",")],
-    queryFn: () => analysisApi.timeseries(period, metrics),
+    queryKey: ["analysis", "timeseries", period, metrics.join(","), range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.timeseries(period, metrics, range),
     enabled: metrics.length > 0,
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useRelationships(period: string) {
+export function useRelationships(period: string, range?: AnalysisRangeOpts) {
   return useQuery({
-    queryKey: ["analysis", "relationships", period],
-    queryFn: () => analysisApi.relationships(period),
+    queryKey: ["analysis", "relationships", period, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.relationships(period, range),
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useRelationshipMatrix(period: string, advanced = false, enabled = true) {
+export function useRelationshipMatrix(
+  period: string,
+  advanced = false,
+  enabled = true,
+  range?: AnalysisRangeOpts,
+) {
   return useQuery({
-    queryKey: ["analysis", "relationship-matrix", period, advanced],
-    queryFn: () => analysisApi.relationshipMatrix(period, advanced),
+    queryKey: ["analysis", "relationship-matrix", period, advanced, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.relationshipMatrix(period, advanced, range),
     enabled,
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useTrainingResponse(period: string, outcome: string, enabled = true) {
+export function useTrainingResponse(
+  period: string,
+  outcome: string,
+  enabled = true,
+  range?: AnalysisRangeOpts,
+) {
   return useQuery({
-    queryKey: ["analysis", "training-response", period, outcome],
-    queryFn: () => analysisApi.trainingResponse(period, outcome),
+    queryKey: ["analysis", "training-response", period, outcome, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.trainingResponse(period, outcome, range),
     enabled: enabled && Boolean(outcome),
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useIntensityDistribution(period: string, enabled = true) {
+export function useIntensityDistribution(period: string, enabled = true, range?: AnalysisRangeOpts) {
   return useQuery({
-    queryKey: ["analysis", "intensity-distribution", period],
-    queryFn: () => analysisApi.intensityDistribution(period),
+    queryKey: ["analysis", "intensity-distribution", period, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.intensityDistribution(period, range),
     enabled,
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useDurationCurveHistory(period: string, enabled = true) {
+export function useDurationCurveHistory(period: string, enabled = true, range?: AnalysisRangeOpts) {
   return useQuery({
-    queryKey: ["analysis", "duration-curve", period],
-    queryFn: () => analysisApi.durationCurveHistory(period),
+    queryKey: ["analysis", "duration-curve", period, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.durationCurveHistory(period, range),
     enabled,
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useBestPeriodBacktrace(period: string, metric: string, enabled = true) {
+export function useBestPeriodBacktrace(
+  period: string,
+  metric: string,
+  enabled = true,
+  range?: AnalysisRangeOpts,
+) {
   return useQuery({
-    queryKey: ["analysis", "best-period", period, metric],
-    queryFn: () => analysisApi.bestPeriodBacktrace(period, metric),
+    queryKey: ["analysis", "best-period", period, metric, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.bestPeriodBacktrace(period, metric, range),
     enabled: enabled && Boolean(metric),
     staleTime: 60_000,
     retry: 1,
@@ -99,10 +118,10 @@ export function useHistory(period: string) {
   });
 }
 
-export function usePeriodComparison(period: string, enabled = true) {
+export function usePeriodComparison(period: string, enabled = true, range?: AnalysisRangeOpts) {
   return useQuery({
-    queryKey: ["analysis", "period-comparison", period],
-    queryFn: () => analysisApi.periodComparison(period),
+    queryKey: ["analysis", "period-comparison", period, range?.startDate, range?.endDate],
+    queryFn: () => analysisApi.periodComparison(period, range),
     enabled,
     staleTime: 60_000,
     retry: 1,

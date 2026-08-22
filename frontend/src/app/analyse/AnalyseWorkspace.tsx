@@ -22,6 +22,7 @@ import { YoYComparisonPanel } from "@/components/analysis/YoYComparisonPanel";
 import { WeekExplorer } from "@/components/analysis/WeekExplorer";
 import { MetricPicker } from "@/components/analysis/MetricPicker";
 import { PeriodComparison } from "@/components/analysis/PeriodComparison";
+import { PeriodInspector } from "@/components/analysis/PeriodInspector";
 import { RelationshipCard } from "@/components/analysis/RelationshipCard";
 import { RelationshipMatrixView } from "@/components/analysis/RelationshipMatrixView";
 import { TrainingResponsePanel } from "@/components/analysis/TrainingResponsePanel";
@@ -48,6 +49,7 @@ import {
   useTrainingResponse,
   useWeekExplorer,
 } from "@/hooks/useAnalysisWorkspace";
+import { normalizeRange, rangeToPeriod } from "@/lib/analysisRange";
 import type { AnalysisPreset } from "@/types/analysis";
 
 const DEFAULT_METRICS = ["fitness.ctl", "cardio.hrv_7d", "fitness.ef_30d", "running.durability_score"];
@@ -55,18 +57,25 @@ const DEFAULT_METRICS = ["fitness.ctl", "cardio.hrv_7d", "fitness.ef_30d", "runn
 function UtviklingPanel() {
   const { state, setParams } = useAnalysisUrlState();
   const catalog = useAnalysisCatalog();
-  const development = useDevelopment(state.period);
+  const brushRange = normalizeRange(state.from, state.to);
+  const selectedRange = brushRange
+    ? { startDate: brushRange.from, endDate: brushRange.to }
+    : undefined;
+  const panelPeriod = brushRange
+    ? rangeToPeriod(brushRange.from, brushRange.to)
+    : state.period;
+
+  // Wide canvas for brush — keep chip period so user can select within loaded window.
   const timeseries = useTimeseries(state.period, state.metrics);
-  // Stagger heavy secondary fetches until primary development settles — reduces
-  // SQLite contention when many analysis endpoints hit the DB at once.
+  const development = useDevelopment(panelPeriod, !brushRange, selectedRange);
   const secondaryReady = !development.isLoading && !development.isFetching;
-  const comparison = usePeriodComparison(state.period, secondaryReady);
-  const intensity = useIntensityDistribution(state.period, secondaryReady);
-  const durationCurve = useDurationCurveHistory(state.period, secondaryReady);
+  const comparison = usePeriodComparison(panelPeriod, secondaryReady, selectedRange);
+  const intensity = useIntensityDistribution(panelPeriod, secondaryReady, selectedRange);
+  const durationCurve = useDurationCurveHistory(panelPeriod, secondaryReady, selectedRange);
   const backtrace = useBestPeriodBacktrace(
     state.period === "28d" ? "2y" : state.period,
     state.backtrace,
-    secondaryReady
+    secondaryReady,
   );
 
   const toggleMetric = (metric: string) => {
@@ -88,6 +97,7 @@ function UtviklingPanel() {
         <h2 className="text-sm font-semibold text-slate-900">Utviklingssammendrag</h2>
         <p className="mt-0.5 text-xs text-slate-500">
           Stimulus → restitusjon → adaptasjon — hvordan utvikler nøkkelområder seg?
+          {brushRange ? ` Filtrert til ${brushRange.from} – ${brushRange.to}.` : ""}
         </p>
         {development.isLoading ? (
           <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3 lg:grid-cols-4">
@@ -133,8 +143,40 @@ function UtviklingPanel() {
           onSelectDate={(isoDate) =>
             setParams({ tab: "historikk", week: isoDate.slice(0, 10) })
           }
+          rangeFrom={brushRange?.from}
+          rangeTo={brushRange?.to}
+          onRangeSelect={(from, to) => setParams({ from, to })}
+          onClearRange={() => setParams({ from: null, to: null })}
         />
       </div>
+
+      {brushRange ? (
+        <PeriodInspector
+          from={brushRange.from}
+          to={brushRange.to}
+          development={development.data}
+          comparison={comparison.data}
+          isLoading={development.isLoading || comparison.isLoading}
+          onViewWeeks={() =>
+            setParams({
+              tab: "historikk",
+              week: brushRange.from,
+              from: brushRange.from,
+              to: brushRange.to,
+            })
+          }
+          onViewActivities={() => {
+            window.location.assign(
+              `/aktiviteter?from=${encodeURIComponent(brushRange.from)}&to=${encodeURIComponent(brushRange.to)}`,
+            );
+          }}
+          onComparePrevious={() => {
+            const el = document.getElementById("period-comparison");
+            el?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        />
+      ) : null}
+
       {timeseries.isError ? (
         <AnalysisError title="Tidsserie feilet" onRetry={() => timeseries.refetch()} />
       ) : null}
@@ -147,23 +189,28 @@ function UtviklingPanel() {
         onMetricChange={(m) => setParams({ backtrace: m })}
       />
 
-      {comparison.isLoading ? <AnalysisSkeleton className="h-40" /> : null}
-      {comparison.data ? (
-        <PeriodComparison rows={comparison.data.rows} disclaimer={comparison.data.disclaimer} />
-      ) : null}
+      <div id="period-comparison">
+        {comparison.isLoading ? <AnalysisSkeleton className="h-40" /> : null}
+        {comparison.data ? (
+          <PeriodComparison rows={comparison.data.rows} disclaimer={comparison.data.disclaimer} />
+        ) : null}
+      </div>
 
       <p className="text-xs text-slate-500">
-        Drill-down:{" "}
-        <Link href="/vo2max" className="underline">
-          VO₂max
+        Avansert drill-down:{" "}
+        <Link
+          href="/analyse?tab=utvikling&metrics=running.critical_speed,fitness.ef_30d"
+          className="underline"
+        >
+          terskel / EF
         </Link>
         {" · "}
-        <Link href="/training-stress" className="underline">
-          Belastning
+        <Link href="/analyse?tab=utvikling&metrics=fitness.ctl,fitness.atl" className="underline">
+          belastning
         </Link>
         {" · "}
         <Link href="/analytics" className="underline">
-          Løpeanalyse
+          løpeanalyse (legacy)
         </Link>
       </p>
     </div>
@@ -173,11 +220,18 @@ function UtviklingPanel() {
 function SammenhengerPanel() {
   const { state, setParams } = useAnalysisUrlState();
   const catalog = useAnalysisCatalog();
-  const query = useRelationships(state.period);
+  const brushRange = normalizeRange(state.from, state.to);
+  const selectedRange = brushRange
+    ? { startDate: brushRange.from, endDate: brushRange.to }
+    : undefined;
+  const panelPeriod = brushRange
+    ? rangeToPeriod(brushRange.from, brushRange.to)
+    : state.period;
+  const query = useRelationships(panelPeriod, selectedRange);
   const [advanced, setAdvanced] = useState(false);
   const secondaryReady = !query.isLoading && !query.isFetching;
-  const matrix = useRelationshipMatrix(state.period, advanced, secondaryReady);
-  const training = useTrainingResponse(state.period, state.outcome, secondaryReady);
+  const matrix = useRelationshipMatrix(panelPeriod, advanced, secondaryReady, selectedRange);
+  const training = useTrainingResponse(panelPeriod, state.outcome, secondaryReady, selectedRange);
 
   const presets = catalog.data?.presets || [];
 
@@ -260,7 +314,7 @@ function SammenhengerPanel() {
           </h2>
           <div className="grid gap-2 md:grid-cols-2">
             {group.cards.map((card) => (
-              <RelationshipCard key={card.id} card={card} period={state.period} />
+              <RelationshipCard key={card.id} card={card} period={panelPeriod} />
             ))}
           </div>
         </section>
@@ -298,7 +352,7 @@ function HistorikkPanel() {
       <header>
         <h2 className="text-sm font-semibold text-slate-900">Treningshistorikk</h2>
         <p className="text-xs text-slate-500">
-          År → måned → uke. Klikk en dato i Utvikling-grafen for ukeutforsker.
+          År → måned → uke. Bruk børsten i Utvikling eller klikk en dato for ukeutforsker.
         </p>
       </header>
       {state.week ? (
@@ -306,6 +360,9 @@ function HistorikkPanel() {
           data={weekQuery.data}
           isLoading={weekQuery.isLoading}
           onPreviousWeek={(weekStart) => setParams({ week: weekStart })}
+          onFollowingRange={(from, to) =>
+            setParams({ tab: "utvikling", from, to, week: from })
+          }
         />
       ) : null}
 
@@ -315,9 +372,9 @@ function HistorikkPanel() {
 
       <HistoryTimeline data={query.data} />
       <p className="text-xs text-slate-500">
-        Full volum/YoY-graf:{" "}
+        Full råvolumgraf (legacy):{" "}
         <Link href="/statistikk" className="underline">
-          /statistikk (legacy)
+          /statistikk
         </Link>
       </p>
     </div>

@@ -18,6 +18,18 @@ import type {
   PerformanceRecoveryPayload,
 } from "@/types/analysis";
 
+export type AnalysisRangeOpts = {
+  endDate?: string;
+  startDate?: string;
+};
+
+function withRange(base: string, opts?: AnalysisRangeOpts): string {
+  const url = new URL(base, "http://local");
+  if (opts?.endDate) url.searchParams.set("end_date", opts.endDate);
+  if (opts?.startDate) url.searchParams.set("start_date", opts.startDate);
+  return `${url.pathname}${url.search}`;
+}
+
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
   if (!res.ok) {
@@ -29,43 +41,64 @@ async function getJson<T>(url: string): Promise<T> {
 
 export const analysisApi = {
   catalog: () => getJson<AnalysisCatalogPayload>(`/api/analysis/catalog`),
-  development: (period: string, multiHorizon = false) =>
+  development: (period: string, multiHorizon = false, range?: AnalysisRangeOpts) =>
     getJson<DevelopmentPayload>(
-      `/api/analysis/development?period=${encodeURIComponent(period)}&multi_horizon=${multiHorizon ? "true" : "false"}`,
+      withRange(
+        `/api/analysis/development?period=${encodeURIComponent(period)}&multi_horizon=${multiHorizon ? "true" : "false"}`,
+        range,
+      ),
     ),
-  timeseries: (period: string, metrics: string[]) =>
+  timeseries: (period: string, metrics: string[], range?: AnalysisRangeOpts) =>
     getJson<TimeseriesPayload>(
-      `/api/analysis/timeseries?period=${encodeURIComponent(period)}&metrics=${encodeURIComponent(metrics.join(","))}`
+      withRange(
+        `/api/analysis/timeseries?period=${encodeURIComponent(period)}&metrics=${encodeURIComponent(metrics.join(","))}`,
+        range,
+      ),
     ),
-  relationships: (period: string) =>
+  relationships: (period: string, range?: AnalysisRangeOpts) =>
     getJson<RelationshipsPayload>(
-      `/api/analysis/relationships?period=${encodeURIComponent(period)}`
+      withRange(`/api/analysis/relationships?period=${encodeURIComponent(period)}`, range),
     ),
-  relationshipMatrix: (period: string, advanced = false) =>
+  relationshipMatrix: (period: string, advanced = false, range?: AnalysisRangeOpts) =>
     getJson<RelationshipMatrixPayload>(
-      `/api/analysis/relationship-matrix?period=${encodeURIComponent(period)}&advanced=${advanced ? "true" : "false"}`
+      withRange(
+        `/api/analysis/relationship-matrix?period=${encodeURIComponent(period)}&advanced=${advanced ? "true" : "false"}`,
+        range,
+      ),
     ),
-  trainingResponse: (period: string, outcome: string) =>
+  trainingResponse: (period: string, outcome: string, range?: AnalysisRangeOpts) =>
     getJson<TrainingResponsePayload>(
-      `/api/analysis/training-response?period=${encodeURIComponent(period)}&outcome=${encodeURIComponent(outcome)}`
+      withRange(
+        `/api/analysis/training-response?period=${encodeURIComponent(period)}&outcome=${encodeURIComponent(outcome)}`,
+        range,
+      ),
     ),
-  intensityDistribution: (period: string) =>
+  intensityDistribution: (period: string, range?: AnalysisRangeOpts) =>
     getJson<IntensityDistributionPayload>(
-      `/api/analysis/intensity-distribution?period=${encodeURIComponent(period)}`
+      withRange(
+        `/api/analysis/intensity-distribution?period=${encodeURIComponent(period)}`,
+        range,
+      ),
     ),
-  durationCurveHistory: (period: string) =>
+  durationCurveHistory: (period: string, range?: AnalysisRangeOpts) =>
     getJson<DurationCurvePayload>(
-      `/api/analysis/duration-curve-history?period=${encodeURIComponent(period)}`
+      withRange(
+        `/api/analysis/duration-curve-history?period=${encodeURIComponent(period)}`,
+        range,
+      ),
     ),
-  bestPeriodBacktrace: (period: string, metric: string) =>
+  bestPeriodBacktrace: (period: string, metric: string, range?: AnalysisRangeOpts) =>
     getJson<BestPeriodBacktracePayload>(
-      `/api/analysis/best-period-backtrace?period=${encodeURIComponent(period)}&metric=${encodeURIComponent(metric)}`
+      withRange(
+        `/api/analysis/best-period-backtrace?period=${encodeURIComponent(period)}&metric=${encodeURIComponent(metric)}`,
+        range,
+      ),
     ),
   history: (period: string) =>
     getJson<HistoryPayload>(`/api/analysis/history?period=${encodeURIComponent(period)}`),
-  periodComparison: (period: string) =>
+  periodComparison: (period: string, range?: AnalysisRangeOpts) =>
     getJson<PeriodComparisonPayload>(
-      `/api/analysis/period-comparison?period=${encodeURIComponent(period)}`
+      withRange(`/api/analysis/period-comparison?period=${encodeURIComponent(period)}`, range),
     ),
   week: (weekDate: string) =>
     getJson<WeekExplorerPayload>(`/api/analysis/week/${encodeURIComponent(weekDate)}`),

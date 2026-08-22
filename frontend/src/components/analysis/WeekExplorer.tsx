@@ -18,13 +18,17 @@ export function WeekExplorer({
   data,
   isLoading,
   onPreviousWeek,
+  onFollowingRange,
 }: {
   data?: WeekExplorerPayload;
   isLoading?: boolean;
   onPreviousWeek?: (weekStart: string) => void;
+  onFollowingRange?: (from: string, to: string) => void;
 }) {
   if (isLoading) return <AnalysisSkeleton className="h-40" />;
   if (!data) return null;
+
+  const links = data.compare_links || {};
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3">
@@ -35,25 +39,61 @@ export function WeekExplorer({
             {data.week_start} – {data.week_end}
           </p>
         </div>
-        {data.compare_links?.previous_week && onPreviousWeek ? (
-          <button
-            type="button"
-            onClick={() => onPreviousWeek(data.compare_links!.previous_week!)}
-            className="text-xs font-medium text-slate-700 underline"
-          >
-            Forrige uke
-          </button>
-        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {links.previous_week && onPreviousWeek ? (
+            <button
+              type="button"
+              onClick={() => onPreviousWeek(links.previous_week!)}
+              className="text-xs font-medium text-slate-700 underline"
+            >
+              COMPARE PREVIOUS WEEK
+            </button>
+          ) : null}
+          {links.following_4_weeks_start &&
+          links.following_4_weeks_end &&
+          onFollowingRange ? (
+            <button
+              type="button"
+              onClick={() =>
+                onFollowingRange(links.following_4_weeks_start!, links.following_4_weeks_end!)
+              }
+              className="text-xs font-medium text-slate-700 underline"
+            >
+              SHOW FOLLOWING 4 WEEKS
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {data.summary ? (
-        <p className="mt-2 text-xs text-slate-600">
-          {data.summary.activity_count ?? data.sessions.length} økter ·{" "}
-          {fmtKm(data.summary.total_distance)} ·{" "}
-          {data.summary.total_duration != null
-            ? fmtMin(data.summary.total_duration)
-            : "—"}
-        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5 text-xs">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Training
+            </p>
+            <p className="mt-1 text-slate-800">
+              {data.summary.activity_count ?? data.sessions.length} økter ·{" "}
+              {fmtKm(data.summary.total_distance)} ·{" "}
+              {data.summary.total_duration != null
+                ? fmtMin(data.summary.total_duration)
+                : "—"}
+            </p>
+          </div>
+          <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5 text-xs">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              State
+            </p>
+            <p className="mt-1 text-slate-800">CTL/ATL/TSB: se belastningsgraf</p>
+          </div>
+          <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5 text-xs">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Recovery / outcome
+            </p>
+            <p className="mt-1 text-slate-800">
+              Snittpuls {data.summary.avg_heart_rate != null ? Math.round(data.summary.avg_heart_rate) : "—"} · EF i utvikling
+            </p>
+          </div>
+        </div>
       ) : null}
 
       <ul className="mt-3 space-y-1">

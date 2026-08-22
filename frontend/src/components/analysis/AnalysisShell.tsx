@@ -10,6 +10,7 @@ import type {
   AnalysisTab,
 } from "@/types/analysis";
 import { cn } from "@/lib/utils";
+import { isValidIsoDate } from "@/lib/analysisRange";
 
 const PERIODS: AnalysisPeriod[] = ["28d", "90d", "6m", "1y", "2y", "all"];
 const SPORTS: AnalysisSport[] = ["running", "cycling", "all"];
@@ -57,6 +58,8 @@ export function useAnalysisUrlState() {
       preset: searchParams.get("preset") || "",
       backtrace: searchParams.get("backtrace") || "fitness.ef_30d",
       week: searchParams.get("week") || "",
+      from: isValidIsoDate(searchParams.get("from")) ? searchParams.get("from")! : "",
+      to: isValidIsoDate(searchParams.get("to")) ? searchParams.get("to")! : "",
     }),
     [searchParams]
   );
@@ -133,7 +136,7 @@ export function AnalysisFiltersBar() {
         ))}
       </div>
       <p className="text-[11px] text-slate-500">
-        Filter lagres i URL. Sport/kontekst brukes mer i senere drill-downs — trender følger periode nå.{" "}
+        Filter lagres i URL. Dra i tidslinjebørsten for å kryssfiltrere paneler uten reload.{" "}
         <Link href="/sammenhenger" className="underline">
           Avansert scatter
         </Link>

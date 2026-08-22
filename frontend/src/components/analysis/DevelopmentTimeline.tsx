@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo, useRef } from "react";
 import {
+  Brush,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -13,6 +15,7 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
+import { formatRangeLabel } from "@/lib/analysisRange";
 
 const COLORS = [...ANALYSIS_CHART_COLORS];
 
@@ -26,7 +29,12 @@ function mergeSeries(payload: TimeseriesPayload) {
       byDate.set(p.date, row);
     }
   });
-  return { keys, rows: Array.from(byDate.values()).sort((a, b) => String(a.date).localeCompare(String(b.date))) };
+  return {
+    keys,
+    rows: Array.from(byDate.values()).sort((a, b) =>
+      String(a.date).localeCompare(String(b.date)),
+    ),
+  };
 }
 
 export function DevelopmentTimeline({
@@ -35,20 +43,60 @@ export function DevelopmentTimeline({
   onToggleMetric,
   available,
   onSelectDate,
+  rangeFrom,
+  rangeTo,
+  onRangeSelect,
+  onClearRange,
 }: {
   data?: TimeseriesPayload;
   selected: string[];
   onToggleMetric: (metric: string) => void;
   available: string[];
   onSelectDate?: (isoDate: string) => void;
+  rangeFrom?: string;
+  rangeTo?: string;
+  onRangeSelect?: (from: string, to: string) => void;
+  onClearRange?: () => void;
 }) {
   const { keys, rows } = data ? mergeSeries(data) : { keys: selected, rows: [] };
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const brushIndexes = useMemo(() => {
+    if (!rangeFrom || !rangeTo || rows.length === 0) return undefined;
+    const startIndex = rows.findIndex((r) => String(r.date) >= rangeFrom);
+    const endIndex = [...rows].reverse().findIndex((r) => String(r.date) <= rangeTo);
+    if (startIndex < 0 || endIndex < 0) return undefined;
+    return {
+      startIndex,
+      endIndex: rows.length - 1 - endIndex,
+    };
+  }, [rangeFrom, rangeTo, rows]);
+
+  const hasSelection = Boolean(rangeFrom && rangeTo);
 
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-slate-900">Utvikling over tid</h2>
-        <p className="text-[11px] text-slate-500">Inntil 4 metrikker · klikk i grafen for ukeutforsker</p>
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Utvikling over tid</h2>
+          <p className="text-[11px] text-slate-500">
+            Inntil 4 metrikker · dra i børsten for å filtrere resten av analysen
+          </p>
+        </div>
+        {hasSelection ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700">
+              {formatRangeLabel(rangeFrom!, rangeTo!)}
+            </span>
+            <button
+              type="button"
+              onClick={onClearRange}
+              className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              CLEAR SELECTION
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
         {available.map((m) => {
@@ -69,7 +117,7 @@ export function DevelopmentTimeline({
           );
         })}
       </div>
-      <div className="mt-3 h-56 w-full">
+      <div className="mt-3 h-64 w-full">
         {rows.length === 0 ? (
           <p className="flex h-full items-center justify-center text-xs text-slate-500">
             Ingen tidsseriedata for valgt periode.
@@ -78,7 +126,7 @@ export function DevelopmentTimeline({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={rows}
-              margin={CHART_MARGIN.compact}
+              margin={{ ...CHART_MARGIN.compact, bottom: 8 }}
               onClick={(state) => {
                 const label = state?.activeLabel;
                 if (label && onSelectDate) onSelectDate(String(label));
@@ -99,6 +147,27 @@ export function DevelopmentTimeline({
                   connectNulls
                 />
               ))}
+              <Brush
+                dataKey="date"
+                height={22}
+                stroke="#334155"
+                travellerWidth={8}
+                startIndex={brushIndexes?.startIndex}
+                endIndex={brushIndexes?.endIndex}
+                onChange={(range) => {
+                  if (!onRangeSelect || !range) return;
+                  const startIndex = range.startIndex;
+                  const endIndex = range.endIndex;
+                  if (startIndex == null || endIndex == null) return;
+                  const from = rows[startIndex]?.date;
+                  const to = rows[endIndex]?.date;
+                  if (!from || !to) return;
+                  if (debounceRef.current) clearTimeout(debounceRef.current);
+                  debounceRef.current = setTimeout(() => {
+                    onRangeSelect(String(from), String(to));
+                  }, 250);
+                }}
+              />
             </LineChart>
           </ResponsiveContainer>
         )}
