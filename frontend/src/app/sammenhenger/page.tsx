@@ -37,8 +37,6 @@ const Grid = styled.div`
 const StatValue = styled.div`font-size:1.6rem; font-weight:700; color:#3498db;`;
 const Small = styled.div`color:#666; font-size:0.95rem;`;
 const ErrorBox = styled.div`background:#fff3f3; color:#a33; padding:1rem; border-radius:8px; margin-bottom:1rem;`;
-const ChartCard = styled(Card)`min-height:440px;`;
-
 const AVAILABILITY_LABELS: Record<string, string> = {
   supported: 'Tilgjengelig',
   computed: 'Beregnet',
