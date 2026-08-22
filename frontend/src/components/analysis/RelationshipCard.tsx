@@ -1,9 +1,19 @@
 "use client";
 
+import { useState } from "react";
 import type { RelationshipCardData } from "@/types/analysis";
 import { EvidenceBadge } from "./ui";
+import { RelationshipDetailPanel } from "./RelationshipDetailPanel";
 
-export function RelationshipCard({ card }: { card: RelationshipCardData }) {
+export function RelationshipCard({
+  card,
+  period = "1y",
+}: {
+  card: RelationshipCardData;
+  period?: string;
+}) {
+  const [open, setOpen] = useState(false);
+
   return (
     <article className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
       <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{card.section}</p>
@@ -36,6 +46,14 @@ export function RelationshipCard({ card }: { card: RelationshipCardData }) {
         <span className="text-[10px] text-slate-500">n={card.sample_count}</span>
       </div>
       <p className="mt-2 text-xs leading-snug text-slate-600">{card.wording}</p>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-2 text-xs font-medium text-slate-900 underline"
+      >
+        {open ? "Skjul lag-profil" : "Vis lag-profil"}
+      </button>
+      {open ? <RelationshipDetailPanel card={card} period={period} /> : null}
     </article>
   );
 }

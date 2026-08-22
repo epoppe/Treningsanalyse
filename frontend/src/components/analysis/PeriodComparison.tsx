@@ -1,6 +1,7 @@
 "use client";
 
 import type { PeriodComparisonRow } from "@/types/analysis";
+import { PeriodExplanationPanel } from "./PeriodExplanationPanel";
 import { EvidenceBadge } from "./ui";
 
 export function PeriodComparison({
@@ -15,6 +16,7 @@ export function PeriodComparison({
     <section className="rounded-lg border border-slate-200 bg-white p-3">
       <h2 className="text-sm font-semibold text-slate-900">Periode-sammenligning</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">Siste vindu vs forrige like lange vindu</p>
+      <PeriodExplanationPanel rows={rows} />
       <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[480px] text-left text-xs">
           <thead className="border-b border-slate-200 text-slate-500">

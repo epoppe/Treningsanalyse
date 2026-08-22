@@ -71,6 +71,52 @@ class AnalysisWorkspaceApiTests(unittest.TestCase):
         self.assertEqual(fitness["direction"], "improving")
         self.assertEqual(fitness["evidence"], "supported")
 
+    def test_development_multi_horizon(self):
+        from app.main import app
+
+        self._override(app)
+        trends = {
+            "metrics": {
+                "ctl": {
+                    "28d": {"direction": "stable", "relative_change_pct": 1.0, "sample_count": 10, "confidence": 0.5},
+                    "90d": {"direction": "improving", "relative_change_pct": 4.0, "sample_count": 20, "confidence": 0.7},
+                    "365d": {"direction": "improving", "relative_change_pct": 8.0, "sample_count": 40, "confidence": 0.75},
+                }
+            }
+        }
+        with patch("app.routers.analysis_workspace.TrendAnalysisService") as trend:
+            trend.return_value.analyze_all.return_value = trends
+            client = TestClient(app)
+            res = client.get("/api/analysis/development", params={"period": "90d", "multi_horizon": "true"})
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        fitness = next(d for d in body["domains"] if d["domain"] == "fitness")
+        self.assertIn("horizons", fitness)
+        self.assertIn("28d", fitness["horizons"])
+
+    def test_relationship_lag_profile(self):
+        from app.main import app
+
+        self._override(app)
+        with patch("app.routers.analysis_workspace.TrainingResponseService") as tr_cls:
+            tr = tr_cls.return_value
+            tr._correlate.side_effect = [
+                {"lag_days": 7, "effect_size": 0.2, "relationship": "positive", "sample_count": 12, "confidence": 0.5},
+                None,
+                {"lag_days": 21, "effect_size": 0.45, "relationship": "positive", "sample_count": 14, "confidence": 0.6},
+                None,
+                None,
+            ]
+            client = TestClient(app)
+            res = client.get(
+                "/api/analysis/relationship-lag",
+                params={"stimulus": "threshold_volume", "outcome": "threshold_pace", "period": "1y"},
+            )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(len(body["profile"]), 5)
+        self.assertEqual(body["best_lag_days"], 21)
+
     def test_timeseries_rejects_unknown_metric(self):
         from app.main import app
 

@@ -118,10 +118,61 @@ def _direction_no(direction: str, higher_is_better: bool = True) -> str:
     return "Usikker"
 
 
+def _domain_from_block(spec: Dict[str, Any], block: Optional[Dict[str, Any]], window: str) -> Dict[str, Any]:
+    if not block:
+        return {
+            **spec,
+            "direction": "uncertain",
+            "direction_label": "Usikker",
+            "relative_change_pct": None,
+            "current": None,
+            "sample_count": 0,
+            "confidence": 0.0,
+            "evidence": "insufficient",
+            "change_point_detected": False,
+            "window": window,
+        }
+    hib = bool(block.get("higher_is_better", True))
+    return {
+        **spec,
+        "direction": block.get("direction"),
+        "direction_label": _direction_no(str(block.get("direction")), hib),
+        "relative_change_pct": block.get("relative_change_pct"),
+        "absolute_change": block.get("absolute_change"),
+        "current": block.get("current"),
+        "baseline": block.get("baseline"),
+        "sample_count": block.get("sample_count") or 0,
+        "confidence": block.get("confidence"),
+        "evidence": _evidence_label(
+            block.get("confidence"), int(block.get("sample_count") or 0)
+        ),
+        "change_point_detected": bool(block.get("change_point_detected")),
+        "window": window,
+        "start_date": block.get("start_date"),
+        "end_date": block.get("end_date"),
+    }
+
+
+def _period_explanation_nb(metric: str, diff: Optional[float], evidence: str) -> str:
+    label = metric.replace("_", " ")
+    if diff is None:
+        return f"{label}: utilstrekkelig data for sammenligning."
+    if evidence == "insufficient":
+        return f"{label}: for få datapunkter til sikker vurdering."
+    if abs(diff) < 0.05:
+        return f"{label}: omtrent uendret vs. forrige periode."
+    direction = "høyere" if diff > 0 else "lavere"
+    return f"{label} er {direction} enn forrige periode (Δ {diff:+.1f})."
+
+
 @router.get("/development")
 def get_development(
     period: str = Query("90d", description="28d|90d|6m|1y|2y|all"),
     end_date: Optional[date] = Query(None),
+    multi_horizon: bool = Query(
+        False,
+        description="Include 28d/90d/365d trend blocks per domain",
+    ),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
@@ -131,59 +182,31 @@ def get_development(
     window = _window_key(min(days, 365))
     window_days = int(window.replace("d", ""))
     try:
+        windows = (28, 90, 365) if multi_horizon else (window_days,)
         trends = TrendAnalysisService(db, storage).analyze_all(
             end_date=end,
-            windows=(window_days,),
+            windows=windows,
         )
         metrics = trends.get("metrics") or {}
         domains: List[Dict[str, Any]] = []
         for spec in DOMAIN_METRICS:
             metric_trends = metrics.get(spec["metric"]) or {}
-            # Prefer requested window; fall back to largest available.
             block = metric_trends.get(window) or metric_trends.get("90d") or metric_trends.get("28d")
             if not block and metric_trends:
                 block = next(iter(metric_trends.values()))
-            if not block:
-                domains.append(
-                    {
-                        **spec,
-                        "direction": "uncertain",
-                        "direction_label": "Usikker",
-                        "relative_change_pct": None,
-                        "current": None,
-                        "sample_count": 0,
-                        "confidence": 0.0,
-                        "evidence": "insufficient",
-                        "change_point_detected": False,
-                    }
-                )
-                continue
-            hib = bool(block.get("higher_is_better", True))
-            domains.append(
-                {
-                    **spec,
-                    "direction": block.get("direction"),
-                    "direction_label": _direction_no(str(block.get("direction")), hib),
-                    "relative_change_pct": block.get("relative_change_pct"),
-                    "absolute_change": block.get("absolute_change"),
-                    "current": block.get("current"),
-                    "baseline": block.get("baseline"),
-                    "sample_count": block.get("sample_count") or 0,
-                    "confidence": block.get("confidence"),
-                    "evidence": _evidence_label(
-                        block.get("confidence"), int(block.get("sample_count") or 0)
-                    ),
-                    "change_point_detected": bool(block.get("change_point_detected")),
-                    "window": window,
-                    "start_date": block.get("start_date"),
-                    "end_date": block.get("end_date"),
+            domain = _domain_from_block(spec, block, window)
+            if multi_horizon:
+                domain["horizons"] = {
+                    key: _domain_from_block(spec, metric_trends.get(key), key)
+                    for key in ("28d", "90d", "365d")
                 }
-            )
+            domains.append(domain)
         return {
             "date": end.isoformat(),
             "period": period,
             "period_days": days,
             "window": window,
+            "multi_horizon": multi_horizon,
             "domains": domains,
             "raw_metrics": metrics,
             "disclaimer": "Trends are observational summaries — not causal claims.",
@@ -677,6 +700,14 @@ def get_period_comparison(
                         min(float(a.get("confidence") or 0), float(b.get("confidence") or 0)),
                         n,
                     ),
+                    "explanation": _period_explanation_nb(
+                        metric,
+                        diff,
+                        _evidence_label(
+                            min(float(a.get("confidence") or 0), float(b.get("confidence") or 0)),
+                            n,
+                        ),
+                    ),
                 }
             )
         return {
@@ -685,6 +716,61 @@ def get_period_comparison(
             "window": window,
             "rows": rows,
             "disclaimer": "Differences are descriptive. Low sample → insufficient evidence.",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/relationship-lag")
+def get_relationship_lag(
+    stimulus: str = Query(..., description="Stimulus key e.g. threshold_volume"),
+    outcome: str = Query(..., description="Outcome key e.g. threshold_pace"),
+    period: str = Query("1y"),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Lag profile for a stimulus→outcome pair — observational only."""
+    end = end_date or date.today()
+    lookback = _period_days(period)
+    start = end - timedelta(days=lookback)
+    try:
+        tr = TrainingResponseService(db, storage)
+        profile: List[Dict[str, Any]] = []
+        for lag in (7, 14, 21, 28, 42):
+            hit = tr._correlate(stimulus, outcome, start, end, lag, family_size=1)  # noqa: SLF001
+            if hit:
+                profile.append(
+                    {
+                        "lag_days": lag,
+                        "effect_size": hit.get("effect_size"),
+                        "relationship": hit.get("relationship"),
+                        "sample_count": hit.get("sample_count"),
+                        "evidence": _evidence_label(
+                            hit.get("confidence"), int(hit.get("sample_count") or 0)
+                        ),
+                    }
+                )
+            else:
+                profile.append(
+                    {
+                        "lag_days": lag,
+                        "effect_size": None,
+                        "relationship": "uncertain",
+                        "sample_count": 0,
+                        "evidence": "insufficient",
+                    }
+                )
+        scored = [p for p in profile if p.get("effect_size") is not None]
+        best = max(scored, key=lambda p: abs(float(p["effect_size"]))) if scored else None
+        return {
+            "date": end.isoformat(),
+            "period": period,
+            "stimulus": stimulus,
+            "outcome": outcome,
+            "profile": profile,
+            "best_lag_days": best.get("lag_days") if best else None,
+            "disclaimer": "Lag profile is observational — not a causal dose recommendation.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

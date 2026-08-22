@@ -31,7 +31,7 @@ export function HistoryTimeline({ data }: { data: HistoryPayload }) {
               {year.months.map((m) => {
                 const key = m.month_start || `${m.year}-${m.month}`;
                 const weekHref = m.month_start
-                  ? `/analyse?tab=historikk&period=90d&week=${m.month_start}`
+                  ? `/analyse?tab=historikk&week=${m.month_start}`
                   : undefined;
                 return (
                   <li
@@ -48,8 +48,8 @@ export function HistoryTimeline({ data }: { data: HistoryPayload }) {
                       </p>
                     </div>
                     {weekHref ? (
-                      <Link href={`/activities`} className="text-[11px] text-sky-700 underline">
-                        Se økter
+                      <Link href={weekHref} className="text-[11px] text-sky-700 underline">
+                        Utforsk uke
                       </Link>
                     ) : null}
                   </li>

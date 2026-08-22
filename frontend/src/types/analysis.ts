@@ -79,6 +79,7 @@ export interface DevelopmentDomain {
   evidence: EvidenceBand | string;
   change_point_detected?: boolean;
   window?: string;
+  horizons?: Record<string, DevelopmentDomain>;
 }
 
 export interface DevelopmentPayload {
@@ -263,6 +264,7 @@ export interface PeriodComparisonRow {
   period_b: { label: string; end: string; value?: number | null; sample_count: number };
   difference?: number | null;
   evidence: string;
+  explanation?: string;
 }
 
 export interface PeriodComparisonPayload {
@@ -280,4 +282,55 @@ export interface AnalysisFilters {
   metrics: string[];
   outcome?: string;
   preset?: string;
+  backtrace?: string;
+  week?: string;
+}
+
+export interface WeekExplorerPayload {
+  week_start: string;
+  week_end: string;
+  summary?: {
+    total_duration?: number | null;
+    total_distance?: number | null;
+    activity_count?: number | null;
+  } | null;
+  sessions: Array<{
+    activity_id?: string;
+    name?: string;
+    type?: string;
+    date?: string;
+    distance_m?: number;
+    duration_s?: number;
+  }>;
+  compare_links?: { previous_week?: string };
+}
+
+export interface HighlightsPayload {
+  date: string;
+  period: string;
+  highlights: Array<{
+    type?: string;
+    metric?: string;
+    direction?: string;
+    relative_change_pct?: number | null;
+    evidence?: string;
+    summary?: string;
+  }>;
+  disclaimer?: string;
+}
+
+export interface RelationshipLagPayload {
+  date: string;
+  period: string;
+  stimulus: string;
+  outcome: string;
+  profile: Array<{
+    lag_days: number;
+    effect_size?: number | null;
+    relationship?: string;
+    sample_count?: number;
+    evidence?: string;
+  }>;
+  best_lag_days?: number | null;
+  disclaimer?: string;
 }

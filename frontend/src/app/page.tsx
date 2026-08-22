@@ -10,12 +10,15 @@ import { formatNorwegianDate, warningLabel } from "@/components/cockpit/cockpitU
 import { PostSyncSummaryCard } from "@/components/cockpit/PostSyncSummaryCard";
 import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
 import { useCockpitSync } from "@/components/cockpit/CockpitSyncProvider";
+import { InsightFeed } from "@/components/cockpit/InsightFeed";
 import { useWhatChanged } from "@/hooks/useDashboard";
+import { useHighlights } from "@/hooks/useAnalysisWorkspace";
 import { useTodayDashboard } from "@/hooks/useTodayDashboard";
 
 export default function TodayCockpitPage() {
   const query = useTodayDashboard();
   const whatChangedQuery = useWhatChanged(false);
+  const highlights = useHighlights("1y");
   const { lastWhatChanged, postSyncSummary } = useCockpitSync();
   const data = query.data;
   const whatChanged = lastWhatChanged || whatChangedQuery.data;
@@ -81,6 +84,7 @@ export default function TodayCockpitPage() {
       ) : null}
 
       <WeeklyPlanStrip data={data} />
+      <InsightFeed data={highlights.data} />
       <DevelopmentStrip data={data} />
 
       <div className="flex flex-wrap gap-3 text-sm">
