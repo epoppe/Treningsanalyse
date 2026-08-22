@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import StoreProvider from "./StoreProvider";
@@ -11,14 +11,32 @@ import QueryProvider from "./QueryProvider";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Treningsapp",
-  description: "Analyse av treningsdata fra Garmin",
+  title: "Treningsanalyse",
+  description: "Personlig treningscockpit for Garmin-data",
+  applicationName: "Treningsanalyse",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Treningsanalyse",
+  },
+  icons: {
+    icon: [{ url: "/icons/icon-192.svg", type: "image/svg+xml" }],
+    apple: [{ url: "/icons/icon-192.svg" }],
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f172a",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
 };
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html lang="no">
@@ -28,9 +46,7 @@ export default function RootLayout({
             <StoreProvider>
               <CockpitSyncProvider>
                 <SyncRefreshBridge />
-                <AppShell>
-                  {children}
-                </AppShell>
+                <AppShell>{children}</AppShell>
               </CockpitSyncProvider>
             </StoreProvider>
           </QueryProvider>

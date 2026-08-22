@@ -7,10 +7,10 @@ import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
 import { AnalysisError, AnalysisSkeleton } from "@/components/analysis/ui";
 import { formatNorwegianDate, warningLabel } from "@/components/cockpit/cockpitUtils";
-import { PostSyncSummaryCard } from "@/components/cockpit/PostSyncSummaryCard";
-import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
+import { SinceLastUpdate } from "@/components/cockpit/SinceLastUpdate";
 import { useCockpitSync } from "@/components/cockpit/CockpitSyncProvider";
 import { InsightFeed } from "@/components/cockpit/InsightFeed";
+import { ConnectionStatus } from "@/components/cockpit/ConnectionStatus";
 import { useWhatChanged } from "@/hooks/useDashboard";
 import { useHighlights } from "@/hooks/useAnalysisWorkspace";
 import { useTodayDashboard } from "@/hooks/useTodayDashboard";
@@ -37,7 +37,7 @@ export default function TodayCockpitPage() {
   if (query.isError || !data) {
     return (
       <AnalysisError
-        title="Kunne ikke hente dagens cockpit"
+        title="Treningsanalyse-serveren er ikke tilgjengelig."
         description={query.error instanceof Error ? query.error.message : undefined}
         onRetry={() => query.refetch()}
       />
@@ -47,9 +47,12 @@ export default function TodayCockpitPage() {
   return (
     <div className="space-y-4">
       <header className="space-y-1">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-          I dag
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+            I dag
+          </p>
+          <ConnectionStatus online={!query.isError} asOf={data.as_of} />
+        </div>
         <h1 className="text-2xl font-semibold tracking-tight text-slate-900 capitalize">
           {formatNorwegianDate(data.as_of)}
         </h1>
@@ -63,8 +66,7 @@ export default function TodayCockpitPage() {
 
       <AthleteStateCard state={data.athlete_state} />
 
-      {postSyncSummary ? <PostSyncSummaryCard data={postSyncSummary} /> : null}
-      {whatChanged ? <WhatChangedCard data={whatChanged} /> : null}
+      <SinceLastUpdate whatChanged={whatChanged} postSync={postSyncSummary} />
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <NextWorkoutCard data={data} />

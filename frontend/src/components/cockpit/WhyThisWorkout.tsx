@@ -176,6 +176,12 @@ export function WhyThisWorkout({
           {historical.data?.disclaimer ? (
             <p className="text-[11px] text-slate-500">{historical.data.disclaimer}</p>
           ) : null}
+          <a
+            href="/analyse?tab=sammenhenger"
+            className="inline-block text-xs font-medium text-slate-800 underline"
+          >
+            HISTORICAL SUPPORT → åpne sammenhenger
+          </a>
         </div>
       ) : null}
     </section>

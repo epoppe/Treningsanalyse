@@ -33,18 +33,18 @@ const PRIMARY_NAV = [
 ] as const;
 
 const MORE_NAV = [
-  { href: "/hrv", label: "HRV" },
-  { href: "/sovn", label: "Søvn" },
-  { href: "/body-battery", label: "Body Battery" },
-  { href: "/vo2max", label: "VO₂max" },
-  { href: "/training-stress", label: "Training stress" },
-  { href: "/statistikk", label: "Rå statistikk" },
+  { href: "/hrv", label: "HRV (drill-down)" },
+  { href: "/sovn", label: "Søvn (drill-down)" },
+  { href: "/body-battery", label: "Body Battery (drill-down)" },
+  { href: "/vo2max", label: "VO₂max (drill-down)" },
+  { href: "/training-stress", label: "Training stress (drill-down)" },
+  { href: "/statistikk", label: "Rå statistikk (legacy)" },
   { href: "/synkronisering", label: "Synkronisering" },
-  { href: "/daglig-readiness", label: "Daglig readiness" },
-  { href: "/analytics", label: "Løpeanalyse" },
-  { href: "/ukesanalyse", label: "Løpsøkonomi" },
+  { href: "/daglig-readiness", label: "Daglig readiness (legacy)" },
+  { href: "/analytics", label: "Løpeanalyse (legacy)" },
+  { href: "/ukesanalyse", label: "Løpsøkonomi (legacy)" },
   { href: "/sammenhenger", label: "Sammenhenger (avansert)" },
-  { href: "/training-status", label: "Treningstatus" },
+  { href: "/training-status", label: "Treningstatus (legacy)" },
 ] as const;
 
 function NavLink({
