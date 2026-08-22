@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { Card, Title, Text } from '@tremor/react';
 import ActivityAnalytics from '@/components/ActivityAnalytics';
 import ActivityDetailsCharts from '@/components/ActivityDetailsCharts';
+import { ComparableSessionsSection } from '@/components/cockpit/ComparableSessionsCard';
 import type { AsyncLoadState } from '@/utils/metricState';
 
 const ActivityDetailPage = () => {
@@ -80,7 +81,8 @@ const ActivityDetailPage = () => {
                 <Card className="mt-6">
                     <Text className="text-red-600">Feil ved henting av aktivitetsdetaljer: {error}</Text>
                 </Card>
-                <div className="mt-6">
+                <div className="mt-6 space-y-4">
+                    <ComparableSessionsSection activityId={String(id)} />
                     <ActivityAnalytics activityId={id} />
                 </div>
             </main>
@@ -91,7 +93,8 @@ const ActivityDetailPage = () => {
         <main className="p-4 md:p-10 mx-auto max-w-7xl">
             <Title>Aktivitetsdetaljer</Title>
 
-            <div className="mt-6">
+            <div className="mt-6 space-y-4">
+                <ComparableSessionsSection activityId={String(id)} />
                 <ActivityAnalytics activityId={id} />
             </div>
 

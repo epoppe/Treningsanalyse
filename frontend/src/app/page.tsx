@@ -72,6 +72,7 @@ export default function TodayCockpitPage() {
           explanation={data.decision_explanation}
           fallbackReasons={data.why}
           workoutType={data.recommendation?.workout_type}
+          asOfDate={data.as_of}
         />
       </div>
 

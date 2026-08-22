@@ -13,6 +13,7 @@ from ..database.models.coaching_v5 import RecommendationRecord
 from ..database.models.activity import Activity
 from ..services.coaching_orchestrator import CoachingOrchestrator
 from ..services.comparable_session_service import ComparableSessionService
+from ..services.decision_historical_support_service import DecisionHistoricalSupportService
 from ..services.goal_context_service import GoalContextService
 from ..services.mesocycle_planner import MesocyclePlanner
 from ..services.plan_adaptation_service import PlanAdaptationService
@@ -461,5 +462,50 @@ def get_plan_dashboard(
             plan_stability=plan_stability,
             source="stored" if stored else "live",
         )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/decision-historical-support")
+def get_decision_historical_support(
+    target_date: Optional[date] = Query(None),
+    workout_type: Optional[str] = Query(None, description="Override workout type"),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> dict:
+    """Historical support context for WhyThisWorkout level 3."""
+    day = target_date or date.today()
+    try:
+        resolved_type = workout_type
+        if not resolved_type:
+            brief = CoachingOrchestrator(db, storage).training_decision_brief(
+                day,
+                persist=False,
+                detail="concise",
+            )
+            rec = brief.get("recommendation") or {}
+            resolved_type = rec.get("workout_type")
+        return DecisionHistoricalSupportService(db, storage).build(
+            workout_type=resolved_type,
+            as_of_date=day,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/comparable-sessions")
+def get_comparable_sessions(
+    activity_id: str = Query(..., description="Garmin activity id"),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> dict:
+    """Interpretation-first comparable session analysis for activity drill-down."""
+    try:
+        payload = ComparableSessionService(db, storage).compare_to_personal_baseline(str(activity_id))
+        if payload.get("status") == "not_found":
+            raise HTTPException(status_code=404, detail="activity_not_found")
+        return payload
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
