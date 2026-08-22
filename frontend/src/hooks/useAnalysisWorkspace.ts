@@ -40,20 +40,21 @@ export function useRelationships(period: string) {
   });
 }
 
-export function useRelationshipMatrix(period: string, advanced = false) {
+export function useRelationshipMatrix(period: string, advanced = false, enabled = true) {
   return useQuery({
     queryKey: ["analysis", "relationship-matrix", period, advanced],
     queryFn: () => analysisApi.relationshipMatrix(period, advanced),
+    enabled,
     staleTime: 60_000,
     retry: 1,
   });
 }
 
-export function useTrainingResponse(period: string, outcome: string) {
+export function useTrainingResponse(period: string, outcome: string, enabled = true) {
   return useQuery({
     queryKey: ["analysis", "training-response", period, outcome],
     queryFn: () => analysisApi.trainingResponse(period, outcome),
-    enabled: Boolean(outcome),
+    enabled: enabled && Boolean(outcome),
     staleTime: 60_000,
     retry: 1,
   });
@@ -98,10 +99,11 @@ export function useHistory(period: string) {
   });
 }
 
-export function usePeriodComparison(period: string) {
+export function usePeriodComparison(period: string, enabled = true) {
   return useQuery({
     queryKey: ["analysis", "period-comparison", period],
     queryFn: () => analysisApi.periodComparison(period),
+    enabled,
     staleTime: 60_000,
     retry: 1,
   });

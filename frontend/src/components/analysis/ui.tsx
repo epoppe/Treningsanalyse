@@ -46,10 +46,21 @@ export function AnalysisError({
   description?: string;
   onRetry?: () => void;
 }) {
+  const safeDescription = (() => {
+    if (!description) return undefined;
+    const trimmed = description.trim();
+    if (trimmed.length <= 220) return trimmed;
+    // Avoid dumping raw SQL/traceback blobs into the UI.
+    if (trimmed.includes("sqlite3") || trimmed.includes("Traceback") || trimmed.includes("SELECT ")) {
+      return "Midlertidig databasefeil under parallell lasting. Prøv igjen.";
+    }
+    return `${trimmed.slice(0, 200)}…`;
+  })();
+
   return (
     <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3" role="alert">
       <p className="text-sm font-medium text-red-800">{title}</p>
-      {description ? <p className="mt-1 text-xs text-red-700/80">{description}</p> : null}
+      {safeDescription ? <p className="mt-1 text-xs text-red-700/80">{safeDescription}</p> : null}
       {onRetry ? (
         <button type="button" onClick={onRetry} className="mt-2 text-xs font-medium text-red-700 underline">
           Prøv igjen

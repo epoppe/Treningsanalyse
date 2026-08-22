@@ -48,10 +48,17 @@ function UtviklingPanel() {
   const catalog = useAnalysisCatalog();
   const development = useDevelopment(state.period);
   const timeseries = useTimeseries(state.period, state.metrics);
-  const comparison = usePeriodComparison(state.period);
-  const intensity = useIntensityDistribution(state.period);
-  const durationCurve = useDurationCurveHistory(state.period);
-  const backtrace = useBestPeriodBacktrace(state.period === "28d" ? "2y" : state.period, state.backtrace);
+  // Stagger heavy secondary fetches until primary development settles — reduces
+  // SQLite contention when many analysis endpoints hit the DB at once.
+  const secondaryReady = !development.isLoading && !development.isFetching;
+  const comparison = usePeriodComparison(state.period, secondaryReady);
+  const intensity = useIntensityDistribution(state.period, secondaryReady);
+  const durationCurve = useDurationCurveHistory(state.period, secondaryReady);
+  const backtrace = useBestPeriodBacktrace(
+    state.period === "28d" ? "2y" : state.period,
+    state.backtrace,
+    secondaryReady
+  );
 
   const toggleMetric = (metric: string) => {
     const set = new Set(state.metrics);
@@ -156,8 +163,9 @@ function SammenhengerPanel() {
   const catalog = useAnalysisCatalog();
   const query = useRelationships(state.period);
   const [advanced, setAdvanced] = useState(false);
-  const matrix = useRelationshipMatrix(state.period, advanced);
-  const training = useTrainingResponse(state.period, state.outcome);
+  const secondaryReady = !query.isLoading && !query.isFetching;
+  const matrix = useRelationshipMatrix(state.period, advanced, secondaryReady);
+  const training = useTrainingResponse(state.period, state.outcome, secondaryReady);
 
   const presets = catalog.data?.presets || [];
 
