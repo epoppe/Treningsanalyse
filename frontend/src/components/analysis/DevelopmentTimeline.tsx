@@ -4,19 +4,15 @@ import {
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-  CartesianGrid,
 } from "recharts";
 import type { TimeseriesPayload } from "@/types/analysis";
+import { ANALYSIS_CHART_COLORS, CHART_LINE, CHART_MARGIN } from "@/components/charts/chartTheme";
 import {
-  ANALYSIS_CHART_AXIS,
-  ANALYSIS_CHART_COLORS,
-  ANALYSIS_CHART_GRID,
-  ANALYSIS_CHART_TOOLTIP,
-  CHART_MARGIN,
-} from "@/components/charts/chartTheme";
+  ThemedCartesianGrid,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from "@/components/charts/ThemedRecharts";
 
 const COLORS = [...ANALYSIS_CHART_COLORS];
 
@@ -88,21 +84,18 @@ export function DevelopmentTimeline({
                 if (label && onSelectDate) onSelectDate(String(label));
               }}
             >
-              <CartesianGrid {...ANALYSIS_CHART_GRID} />
-              <XAxis dataKey="date" tick={ANALYSIS_CHART_AXIS.tick} minTickGap={32} />
-              <YAxis tick={ANALYSIS_CHART_AXIS.tick} width={40} />
-              <Tooltip
-                contentStyle={ANALYSIS_CHART_TOOLTIP.contentStyle}
-                labelFormatter={(label) => String(label)}
-              />
+              <ThemedCartesianGrid />
+              <ThemedXAxis dataKey="date" minTickGap={32} />
+              <ThemedYAxis width={40} />
+              <ThemedTooltip labelFormatter={(label) => String(label)} />
               {keys.map((key, i) => (
                 <Line
                   key={key}
                   type="monotone"
                   dataKey={key}
                   stroke={COLORS[i % COLORS.length]}
-                  dot={false}
-                  strokeWidth={1.75}
+                  dot={CHART_LINE.dot}
+                  strokeWidth={CHART_LINE.strokeWidth}
                   connectNulls
                 />
               ))}

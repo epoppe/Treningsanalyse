@@ -6,16 +6,11 @@ import {
   Area,
   Bar,
   BarChart,
-  CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
   ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
 } from 'recharts';
-import { CHART_MARGIN } from '@/components/charts/chartTheme';
+import { CHART_MARGIN, chartColor } from '@/components/charts/chartTheme';
 import {
   ThemedCartesianGrid,
   ThemedLegend,
@@ -445,67 +440,56 @@ export default function StressPage() {
               </QuickFilterButton>
             </div>
             <ResponsiveContainer width="100%" height={450}>
-              <ComposedChart 
-                data={chartData} 
-                margin={{ top: 20, right: 30, left: 20, bottom: 60 }}
+              <ComposedChart
+                data={chartData}
+                margin={CHART_MARGIN.labeled}
               >
                 <defs>
                   <linearGradient id="gridGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#f8f9fa" stopOpacity={0.8}/>
-                    <stop offset="100%" stopColor="#e9ecef" stopOpacity={0.8}/>
+                    <stop offset="0%" stopColor="#f8fafc" stopOpacity={0.9} />
+                    <stop offset="100%" stopColor="#e2e8f0" stopOpacity={0.5} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid 
-                  strokeDasharray="3 3" 
-                  stroke="#e0e0e0"
-                  fill="url(#gridGradient)"
-                />
-                <XAxis 
-                  dataKey="date" 
+                <ThemedCartesianGrid fill="url(#gridGradient)" />
+                <ThemedXAxis
+                  dataKey="date"
                   angle={-45}
                   textAnchor="end"
                   height={80}
                   interval="preserveStartEnd"
-                  tick={{ fill: '#666', fontSize: 12 }}
                 />
-                <YAxis 
+                <ThemedYAxis
                   domain={[17, 36]}
-                  label={{ value: 'Stress Level', angle: -90, position: 'insideLeft', style: { fill: '#666' } }}
-                  tick={{ fill: '#666' }}
+                  label={{ value: 'Stress Level', angle: -90, position: 'insideLeft' }}
                 />
-                <Tooltip 
-                  formatter={(value: any, name: string) => {
-                    if (name === 'stress_level') return [value?.toFixed(0), 'Daglig stress-nivå'];
-                    if (name === 'movingAverage7d') return [value?.toFixed(1), '7-dagers gjennomsnitt'];
-                    return [value, name];
+                <ThemedTooltip
+                  formatter={(value: any, name: any) => {
+                    const key = String(name);
+                    if (key === 'stress_level') return [Number(value).toFixed(0), 'Daglig stress-nivå'];
+                    if (key === 'movingAverage7d') return [Number(value).toFixed(1), '7-dagers gjennomsnitt'];
+                    return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
-                  contentStyle={{ backgroundColor: 'rgba(255, 255, 255, 0.95)', border: '1px solid #ddd' }}
                 />
-                <Legend 
-                  wrapperStyle={{ paddingTop: '20px' }}
-                  iconType="circle"
-                />
-                {/* Scatter plot for daglige verdier */}
-                <Line 
+                <ThemedLegend wrapperStyle={{ paddingTop: '20px' }} iconType="circle" />
+                <Line
                   type="monotone"
-                  dataKey="stress_level" 
+                  dataKey="stress_level"
                   stroke="none"
-                  fill="#60a5fa"
-                  dot={{ fill: '#60a5fa', r: 4, strokeWidth: 0, fillOpacity: 0.7 }}
+                  fill={chartColor(1)}
+                  dot={{ fill: chartColor(1), r: 4, strokeWidth: 0, fillOpacity: 0.7 }}
                   name="Daily Stress Level"
                   isAnimationActive={false}
                 />
-                {/* 7-dagers glidende gjennomsnitt */}
                 {showTrend && (
-                  <Line 
-                    type="monotone" 
-                    dataKey="movingAverage7d" 
-                    stroke="#dc2626" 
+                  <Line
+                    type="monotone"
+                    dataKey="movingAverage7d"
+                    stroke={chartColor(2)}
                     strokeWidth={2.5}
                     dot={false}
                     name="7-day Rolling Average"
-                    isAnimationActive={true}
+                    isAnimationActive
                   />
                 )}
               </ComposedChart>

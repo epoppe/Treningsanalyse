@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { analysisApi, FactorRelationshipMetricMeta, FactorRelationshipsResponse } from '../../utils/api';
 import PlotlyChart from '../../components/PlotlyChart';
+import { ChartShell } from '@/components/charts/ChartShell';
 import { FACTOR_RELATIONSHIP_METRICS } from './metricsCatalog';
 
 const CORRELATION_STRENGTH_NB: Record<string, string> = {
@@ -217,22 +218,29 @@ export default function SammenhengerPage() {
         <Card><Small>Gj.snitt X / Y</Small><StatValue style={{fontSize:'1.1rem'}}>{loading ? '…' : `${data?.summary.avg_x ?? '–'} / ${data?.summary.avg_y ?? '–'}`}</StatValue></Card>
       </Grid>
 
-      <ChartCard>
-        {loading ? <Small>Laster analyse…</Small> : (
-          scatterData.length > 0 ? (
+      <ChartShell
+        title={loading ? 'Laster analyse…' : `${data?.x_meta.label ?? 'X'} vs ${data?.y_meta.label ?? 'Y'}`}
+        heightClassName="h-[420px]"
+        isEmpty={!loading && scatterData.length === 0}
+        emptyMessage="Ingen datapunkter med både X og Y for valgte filtre. Prøv flere dager, lavere min. distanse eller en annen aktivitetstype."
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500">Laster analyse…</p>
+        ) : scatterData.length > 0 ? (
+          <div className="h-full min-h-[360px]">
             <PlotlyChart
               data={scatterData}
               xKey="x"
-              yKeys={["y"]}
+              yKeys={['y']}
               title={`${data?.x_meta.label} vs ${data?.y_meta.label}`}
               yAxisTitle={yAxisTitle}
               xAxisTitle={xAxisTitle}
               traceMode="markers"
               textKey="hover_label"
             />
-          ) : <Small>Ingen datapunkter med både X og Y for valgte filtre. Prøv flere dager, lavere min. distanse eller en annen aktivitetstype.</Small>
-        )}
-      </ChartCard>
+          </div>
+        ) : null}
+      </ChartShell>
     </Container>
   );
 }

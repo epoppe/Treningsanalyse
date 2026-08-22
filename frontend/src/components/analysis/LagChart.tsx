@@ -3,20 +3,16 @@
 import {
   Bar,
   BarChart,
-  CartesianGrid,
   ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
 import type { RelationshipLagPayload } from "@/types/analysis";
+import { CHART_MARGIN, CHART_PRIMARY } from "@/components/charts/chartTheme";
 import {
-  ANALYSIS_CHART_AXIS,
-  ANALYSIS_CHART_GRID,
-  ANALYSIS_CHART_PRIMARY,
-  ANALYSIS_CHART_TOOLTIP,
-  CHART_MARGIN,
-} from "@/components/charts/chartTheme";
+  ThemedCartesianGrid,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from "@/components/charts/ThemedRecharts";
 
 export function LagChart({ data }: { data?: RelationshipLagPayload }) {
   const rows =
@@ -34,11 +30,11 @@ export function LagChart({ data }: { data?: RelationshipLagPayload }) {
     <div className="h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={CHART_MARGIN.compact}>
-          <CartesianGrid {...ANALYSIS_CHART_GRID} />
-          <XAxis dataKey="lag" tick={ANALYSIS_CHART_AXIS.tick} />
-          <YAxis tick={ANALYSIS_CHART_AXIS.tick} width={32} domain={[-1, 1]} />
-          <Tooltip contentStyle={ANALYSIS_CHART_TOOLTIP.contentStyle} />
-          <Bar dataKey="effect" fill={ANALYSIS_CHART_PRIMARY} radius={[4, 4, 0, 0]} />
+          <ThemedCartesianGrid />
+          <ThemedXAxis dataKey="lag" />
+          <ThemedYAxis width={32} domain={[-1, 1]} />
+          <ThemedTooltip />
+          <Bar dataKey="effect" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
       {data?.best_lag_days != null ? (

@@ -6,6 +6,7 @@ import styled from 'styled-components';
 import { fetchActivitiesByDateRange, selectAllActivities, selectActivitiesStatus } from '../../store/slices/activitiesSlice';
 import { AppDispatch, RootState } from '../../store';
 import RunningEconomyTable from '../../components/RunningEconomyTable';
+import { LegacyChartToggle } from '@/components/charts/ChartShell';
 import { useSyncListener } from '../../hooks/useSyncListener';
 
 import RunningEconomyChart from '../../components/RunningEconomyChart';
@@ -26,22 +27,18 @@ const Title = styled.h1`
 const ButtonContainer = styled.div`
   margin-bottom: 1rem;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 `;
 
-const Button = styled.button<{ $active: boolean }>`
-  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
-  color: ${props => (props.$active ? 'white' : '#2c3e50')};
-  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s ease-in-out;
-
-  &:hover {
-    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
-  }
-`;
+const TIME_FILTERS: Array<{ id: string; label: string }> = [
+  { id: '3m', label: 'Siste 3 mnd' },
+  { id: '6m', label: 'Siste 6 mnd' },
+  { id: 'ytd', label: 'År til dato' },
+  { id: '12m', label: 'Siste 12 mnd' },
+  { id: '3y', label: 'Siste 3 år' },
+  { id: 'all', label: 'All historikk' },
+];
 
 export default function RunningEconomyPage() {
   const dispatch = useDispatch<AppDispatch>();
@@ -134,12 +131,15 @@ export default function RunningEconomyPage() {
       <Title>Løpsøkonomi</Title>
       
       <ButtonContainer>
-        <Button $active={timeFilter === '3m'} onClick={() => setTimeFilter('3m')}>Siste 3 mnd</Button>
-        <Button $active={timeFilter === '6m'} onClick={() => setTimeFilter('6m')}>Siste 6 mnd</Button>
-        <Button $active={timeFilter === 'ytd'} onClick={() => setTimeFilter('ytd')}>År til dato</Button>
-        <Button $active={timeFilter === '12m'} onClick={() => setTimeFilter('12m')}>Siste 12 mnd</Button>
-        <Button $active={timeFilter === '3y'} onClick={() => setTimeFilter('3y')}>Siste 3 år</Button>
-        <Button $active={timeFilter === 'all'} onClick={() => setTimeFilter('all')}>All historikk</Button>
+        {TIME_FILTERS.map((filter) => (
+          <LegacyChartToggle
+            key={filter.id}
+            active={timeFilter === filter.id}
+            onClick={() => setTimeFilter(filter.id)}
+          >
+            {filter.label}
+          </LegacyChartToggle>
+        ))}
       </ButtonContainer>
 
       {runningActivities.length === 0 ? (
