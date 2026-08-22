@@ -117,6 +117,33 @@ class AnalysisWorkspaceApiTests(unittest.TestCase):
         self.assertEqual(len(body["profile"]), 5)
         self.assertEqual(body["best_lag_days"], 21)
 
+    def test_history_yoy_endpoint(self):
+        from app.main import app
+
+        self._override(app)
+        with patch("app.routers.analysis_workspace.HistoryCockpitService") as svc_cls:
+            svc_cls.return_value.yoy_months.return_value = {
+                "months": 12,
+                "rows": [{"month_label": "2026-08", "deltas": {"distance_pct": 5.0}}],
+            }
+            client = TestClient(app)
+            res = client.get("/api/analysis/history/yoy", params={"months": 12})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["rows"][0]["month_label"], "2026-08")
+
+    def test_history_annotations_endpoint(self):
+        from app.main import app
+
+        self._override(app)
+        with patch("app.routers.analysis_workspace.HistoryCockpitService") as svc_cls:
+            svc_cls.return_value.annotations.return_value = {
+                "items": [{"type": "plan_adjustment", "title": "Planjustering"}],
+            }
+            client = TestClient(app)
+            res = client.get("/api/analysis/history/annotations")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()["items"][0]["type"], "plan_adjustment")
+
     def test_timeseries_rejects_unknown_metric(self):
         from app.main import app
 

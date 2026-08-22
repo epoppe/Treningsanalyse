@@ -10,9 +10,12 @@ import type {
   RelationshipMatrixPayload,
   RelationshipsPayload,
   HighlightsPayload,
+  HistoryAnnotationsPayload,
   TimeseriesPayload,
   TrainingResponsePayload,
   WeekExplorerPayload,
+  YoYPayload,
+  PerformanceRecoveryPayload,
 } from "@/types/analysis";
 
 async function getJson<T>(url: string): Promise<T> {
@@ -72,6 +75,14 @@ export const analysisApi = {
     getJson<RelationshipLagPayload>(
       `/api/analysis/relationship-lag?stimulus=${encodeURIComponent(stimulus)}&outcome=${encodeURIComponent(outcome)}&period=${encodeURIComponent(period)}`,
     ),
+  historyYoy: (months = 12) =>
+    getJson<YoYPayload>(`/api/analysis/history/yoy?months=${months}`),
+  historyPerformanceRecovery: (months = 12) =>
+    getJson<PerformanceRecoveryPayload>(
+      `/api/analysis/history/performance-recovery?months=${months}`,
+    ),
+  historyAnnotations: (limit = 24) =>
+    getJson<HistoryAnnotationsPayload>(`/api/analysis/history/annotations?limit=${limit}`),
   dependencyCheck: (x: string, y: string, advanced = false) =>
     getJson<{
       x: string;

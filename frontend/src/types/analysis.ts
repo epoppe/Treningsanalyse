@@ -334,3 +334,62 @@ export interface RelationshipLagPayload {
   best_lag_days?: number | null;
   disclaimer?: string;
 }
+
+export interface YoYRow {
+  year: number;
+  month: number;
+  month_label: string;
+  current?: {
+    activities?: number;
+    distance_m?: number;
+    duration_s?: number;
+    tss?: number;
+  } | null;
+  previous_year?: {
+    activities?: number;
+    distance_m?: number;
+    duration_s?: number;
+    tss?: number;
+  } | null;
+  deltas?: {
+    distance_pct?: number;
+    duration_pct?: number;
+    activities_pct?: number;
+  } | null;
+}
+
+export interface YoYPayload {
+  end_date: string;
+  months: number;
+  rows: YoYRow[];
+  disclaimer?: string;
+}
+
+export interface PerformanceRecoveryMonth {
+  month: string;
+  month_start?: string;
+  month_end?: string;
+  volume_hours?: number | null;
+  activity_count?: number | null;
+  ctl?: number | null;
+  hrv_delta_pct?: number | null;
+}
+
+export interface PerformanceRecoveryPayload {
+  end_date: string;
+  months: PerformanceRecoveryMonth[];
+  disclaimer?: string;
+}
+
+export interface HistoryAnnotation {
+  date?: string;
+  type?: string;
+  title?: string;
+  detail?: string;
+}
+
+export interface HistoryAnnotationsPayload {
+  end_date: string;
+  items: HistoryAnnotation[];
+  disclaimer?: string;
+}
