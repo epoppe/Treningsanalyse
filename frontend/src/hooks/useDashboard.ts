@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { todayApi } from "@/dashboard/todayApi";
+import { COCKPIT_DELTA_STALE_MS, COCKPIT_QUERY_DEFAULTS } from "@/lib/cockpitQueryDefaults";
 
 export const whatChangedKeys = {
   all: ["what-changed"] as const,
@@ -13,8 +14,9 @@ export function useWhatChanged(refresh = false, enabled = true) {
     queryKey: whatChangedKeys.latest(refresh),
     queryFn: () => todayApi.whatChanged(refresh),
     enabled,
-    staleTime: 30_000,
-    retry: 1,
+    staleTime: COCKPIT_DELTA_STALE_MS,
+    retry: COCKPIT_QUERY_DEFAULTS.retry,
+    refetchOnWindowFocus: COCKPIT_QUERY_DEFAULTS.refetchOnWindowFocus,
   });
 }
 
@@ -28,8 +30,7 @@ export function usePostSyncSummary(activityId?: string) {
     queryKey: postSyncKeys.activity(activityId || ""),
     queryFn: () => todayApi.postSyncSummary(activityId!),
     enabled: Boolean(activityId),
-    staleTime: 60_000,
-    retry: 1,
+    ...COCKPIT_QUERY_DEFAULTS,
   });
 }
 
@@ -42,8 +43,7 @@ export function useRecommendationHistory(limit = 30) {
   return useQuery({
     queryKey: recommendationHistoryKeys.list(limit),
     queryFn: () => todayApi.recommendationHistory(limit),
-    staleTime: 60_000,
-    retry: 1,
+    ...COCKPIT_QUERY_DEFAULTS,
   });
 }
 
@@ -58,8 +58,7 @@ export function useDecisionHistoricalSupport(workoutType?: string, date?: string
     queryKey: historicalSupportKeys.detail(workoutType, date),
     queryFn: () => todayApi.decisionHistoricalSupport(workoutType, date),
     enabled,
-    staleTime: 60_000,
-    retry: 1,
+    ...COCKPIT_QUERY_DEFAULTS,
   });
 }
 
@@ -73,7 +72,6 @@ export function useComparableSessions(activityId?: string) {
     queryKey: comparableSessionsKeys.activity(activityId || ""),
     queryFn: () => todayApi.comparableSessions(activityId!),
     enabled: Boolean(activityId),
-    staleTime: 60_000,
-    retry: 1,
+    ...COCKPIT_QUERY_DEFAULTS,
   });
 }

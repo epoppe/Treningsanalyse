@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { planApi } from "@/dashboard/planApi";
+import { COCKPIT_QUERY_DEFAULTS } from "@/lib/cockpitQueryDefaults";
 
 export const planKeys = {
   all: ["plan"] as const,
@@ -12,7 +13,6 @@ export function usePlan(date?: string) {
   return useQuery({
     queryKey: planKeys.dashboard(date),
     queryFn: () => planApi.plan(date),
-    staleTime: 60_000,
-    retry: 1,
+    ...COCKPIT_QUERY_DEFAULTS,
   });
 }

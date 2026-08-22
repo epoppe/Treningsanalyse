@@ -10,6 +10,12 @@ import {
   YAxis,
 } from "recharts";
 import type { RelationshipLagPayload } from "@/types/analysis";
+import {
+  ANALYSIS_CHART_AXIS,
+  ANALYSIS_CHART_GRID,
+  ANALYSIS_CHART_PRIMARY,
+  ANALYSIS_CHART_TOOLTIP,
+} from "./chartTheme";
 
 export function LagChart({ data }: { data?: RelationshipLagPayload }) {
   const rows =
@@ -27,11 +33,11 @@ export function LagChart({ data }: { data?: RelationshipLagPayload }) {
     <div className="h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-          <XAxis dataKey="lag" tick={{ fontSize: 10 }} />
-          <YAxis tick={{ fontSize: 10 }} width={32} domain={[-1, 1]} />
-          <Tooltip contentStyle={{ fontSize: 12 }} />
-          <Bar dataKey="effect" fill="#0f766e" radius={[4, 4, 0, 0]} />
+          <CartesianGrid {...ANALYSIS_CHART_GRID} />
+          <XAxis dataKey="lag" tick={ANALYSIS_CHART_AXIS.tick} />
+          <YAxis tick={ANALYSIS_CHART_AXIS.tick} width={32} domain={[-1, 1]} />
+          <Tooltip contentStyle={ANALYSIS_CHART_TOOLTIP.contentStyle} />
+          <Bar dataKey="effect" fill={ANALYSIS_CHART_PRIMARY} radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
       {data?.best_lag_days != null ? (

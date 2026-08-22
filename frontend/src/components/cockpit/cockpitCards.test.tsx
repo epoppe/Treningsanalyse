@@ -141,7 +141,7 @@ describe("WhyThisWorkout", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Evidens" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Evidens" }));
     expect(screen.getByText(/Tidligere anbefalinger/i)).toBeInTheDocument();
     expect(screen.getByText(/12 lagrede anbefalinger/i)).toBeInTheDocument();
   });
