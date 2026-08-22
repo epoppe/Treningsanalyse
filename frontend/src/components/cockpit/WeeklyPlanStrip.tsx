@@ -6,6 +6,14 @@ import { cn } from "@/lib/utils";
 
 const WEEKDAY_LABELS = ["Man", "Tir", "Ons", "Tor", "Fre", "Lør", "Søn"];
 
+type WeeklyPlanStripData = {
+  as_of?: string;
+  weekly_plan?: {
+    week_objective?: string;
+    sessions?: PlannedSession[];
+  };
+};
+
 function sessionStatus(session: PlannedSession, dayOffset: number, asOf?: string): "today" | "planned" | "empty" {
   if (!session.type || session.type === "rest") return "empty";
   const todayOffset = getTodayOffset(asOf);
@@ -19,7 +27,7 @@ function getTodayOffset(asOf?: string): number {
   return day === 0 ? 6 : day - 1;
 }
 
-export function WeeklyPlanStrip({ data }: { data: TodayDashboardPayload }) {
+export function WeeklyPlanStrip({ data }: { data: WeeklyPlanStripData }) {
   const sessions = data.weekly_plan?.sessions || [];
 
   return (

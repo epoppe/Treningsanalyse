@@ -12,12 +12,27 @@ const PLAN_REASON_LABELS: Record<string, string> = {
   no_quality_conflict: "Ingen planendring nødvendig etter siste vurdering.",
 };
 
+const PHASE_LABELS: Record<string, string> = {
+  recovery: "Restitusjon",
+  base: "Grunnperiode",
+  build: "Oppbygging",
+  specific: "Spesifikk",
+  peak: "Toppform",
+  taper: "Nedtrapping",
+  maintenance: "Vedlikehold",
+};
+
 export function warningLabel(code: string): string {
   return WARNING_LABELS[code] || code.replace(/_/g, " ");
 }
 
 export function planReasonLabel(code: string): string {
   return PLAN_REASON_LABELS[code] || code.replace(/_/g, " ");
+}
+
+export function phaseLabel(phase?: string | null): string {
+  if (!phase) return "—";
+  return PHASE_LABELS[phase] || phase.replace(/_/g, " ");
 }
 
 const REASON_LABELS_NB: Record<string, string> = {
