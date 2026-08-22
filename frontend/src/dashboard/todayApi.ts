@@ -32,8 +32,13 @@ export const todayApi = {
     getJson<PostSyncSummaryPayload>(
       `/api/dashboard/post-sync-summary?activity_id=${encodeURIComponent(activityId)}`,
     ),
-  recommendationHistory: (limit = 30) =>
-    getJson<RecommendationHistoryPayload>(`/api/dashboard/recommendation-history?limit=${limit}`),
+  recommendationHistory: (limit = 30, execution?: string) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (execution && execution !== "all") params.set("execution", execution);
+    return getJson<RecommendationHistoryPayload>(
+      `/api/dashboard/recommendation-history?${params.toString()}`,
+    );
+  },
   decisionHistoricalSupport: (workoutType?: string, date?: string) => {
     const params = new URLSearchParams();
     if (workoutType) params.set("workout_type", workoutType);
