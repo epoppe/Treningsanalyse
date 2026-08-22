@@ -51,9 +51,10 @@ function toTodayPayload(data: ReturnType<typeof usePlan>["data"]): TodayDashboar
 export default function PlanPage() {
   const [horizon, setHorizon] = useState<PlanHorizon>("week");
   const query = usePlan();
-  const todayQuery = useTodayDashboard();
-  const history = useRecommendationHistory(20);
   const data = query.data;
+  const hasPlanSession = Boolean(data?.weekly_plan?.sessions?.length);
+  const todayQuery = useTodayDashboard(undefined, !query.isLoading && !hasPlanSession);
+  const history = useRecommendationHistory(20);
 
   if (query.isLoading) {
     return (

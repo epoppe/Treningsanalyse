@@ -10,8 +10,15 @@ import {
   CartesianGrid,
 } from "recharts";
 import type { TimeseriesPayload } from "@/types/analysis";
+import {
+  ANALYSIS_CHART_AXIS,
+  ANALYSIS_CHART_COLORS,
+  ANALYSIS_CHART_GRID,
+  ANALYSIS_CHART_TOOLTIP,
+  CHART_MARGIN,
+} from "@/components/charts/chartTheme";
 
-const COLORS = ["#0f766e", "#1d4ed8", "#c2410c", "#7c3aed"];
+const COLORS = [...ANALYSIS_CHART_COLORS];
 
 function mergeSeries(payload: TimeseriesPayload) {
   const keys = Object.keys(payload.series);
@@ -75,17 +82,17 @@ export function DevelopmentTimeline({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={rows}
-              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              margin={CHART_MARGIN.compact}
               onClick={(state) => {
                 const label = state?.activeLabel;
                 if (label && onSelectDate) onSelectDate(String(label));
               }}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={32} />
-              <YAxis tick={{ fontSize: 10 }} width={40} />
+              <CartesianGrid {...ANALYSIS_CHART_GRID} />
+              <XAxis dataKey="date" tick={ANALYSIS_CHART_AXIS.tick} minTickGap={32} />
+              <YAxis tick={ANALYSIS_CHART_AXIS.tick} width={40} />
               <Tooltip
-                contentStyle={{ fontSize: 12 }}
+                contentStyle={ANALYSIS_CHART_TOOLTIP.contentStyle}
                 labelFormatter={(label) => String(label)}
               />
               {keys.map((key, i) => (

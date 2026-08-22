@@ -2,7 +2,15 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine } from 'recharts';
+import { Line, LineChart, ReferenceLine, ResponsiveContainer } from 'recharts';
+import { CHART_MARGIN, LEGACY_SERIES_COLORS } from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import { analysisApi } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
@@ -361,31 +369,32 @@ export default function VO2MaxPage() {
           <ChartContainer>
             <ChartTitle>VO2Max over tid</ChartTitle>
             <ResponsiveContainer width="100%" height={400}>
-              <LineChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
+              <LineChart data={chartData} margin={CHART_MARGIN.legacy}>
+                <ThemedCartesianGrid />
+                <ThemedXAxis
+                  dataKey="date"
                   angle={-45}
                   textAnchor="end"
                   height={80}
                   interval="preserveStartEnd"
                 />
-                <YAxis 
+                <ThemedYAxis
                   label={{ value: 'VO2Max', angle: -90, position: 'insideLeft' }}
                   domain={['dataMin - 2', 'dataMax + 2']}
                 />
-                <Tooltip 
-                  formatter={(value: any, name: string) => {
-                    if (name === 'vo2max') return [value.toFixed(1), 'VO2Max'];
-                    return [value, name];
+                <ThemedTooltip
+                  formatter={(value: any, name: any) => {
+                    const key = String(name);
+                    if (key === 'vo2max') return [Number(value).toFixed(1), 'VO2Max'];
+                    return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="vo2max" 
-                  stroke="#3b82f6" 
+                <ThemedLegend />
+                <Line
+                  type="monotone"
+                  dataKey="vo2max"
+                  stroke={LEGACY_SERIES_COLORS.vo2}
                   strokeWidth={2}
                   dot={false}
                   name="VO2Max"

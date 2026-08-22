@@ -3,13 +3,19 @@
 import {
   ComposedChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
   ResponsiveContainer,
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
@@ -201,21 +207,21 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
       </InfoPanel>
 
       <ResponsiveContainer width="100%" height="75%">
-        <ComposedChart data={dataWithRollingAvg} margin={{ top: 20, right: 30, left: 30, bottom: 80 }}>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} />
-          <XAxis 
+        <ComposedChart data={dataWithRollingAvg} margin={{ ...CHART_MARGIN.labeled, top: 20, right: 30, left: 30, bottom: 80 }}>
+          <ThemedCartesianGrid vertical={false} />
+          <ThemedXAxis 
             dataKey="date" 
             tick={<CustomAxisTick />}
             interval={Math.max(1, Math.floor(dataWithRollingAvg.length / 15))}
             height={80}
           />
-          <YAxis
+          <ThemedYAxis
             label={{ value: 'Overall Score', angle: -90, position: 'insideLeft' }}
             domain={yAxisDomain()}
             tickFormatter={(tick) => String(Math.round(tick))}
           />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend />
+          <ThemedTooltip content={<CustomTooltip />} />
+          <ThemedLegend />
           
           {/* Daglige overall score-verdier */}
           <Line
@@ -223,7 +229,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
             dataKey="overall_score"
             stroke="none"
             strokeWidth={0}
-            dot={{ fill: '#e74c3c', strokeWidth: 1, r: 2.5 }}
+            dot={{ fill: LEGACY_SERIES_COLORS.vo2, strokeWidth: 1, r: 2.5 }}
             name="Overall Score"
             connectNulls={false}
           />
@@ -233,7 +239,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
             <Line
               type="monotone"
               dataKey="rolling_avg_7d"
-              stroke="#3b82f6"
+              stroke={LEGACY_SERIES_COLORS.ctl}
               strokeWidth={3}
               dot={false}
               name="7-dagers snitt"

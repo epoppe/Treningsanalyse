@@ -2,14 +2,21 @@
 
 import { memo } from 'react';
 import {
-  BarChart,
   Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer
+  BarChart,
+  ResponsiveContainer,
 } from 'recharts';
+import {
+  CHART_BAR,
+  CHART_MARGIN,
+  chartColor,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -204,15 +211,15 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
       </CardHeader>
       <CardContent className="h-[260px]" style={{ padding: '0 1rem 0.4rem 1rem', height: '260px' }}>
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-            <XAxis
+          <BarChart data={chartData} margin={CHART_MARGIN.labeled}>
+            <ThemedCartesianGrid />
+            <ThemedXAxis
               dataKey="groupKey"
               height={50}
               interval={0}
               tick={<CustomAxisTick data={chartData} />}
             />
-            <YAxis
+            <ThemedYAxis
               label={{
                 value: getYAxisLabel(),
                 angle: -90,
@@ -221,19 +228,16 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
                 fontSize: 12,
               }}
               domain={getYAxisDomain()}
-              tick={{ fill: '#64748b', fontSize: 12 }}
-              axisLine={{ stroke: '#e2e8f0' }}
-              tickLine={{ stroke: '#e2e8f0' }}
             />
-            <Tooltip
+            <ThemedTooltip
               content={({ active, payload }) => {
                 if (active && payload && payload.length && payload[0].value) {
                   return (
-                    <div className="rounded-md border border-border bg-popover px-3 py-2 text-sm shadow-md">
-                      <p className="font-semibold text-foreground">
+                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+                      <p className="font-semibold text-slate-900">
                         {groupByMonth ? 'Måned' : 'Uke (start)'}: {payload[0].payload.date}
                       </p>
-                      <p className="text-muted-foreground">
+                      <p className="text-slate-600">
                         {`Total ${getYAxisLabel().toLowerCase()}: ${Number(payload[0].value).toFixed(2)}`}
                       </p>
                     </div>
@@ -244,9 +248,9 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
             />
             <Bar
               dataKey={metric}
-              fill="hsl(var(--primary))"
+              fill={chartColor(0)}
               name={getYAxisLabel()}
-              radius={[6, 6, 0, 0]}
+              radius={CHART_BAR.radius}
             />
           </BarChart>
         </ResponsiveContainer>

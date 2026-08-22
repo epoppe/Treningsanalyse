@@ -388,7 +388,11 @@ export default function ActivityExplorer() {
             <strong>Laster lenger enn forventet.</strong> Sjekk at backend kjører på port 8000.
             <br />
             <button
-              onClick={() => window.location.reload()}
+              type="button"
+              onClick={() => {
+                setLoadingTimeout(false);
+                handleRefreshActivities();
+              }}
               style={{
                 marginTop: '0.5rem',
                 padding: '0.5rem 1rem',
@@ -420,8 +424,9 @@ export default function ActivityExplorer() {
         }}>
           <h2>Feil ved lasting av aktiviteter</h2>
           <p>{error}</p>
-          <button 
-            onClick={() => window.location.reload()}
+          <button
+            type="button"
+            onClick={handleRefreshActivities}
             style={{
               padding: '0.75rem 1.5rem',
               backgroundColor: '#3498db',

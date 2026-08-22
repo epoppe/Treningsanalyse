@@ -45,13 +45,21 @@ export function WhyThisWorkout({
           </p>
           <h2 className="mt-1 text-lg font-semibold capitalize text-slate-900">{title}</h2>
         </div>
-        <div className="flex rounded-lg border border-slate-200 p-0.5 text-[11px]">
+        <div
+          className="flex rounded-lg border border-slate-200 p-0.5 text-[11px]"
+          role="tablist"
+          aria-label="Detaljnivå for begrunnelse"
+        >
           {[1, 2, 3].map((n) => (
             <button
               key={n}
               type="button"
+              role="tab"
+              aria-selected={level === n}
+              aria-controls={`why-panel-${n}`}
+              id={`why-tab-${n}`}
               onClick={() => setLevel(n as 1 | 2 | 3)}
-              className={`rounded-md px-2 py-1 ${
+              className={`rounded-md px-2 py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-900 ${
                 level === n ? "bg-slate-900 text-white" : "text-slate-600"
               }`}
             >
@@ -62,7 +70,12 @@ export function WhyThisWorkout({
       </div>
 
       {level === 1 ? (
-        <ul className="mt-3 space-y-2">
+        <ul
+          id="why-panel-1"
+          role="tabpanel"
+          aria-labelledby="why-tab-1"
+          className="mt-3 space-y-2"
+        >
           {level1.length > 0 ? (
             level1.map((reason, index) => (
               <li key={`${reason.code || index}`} className="flex gap-2 text-sm text-slate-700">
@@ -79,7 +92,12 @@ export function WhyThisWorkout({
       ) : null}
 
       {level === 2 ? (
-        <div className="mt-3 space-y-2 text-sm text-slate-700">
+        <div
+          id="why-panel-2"
+          role="tabpanel"
+          aria-labelledby="why-tab-2"
+          className="mt-3 space-y-2 text-sm text-slate-700"
+        >
           {top.map((reason, index) => (
             <p key={`${reason.code || index}`}>
               <span className="font-medium">{reason.factor || reason.code || "Signal"}:</span>{" "}
@@ -95,7 +113,12 @@ export function WhyThisWorkout({
       ) : null}
 
       {level === 3 ? (
-        <div className="mt-3 space-y-3 text-sm">
+        <div
+          id="why-panel-3"
+          role="tabpanel"
+          aria-labelledby="why-tab-3"
+          className="mt-3 space-y-3 text-sm"
+        >
           <div className="flex flex-wrap items-center gap-2">
             <EvidenceBadge evidence={evidenceBand(explanation?.evidence_strength)} />
             <span className="text-slate-600">

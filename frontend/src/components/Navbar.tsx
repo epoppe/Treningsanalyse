@@ -50,64 +50,61 @@ const NavLink = styled(Link)<{ $active?: boolean }>`
   }
 `;
 
+/** @deprecated Legacy navbar — AppShell is primary. Kept for legacy pages without reload hacks. */
 export default function Navbar() {
   const pathname = usePathname();
-  const hardNavigate = (e: React.MouseEvent, href: string) => {
-    e.preventDefault();
-    window.location.href = href; // tving full reload
-  };
 
   return (
-    <Nav>
+    <Nav aria-label="Legacy navigasjon">
       <NavContainer>
         <NavLinks>
-          <NavLink href="/" prefetch={false} onClick={(e) => hardNavigate(e, '/') } $active={pathname === '/'}>
+          <NavLink href="/aktiviteter" prefetch $active={pathname?.startsWith('/aktiviteter') || pathname?.startsWith('/activities')}>
             Aktiviteter
           </NavLink>
-          <NavLink href="/analyse" prefetch={false} onClick={(e) => hardNavigate(e, '/analyse') } $active={pathname?.startsWith('/analyse')}>
+          <NavLink href="/analyse" prefetch $active={pathname?.startsWith('/analyse')}>
             Analyse
           </NavLink>
-          <NavLink href="/statistikk" prefetch={false} onClick={(e) => hardNavigate(e, '/statistikk') } $active={pathname === '/statistikk'}>
+          <NavLink href="/statistikk" prefetch $active={pathname === '/statistikk'}>
             Statistikk
           </NavLink>
-          <NavLink href="/sammenhenger" prefetch={false} onClick={(e) => hardNavigate(e, '/sammenhenger') } $active={pathname === '/sammenhenger'}>
+          <NavLink href="/sammenhenger" prefetch $active={pathname === '/sammenhenger'}>
             Sammenhenger
           </NavLink>
-          <NavLink href="/ukesanalyse" prefetch={false} onClick={(e) => hardNavigate(e, '/ukesanalyse') } $active={pathname === '/ukesanalyse'}>
+          <NavLink href="/ukesanalyse" prefetch $active={pathname === '/ukesanalyse'}>
             Løpsøkonomi
           </NavLink>
-          <NavLink href="/analytics" prefetch={false} onClick={(e) => hardNavigate(e, '/analytics') } $active={pathname === '/analytics'}>
+          <NavLink href="/analytics" prefetch $active={pathname === '/analytics'}>
             Løpeanalyse
           </NavLink>
-          <NavLink href="/hrv" prefetch={false} onClick={(e) => hardNavigate(e, '/hrv') } $active={pathname === '/hrv'}>
+          <NavLink href="/hrv" prefetch $active={pathname === '/hrv'}>
             HRV
           </NavLink>
-          <NavLink href="/vo2max" prefetch={false} onClick={(e) => hardNavigate(e, '/vo2max') } $active={pathname === '/vo2max'}>
+          <NavLink href="/vo2max" prefetch $active={pathname === '/vo2max'}>
             VO2Max
           </NavLink>
-          <NavLink href="/stress" prefetch={false} onClick={(e) => hardNavigate(e, '/stress') } $active={pathname === '/stress'}>
+          <NavLink href="/stress" prefetch $active={pathname === '/stress'}>
             Stress
           </NavLink>
-          <NavLink href="/daglig-readiness" prefetch={false} onClick={(e) => hardNavigate(e, '/daglig-readiness') } $active={pathname === '/daglig-readiness'}>
+          <NavLink href="/daglig-readiness" prefetch $active={pathname === '/daglig-readiness'}>
             Daglig Readiness
           </NavLink>
-          <NavLink href="/body-battery" prefetch={false} onClick={(e) => hardNavigate(e, '/body-battery') } $active={pathname === '/body-battery'}>
+          <NavLink href="/body-battery" prefetch $active={pathname === '/body-battery'}>
             Body Battery
           </NavLink>
-          <NavLink href="/sovn" prefetch={false} onClick={(e) => hardNavigate(e, '/sovn') } $active={pathname === '/sovn'}>
+          <NavLink href="/sovn" prefetch $active={pathname === '/sovn'}>
             Søvn
           </NavLink>
-          <NavLink href="/training-status" prefetch={false} onClick={(e) => hardNavigate(e, '/training-status') } $active={pathname === '/training-status'}>
+          <NavLink href="/training-status" prefetch $active={pathname === '/training-status'}>
             Treningstatus
           </NavLink>
-          <NavLink href="/training-stress" prefetch={false} onClick={(e) => hardNavigate(e, '/training-stress') } $active={pathname === '/training-stress'}>
+          <NavLink href="/training-stress" prefetch $active={pathname === '/training-stress'}>
             Training Stress
           </NavLink>
-          <NavLink href="/synkronisering" prefetch={false} onClick={(e) => hardNavigate(e, '/synkronisering') } $active={pathname === '/synkronisering'}>
+          <NavLink href="/synkronisering" prefetch $active={pathname === '/synkronisering'}>
             Synkronisering
           </NavLink>
         </NavLinks>
       </NavContainer>
     </Nav>
   );
-} 
+}

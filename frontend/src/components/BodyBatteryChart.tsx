@@ -1,14 +1,20 @@
 import React from 'react';
 import {
-  LineChart,
   Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  LineChart,
   ResponsiveContainer,
-  Legend
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  LEGACY_SERIES_COLORS,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import { format, parseISO } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
@@ -139,64 +145,59 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title, moving
     }}>
       <h3 style={{ margin: '0 0 1rem 0', color: '#2c3e50' }}>{title}</h3>
       <ResponsiveContainer width="100%" height={400}>
-        <LineChart data={dataForChart} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-          <XAxis 
-            dataKey="date" 
+        <LineChart data={dataForChart} margin={CHART_MARGIN.legacy}>
+          <ThemedCartesianGrid />
+          <ThemedXAxis
+            dataKey="date"
             tick={<CustomAxisTick />}
             interval="preserveStartEnd"
           />
-          <YAxis 
+          <ThemedYAxis
             domain={[0, 100]}
             tickFormatter={(value) => `${value}%`}
-            stroke="#666"
           />
-          <Tooltip content={<CustomTooltip />} />
-          <Legend />
+          <ThemedTooltip content={<CustomTooltip />} />
+          <ThemedLegend />
           
-          {/* Høyeste Body Battery */}
           <Line
             type="monotone"
             dataKey="max_body_battery"
-            stroke="#27ae60"
+            stroke={LEGACY_SERIES_COLORS.bodyBatteryHigh}
             strokeWidth={2}
-            dot={hideDots ? false : { fill: '#27ae60', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: LEGACY_SERIES_COLORS.bodyBatteryHigh, strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Høyeste Body Battery"
             connectNulls={false}
           />
           
-          {/* Laveste Body Battery */}
           <Line
             type="monotone"
             dataKey="min_body_battery"
-            stroke="#e74c3c"
+            stroke={LEGACY_SERIES_COLORS.bodyBatteryLow}
             strokeWidth={2}
-            dot={hideDots ? false : { fill: '#e74c3c', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: LEGACY_SERIES_COLORS.bodyBatteryLow, strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Laveste Body Battery"
             connectNulls={false}
           />
           
-          {/* Start oppladet */}
           <Line
             type="monotone"
             dataKey="body_battery_charged_start"
-            stroke="#3498db"
+            stroke={LEGACY_SERIES_COLORS.bodyBatteryCharged}
             strokeWidth={2}
-            dot={hideDots ? false : { fill: '#3498db', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: LEGACY_SERIES_COLORS.bodyBatteryCharged, strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Start (Oppladet)"
             connectNulls={false}
           />
           
-          {/* Start utladet */}
           <Line
             type="monotone"
             dataKey="body_battery_drained_start"
-            stroke="#f39c12"
+            stroke={LEGACY_SERIES_COLORS.bodyBatteryDrained}
             strokeWidth={2}
-            dot={hideDots ? false : { fill: '#f39c12', strokeWidth: 2, r: 4 }}
+            dot={hideDots ? false : { fill: LEGACY_SERIES_COLORS.bodyBatteryDrained, strokeWidth: 2, r: 4 }}
             activeDot={{ r: 6 }}
             name="Start (Utladet)"
             connectNulls={false}

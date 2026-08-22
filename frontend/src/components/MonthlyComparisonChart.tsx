@@ -1,15 +1,21 @@
 'use client';
 
 import {
-  BarChart,
   Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer
+  BarChart,
+  ResponsiveContainer,
 } from 'recharts';
+import {
+  CHART_MARGIN,
+  yearComparisonColors,
+} from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import styled from 'styled-components';
 import { Activity } from '../types';
 import { useEffect, useMemo, useState } from 'react';
@@ -166,9 +172,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
     return newData;
   });
 
-  // Farger for hvert år (dynamisk basert på antall år)
-  const baseColors = ['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#8dd1e1', '#d084d0', '#82d982'];
-  const yearColors = baseColors.slice(0, years.length);
+  const yearColors = yearComparisonColors(years.length);
 
   const showNoData = !useServerSummaries && activities.length === 0;
 
@@ -180,27 +184,22 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
         <p>Ingen data å vise for denne perioden.</p>
       ) : (
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="month" />
-            <YAxis
+          <BarChart data={finalChartData} margin={CHART_MARGIN.labeled}>
+            <ThemedCartesianGrid />
+            <ThemedXAxis dataKey="month" />
+            <ThemedYAxis
               label={{
                 value: getYAxisLabel(),
                 angle: -90,
-                position: 'insideLeft'
+                position: 'insideLeft',
               }}
             />
-            <Tooltip
+            <ThemedTooltip
               content={({ active, payload, label }) => {
                 if (active && payload && payload.length) {
                   return (
-                    <div style={{
-                      background: 'white',
-                      padding: '0.5rem',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px'
-                    }}>
-                      <p><strong>{label}</strong></p>
+                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+                      <p className="font-semibold text-slate-900">{label}</p>
                     {payload.map((entry, index) => {
                       const rawValue = entry.value as number | string | undefined;
                       let formattedValue: string;
@@ -222,7 +221,7 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
                 return null;
               }}
             />
-            <Legend />
+            <ThemedLegend />
             {years.map((year, index) => (
               <Bar 
                 key={year}

@@ -3,29 +3,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title as ChartTitle,
-  Tooltip,
-  Legend,
-  Filler
-} from 'chart.js';
-import { Line } from 'react-chartjs-2';
-
-// Registrer Chart.js komponenter
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  ChartTitle,
-  Tooltip,
-  Legend,
-  Filler
-);
+  TrainingFormChart,
+  TrainingLoadChart,
+} from '@/components/charts/TrainingStressCharts';
 
 // Styled components
 const Container = styled.div`
@@ -162,27 +142,6 @@ const MetricValue = styled.div`
   line-height: 1.1;
 `;
 
-const ChartContainer = styled.div`
-  background: white;
-  border-radius: 8px;
-  padding: 0.75rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1.5rem;
-`;
-
-const ChartWrapper = styled.div`
-  position: relative;
-  height: 675px;
-  width: 100%;
-  margin-top: 0.5rem;
-`;
-
-const ChartTitleStyled = styled.h3`
-  color: #2c3e50;
-  margin-bottom: 0.25rem;
-  font-size: 1rem;
-  text-align: center;
-`;
 
 const LoadingSpinner = styled.div`
   border: 4px solid #f3f3f3;
@@ -427,17 +386,6 @@ const TrainingStressPage: React.FC = () => {
     return `${(distance / 1000).toFixed(1)} km`;
   };
 
-  const formatDateForChart = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('nb-NO', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const getFormColor = (formValue: number) => {
-    if (formValue >= 10) return '#27ae60'; // Grønn - god form
-    if (formValue >= 0) return '#f39c12'; // Oransje - nøytral
-    return '#e74c3c'; // Rød - tretthet
-  };
-
   return (
     <Container>
       {loading ? (
@@ -542,230 +490,10 @@ const TrainingStressPage: React.FC = () => {
 
           {error && <ErrorMessage>{error}</ErrorMessage>}
 
-          <ChartContainer>
-            <ChartTitleStyled>Training Load Over Tid</ChartTitleStyled>
-            <ChartWrapper>
-              <Line
-                data={{
-                  labels: data.daily_data.map(day => formatDateForChart(day.date)),
-                  datasets: [
-                                         {
-                       label: 'CTL',
-                       data: data.daily_data.map(day => day.ctl),
-                       borderColor: '#3498db',
-                       backgroundColor: 'rgba(52, 152, 219, 0.2)',
-                       fill: true,
-                       tension: 0.4,
-                       pointRadius: 0,
-                       pointHoverRadius: 0,
-                     },
-                    {
-                      label: 'ATL',
-                      data: data.daily_data.map(day => day.atl),
-                      borderColor: '#e67e22',
-                      backgroundColor: 'rgba(230, 126, 34, 0.2)',
-                      fill: true,
-                      tension: 0.4,
-                    },
-                    {
-                      label: 'TSS',
-                      data: data.daily_data.map(day => day.tss),
-                      borderColor: '#9b59b6',
-                      backgroundColor: 'rgba(155, 89, 182, 0.2)',
-                      fill: false,
-                      tension: 0,
-                      pointRadius: 4,
-                      pointHoverRadius: 6,
-                      pointBackgroundColor: '#9b59b6',
-                      pointBorderColor: '#9b59b6',
-                      borderWidth: 0,
-                    },
-                  ],
-                }}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      position: 'top',
-                      align: 'start',
-                      labels: {
-                        boxWidth: 12,
-                        padding: 8,
-                        usePointStyle: true,
-                      },
-                    },
-                    tooltip: {
-                      callbacks: {
-                        title: function(context) {
-                          const dateIndex = context[0].dataIndex;
-                          const fullDate = data.daily_data[dateIndex].date;
-                          const date = new Date(fullDate);
-                          return date.toLocaleDateString('nb-NO', { 
-                            weekday: 'long', 
-                            year: 'numeric', 
-                            month: 'long', 
-                            day: 'numeric' 
-                          });
-                        },
-                        label: function(context) {
-                          let label = context.dataset.label || '';
-                          if (label) {
-                            label += ': ';
-                          }
-                          if (context.parsed.y !== null) {
-                            label += context.parsed.y.toFixed(1);
-                          }
-                          return label;
-                        }
-                      }
-                    }
-                  },
-                  scales: {
-                    x: {
-                      type: 'category',
-                      grid: {
-                        display: false,
-                      },
-                      ticks: {
-                        color: '#666',
-                        maxRotation: 45,
-                      },
-                    },
-                    y: {
-                      beginAtZero: true,
-                      grid: {
-                        color: '#ecf0f1',
-                      },
-                      ticks: {
-                        color: '#666',
-                      },
-                      title: {
-                        display: true,
-                        text: 'TSS',
-                        color: '#666',
-                        font: {
-                          size: 14,
-                        },
-                      },
-                    },
-                  },
-                }}
-              />
-            </ChartWrapper>
-          </ChartContainer>
-
-          <ChartContainer>
-            <ChartTitleStyled>Form (Fitness/Fatigue) Over Tid</ChartTitleStyled>
-            <ChartWrapper>
-              <Line
-                data={{
-                  labels: data.daily_data.map(day => formatDateForChart(day.date)),
-                  datasets: [
-                    {
-                      label: 'Form',
-                      data: data.daily_data.map(day => day.form),
-                      borderColor: '#27ae60',
-                      backgroundColor: 'rgba(39, 174, 96, 0.2)',
-                      fill: true,
-                      tension: 0.4,
-                      pointRadius: 4,
-                      pointHoverRadius: 6,
-                    },
-                    {
-                      label: 'Nøytral (0)',
-                      data: data.daily_data.map(() => 0),
-                      borderColor: '#bdc3c7',
-                      backgroundColor: 'transparent',
-                      borderDash: [5, 5],
-                      fill: false,
-                      pointRadius: 0,
-                      pointHoverRadius: 0,
-                    },
-                  ],
-                }}
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: {
-                      position: 'top',
-                      align: 'start',
-                      labels: {
-                        boxWidth: 12,
-                        padding: 8,
-                        usePointStyle: true,
-                      },
-                    },
-                    tooltip: {
-                      callbacks: {
-                        title: function(context) {
-                          const dateIndex = context[0].dataIndex;
-                          const fullDate = data.daily_data[dateIndex].date;
-                          const date = new Date(fullDate);
-                          return date.toLocaleDateString('nb-NO', { 
-                            weekday: 'long', 
-                            year: 'numeric', 
-                            month: 'long', 
-                            day: 'numeric' 
-                          });
-                        },
-                        label: function(context) {
-                          if (context.dataset.label === 'Form') {
-                            const rawValue = context.parsed.y;
-                            if (rawValue == null) {
-                              return 'Form: –';
-                            }
-                            const value = Number(rawValue);
-                            let status = '';
-                            if (value >= 10) status = ' (God form)';
-                            else if (value >= 0) status = ' (Nøytral)';
-                            else status = ' (Tretthet)';
-                            return `Form: ${value.toFixed(1)}${status}`;
-                          }
-                          return context.dataset.label || '';
-                        }
-                      }
-                    },
-                  },
-                  scales: {
-                    x: {
-                      type: 'category',
-                      grid: {
-                        display: false,
-                      },
-                      ticks: {
-                        color: '#666',
-                        maxRotation: 45,
-                      },
-                    },
-                    y: {
-                      grid: {
-                        color: '#ecf0f1',
-                      },
-                      ticks: {
-                        color: '#666',
-                        callback: function(value) {
-                          const numericValue = Number(value);
-                          if (numericValue >= 10) return `${numericValue} (God form)`;
-                          if (numericValue >= 0) return `${numericValue} (Nøytral)`;
-                          return `${numericValue} (Tretthet)`;
-                        }
-                      },
-                      title: {
-                        display: true,
-                        text: 'Form Score',
-                        color: '#666',
-                        font: {
-                          size: 14,
-                        },
-                      },
-                    },
-                  },
-                }}
-              />
-            </ChartWrapper>
-          </ChartContainer>
+          <div className="space-y-4">
+            <TrainingLoadChart data={data.daily_data} />
+            <TrainingFormChart data={data.daily_data} />
+          </div>
 
                      <ActivityList>
              <MetricTitle>Aktiviteter med EPOC/TSS</MetricTitle>

@@ -8,17 +8,20 @@ import { nb } from 'date-fns/locale';
 import { useSleepData } from '../../hooks/useHealthData';
 import SleepScoreChart from '../../components/SleepScoreChart';
 import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Legend,
+  Bar,
   BarChart,
-  Bar
+  Line,
+  LineChart,
+  ResponsiveContainer,
 } from 'recharts';
+import { CHART_MARGIN } from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 
 const Container = styled.div`
   max-width: 1200px;
@@ -344,12 +347,12 @@ export default function SovnPage() {
           <ChartCard>
             <ChartTitle>Søvntid (timer) og søvnmål</ChartTitle>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={formatDateShort} />
-                <YAxis yAxisId="left" label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
-                <Tooltip formatter={(v: any, n: any) => [n?.toLowerCase().includes('score') ? v : `${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
-                <Legend />
+              <LineChart data={chartData} margin={CHART_MARGIN.default}>
+                <ThemedCartesianGrid />
+                <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
+                <ThemedYAxis yAxisId="left" label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
+                <ThemedTooltip formatter={(v: any, n: any) => [n?.toLowerCase().includes('score') ? v : `${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
+                <ThemedLegend />
                 <Line yAxisId="left" type="monotone" dataKey="sleep_hours_merged" name="Søvntid" stroke="#3498db" dot={false} strokeWidth={2} connectNulls />
                 <Line yAxisId="left" type="monotone" dataKey="sleep_goal_hours" name="Mål" stroke="#95a5a6" dot={false} strokeDasharray="5 5" />
               </LineChart>
@@ -360,12 +363,12 @@ export default function SovnPage() {
           <ChartCard>
             <ChartTitle>Søvnfaser per dag (timer)</ChartTitle>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="date" tickFormatter={formatDateShort} />
-                <YAxis label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
-                <Tooltip formatter={(v: any, n: any) => [`${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
-                <Legend />
+              <BarChart data={chartData} margin={CHART_MARGIN.default}>
+                <ThemedCartesianGrid />
+                <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
+                <ThemedYAxis label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
+                <ThemedTooltip formatter={(v: any, n: any) => [`${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
+                <ThemedLegend />
                 <Bar stackId="sleep" dataKey="deep_hours" name="Dyp" fill="#2ecc71" />
                 <Bar stackId="sleep" dataKey="light_hours" name="Lett" fill="#3498db" />
                 <Bar stackId="sleep" dataKey="rem_hours" name="REM" fill="#9b59b6" />
