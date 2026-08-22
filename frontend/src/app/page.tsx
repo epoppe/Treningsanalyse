@@ -15,7 +15,7 @@ import { useTodayDashboard } from "@/hooks/useTodayDashboard";
 
 export default function TodayCockpitPage() {
   const query = useTodayDashboard();
-  const whatChangedQuery = useWhatChanged(false, false);
+  const whatChangedQuery = useWhatChanged(false);
   const { lastWhatChanged, postSyncSummary } = useCockpitSync();
   const data = query.data;
   const whatChanged = lastWhatChanged || whatChangedQuery.data;
