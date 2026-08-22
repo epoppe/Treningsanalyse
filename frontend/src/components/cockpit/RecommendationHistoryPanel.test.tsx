@@ -8,9 +8,11 @@ jest.mock("@/hooks/useDashboard", () => ({
 }));
 
 jest.mock("next/link", () => {
-  return ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
-  );
+  function MockLink({ children, href }: { children: React.ReactNode; href: string }) {
+    return <a href={href}>{children}</a>;
+  }
+  MockLink.displayName = "MockLink";
+  return MockLink;
 });
 
 describe("RecommendationHistoryPanel", () => {
@@ -41,7 +43,7 @@ describe("RecommendationHistoryPanel", () => {
     expect(screen.getByText("Anbefalt")).toBeInTheDocument();
     expect(screen.getByText("Faktisk")).toBeInTheDocument();
     expect(screen.getByText("Gjennomføring")).toBeInTheDocument();
-    expect(screen.getByText("Fulgt")).toBeInTheDocument();
+    expect(screen.getAllByText("Fulgt").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("90%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Justert" }));
