@@ -15,6 +15,7 @@ import {
   IntensityDistributionPanel,
 } from "@/components/analysis/DurationCurvePanel";
 import { HistoryTimeline } from "@/components/analysis/HistoryTimeline";
+import { WeekExplorer } from "@/components/analysis/WeekExplorer";
 import { MetricPicker } from "@/components/analysis/MetricPicker";
 import { PeriodComparison } from "@/components/analysis/PeriodComparison";
 import { RelationshipCard } from "@/components/analysis/RelationshipCard";
@@ -38,6 +39,7 @@ import {
   useRelationships,
   useTimeseries,
   useTrainingResponse,
+  useWeekExplorer,
 } from "@/hooks/useAnalysisWorkspace";
 import type { AnalysisPreset } from "@/types/analysis";
 
@@ -120,6 +122,9 @@ function UtviklingPanel() {
             state.metrics.length
               ? state.metrics
               : development.data?.available_metrics?.slice(0, 8) || DEFAULT_METRICS
+          }
+          onSelectDate={(isoDate) =>
+            setParams({ tab: "historikk", week: isoDate.slice(0, 10) })
           }
         />
       </div>
@@ -248,7 +253,7 @@ function SammenhengerPanel() {
           </h2>
           <div className="grid gap-2 md:grid-cols-2">
             {group.cards.map((card) => (
-              <RelationshipCard key={card.id} card={card} />
+              <RelationshipCard key={card.id} card={card} period={state.period} />
             ))}
           </div>
         </section>
@@ -264,10 +269,11 @@ function SammenhengerPanel() {
 }
 
 function HistorikkPanel() {
-  const { state } = useAnalysisUrlState();
+  const { state, setParams } = useAnalysisUrlState();
   const historyPeriod =
     state.period === "28d" || state.period === "90d" ? "2y" : state.period;
   const query = useHistory(historyPeriod);
+  const weekQuery = useWeekExplorer(state.week || undefined);
 
   if (query.isLoading) return <AnalysisSkeleton className="h-64" />;
   if (query.isError) {
@@ -282,9 +288,16 @@ function HistorikkPanel() {
       <header>
         <h2 className="text-sm font-semibold text-slate-900">Treningshistorikk</h2>
         <p className="text-xs text-slate-500">
-          År → måned. Bruk Utvikling for duration curve og beste-periode tilbakeblikk.
+          År → måned → uke. Klikk en dato i Utvikling-grafen for ukeutforsker.
         </p>
       </header>
+      {state.week ? (
+        <WeekExplorer
+          data={weekQuery.data}
+          isLoading={weekQuery.isLoading}
+          onPreviousWeek={(weekStart) => setParams({ week: weekStart })}
+        />
+      ) : null}
       <HistoryTimeline data={query.data} />
       <p className="text-xs text-slate-500">
         Volum/YoY:{" "}

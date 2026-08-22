@@ -6,10 +6,13 @@ import type {
   HistoryPayload,
   IntensityDistributionPayload,
   PeriodComparisonPayload,
+  RelationshipLagPayload,
   RelationshipMatrixPayload,
   RelationshipsPayload,
+  HighlightsPayload,
   TimeseriesPayload,
   TrainingResponsePayload,
+  WeekExplorerPayload,
 } from "@/types/analysis";
 
 async function getJson<T>(url: string): Promise<T> {
@@ -23,8 +26,10 @@ async function getJson<T>(url: string): Promise<T> {
 
 export const analysisApi = {
   catalog: () => getJson<AnalysisCatalogPayload>(`/api/analysis/catalog`),
-  development: (period: string) =>
-    getJson<DevelopmentPayload>(`/api/analysis/development?period=${encodeURIComponent(period)}`),
+  development: (period: string, multiHorizon = false) =>
+    getJson<DevelopmentPayload>(
+      `/api/analysis/development?period=${encodeURIComponent(period)}&multi_horizon=${multiHorizon ? "true" : "false"}`,
+    ),
   timeseries: (period: string, metrics: string[]) =>
     getJson<TimeseriesPayload>(
       `/api/analysis/timeseries?period=${encodeURIComponent(period)}&metrics=${encodeURIComponent(metrics.join(","))}`
@@ -58,6 +63,14 @@ export const analysisApi = {
   periodComparison: (period: string) =>
     getJson<PeriodComparisonPayload>(
       `/api/analysis/period-comparison?period=${encodeURIComponent(period)}`
+    ),
+  week: (weekDate: string) =>
+    getJson<WeekExplorerPayload>(`/api/analysis/week/${encodeURIComponent(weekDate)}`),
+  highlights: (period = "1y") =>
+    getJson<HighlightsPayload>(`/api/analysis/highlights?period=${encodeURIComponent(period)}`),
+  relationshipLag: (stimulus: string, outcome: string, period: string) =>
+    getJson<RelationshipLagPayload>(
+      `/api/analysis/relationship-lag?stimulus=${encodeURIComponent(stimulus)}&outcome=${encodeURIComponent(outcome)}&period=${encodeURIComponent(period)}`,
     ),
   dependencyCheck: (x: string, y: string, advanced = false) =>
     getJson<{

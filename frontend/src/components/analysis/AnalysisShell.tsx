@@ -56,6 +56,7 @@ export function useAnalysisUrlState() {
       outcome: searchParams.get("outcome") || "fitness.ef_30d",
       preset: searchParams.get("preset") || "",
       backtrace: searchParams.get("backtrace") || "fitness.ef_30d",
+      week: searchParams.get("week") || "",
     }),
     [searchParams]
   );

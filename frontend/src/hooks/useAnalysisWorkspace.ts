@@ -12,10 +12,10 @@ export function useAnalysisCatalog() {
   });
 }
 
-export function useDevelopment(period: string) {
+export function useDevelopment(period: string, multiHorizon = true) {
   return useQuery({
-    queryKey: ["analysis", "development", period],
-    queryFn: () => analysisApi.development(period),
+    queryKey: ["analysis", "development", period, multiHorizon],
+    queryFn: () => analysisApi.development(period, multiHorizon),
     staleTime: 60_000,
     retry: 1,
   });
@@ -104,6 +104,40 @@ export function usePeriodComparison(period: string, enabled = true) {
     queryKey: ["analysis", "period-comparison", period],
     queryFn: () => analysisApi.periodComparison(period),
     enabled,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useWeekExplorer(weekDate?: string) {
+  return useQuery({
+    queryKey: ["analysis", "week", weekDate],
+    queryFn: () => analysisApi.week(weekDate!),
+    enabled: Boolean(weekDate),
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export function useHighlights(period = "1y") {
+  return useQuery({
+    queryKey: ["analysis", "highlights", period],
+    queryFn: () => analysisApi.highlights(period),
+    staleTime: 120_000,
+    retry: 1,
+  });
+}
+
+export function useRelationshipLag(
+  stimulus?: string,
+  outcome?: string,
+  period = "1y",
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["analysis", "relationship-lag", stimulus, outcome, period],
+    queryFn: () => analysisApi.relationshipLag(stimulus!, outcome!, period),
+    enabled: enabled && Boolean(stimulus && outcome),
     staleTime: 60_000,
     retry: 1,
   });

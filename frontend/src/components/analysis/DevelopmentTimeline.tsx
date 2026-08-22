@@ -31,11 +31,13 @@ export function DevelopmentTimeline({
   selected,
   onToggleMetric,
   available,
+  onSelectDate,
 }: {
   data?: TimeseriesPayload;
   selected: string[];
   onToggleMetric: (metric: string) => void;
   available: string[];
+  onSelectDate?: (isoDate: string) => void;
 }) {
   const { keys, rows } = data ? mergeSeries(data) : { keys: selected, rows: [] };
 
@@ -43,7 +45,7 @@ export function DevelopmentTimeline({
     <section className="rounded-lg border border-slate-200 bg-white p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold text-slate-900">Utvikling over tid</h2>
-        <p className="text-[11px] text-slate-500">Inntil 4 metrikker · native enheter</p>
+        <p className="text-[11px] text-slate-500">Inntil 4 metrikker · klikk i grafen for ukeutforsker</p>
       </div>
       <div className="mt-2 flex flex-wrap gap-1">
         {available.map((m) => {
@@ -71,7 +73,14 @@ export function DevelopmentTimeline({
           </p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+            <LineChart
+              data={rows}
+              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              onClick={(state) => {
+                const label = state?.activeLabel;
+                if (label && onSelectDate) onSelectDate(String(label));
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={32} />
               <YAxis tick={{ fontSize: 10 }} width={40} />
