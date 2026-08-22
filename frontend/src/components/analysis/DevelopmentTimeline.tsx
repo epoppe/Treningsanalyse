@@ -15,7 +15,8 @@ import {
   ANALYSIS_CHART_COLORS,
   ANALYSIS_CHART_GRID,
   ANALYSIS_CHART_TOOLTIP,
-} from "./chartTheme";
+  CHART_MARGIN,
+} from "@/components/charts/chartTheme";
 
 const COLORS = [...ANALYSIS_CHART_COLORS];
 
@@ -81,7 +82,7 @@ export function DevelopmentTimeline({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={rows}
-              margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              margin={CHART_MARGIN.compact}
               onClick={(state) => {
                 const label = state?.activeLabel;
                 if (label && onSelectDate) onSelectDate(String(label));

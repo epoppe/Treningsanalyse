@@ -15,7 +15,8 @@ import {
   ANALYSIS_CHART_GRID,
   ANALYSIS_CHART_PRIMARY,
   ANALYSIS_CHART_TOOLTIP,
-} from "./chartTheme";
+  CHART_MARGIN,
+} from "@/components/charts/chartTheme";
 
 export function LagChart({ data }: { data?: RelationshipLagPayload }) {
   const rows =
@@ -32,7 +33,7 @@ export function LagChart({ data }: { data?: RelationshipLagPayload }) {
   return (
     <div className="h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <BarChart data={rows} margin={CHART_MARGIN.compact}>
           <CartesianGrid {...ANALYSIS_CHART_GRID} />
           <XAxis dataKey="lag" tick={ANALYSIS_CHART_AXIS.tick} />
           <YAxis tick={ANALYSIS_CHART_AXIS.tick} width={32} domain={[-1, 1]} />

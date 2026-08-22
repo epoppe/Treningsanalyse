@@ -2,17 +2,23 @@
 
 import type { DurationCurvePayload, IntensityDistributionPayload } from "@/types/analysis";
 import {
-  CartesianGrid,
+  CHART_MARGIN,
+  chartColor,
+} from "@/components/charts/chartTheme";
+import {
   Legend,
   Line,
   LineChart,
   ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
+import {
+  ThemedCartesianGrid,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from "@/components/charts/ThemedRecharts";
 
-const ZONE_COLORS = ["#0f766e", "#ca8a04", "#c2410c"];
+const ZONE_COLORS = [chartColor(0), chartColor(2), chartColor(1)];
 
 function mergeZoneSeries(payload: IntensityDistributionPayload) {
   const keys = Object.keys(payload.series);
@@ -51,12 +57,12 @@ export function IntensityDistributionPanel({
           </p>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-              <XAxis dataKey="date" tick={{ fontSize: 10 }} minTickGap={40} />
-              <YAxis tick={{ fontSize: 10 }} width={36} unit="%" />
-              <Tooltip contentStyle={{ fontSize: 12 }} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
+            <LineChart data={rows} margin={CHART_MARGIN.compact}>
+              <ThemedCartesianGrid />
+              <ThemedXAxis dataKey="date" minTickGap={40} />
+              <ThemedYAxis width={36} unit="%" />
+              <ThemedTooltip />
+              <Legend wrapperStyle={{ fontSize: 11, color: "#475569" }} />
               {keys.map((key, i) => (
                 <Line
                   key={key}
