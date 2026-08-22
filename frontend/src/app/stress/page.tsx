@@ -2,7 +2,27 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import styled from 'styled-components';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ComposedChart, Area } from 'recharts';
+import {
+  Area,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { CHART_MARGIN } from '@/components/charts/chartTheme';
+import {
+  ThemedCartesianGrid,
+  ThemedLegend,
+  ThemedTooltip,
+  ThemedXAxis,
+  ThemedYAxis,
+} from '@/components/charts/ThemedRecharts';
 import { api } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
@@ -503,28 +523,27 @@ export default function StressPage() {
               </QuickFilterButton>
             </div>
             <ResponsiveContainer width="100%" height={400}>
-              <ComposedChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
+              <ComposedChart data={chartData} margin={CHART_MARGIN.legacy}>
+                <ThemedCartesianGrid />
+                <ThemedXAxis
+                  dataKey="date"
                   angle={-45}
                   textAnchor="end"
                   height={80}
                   interval="preserveStartEnd"
                 />
-                <YAxis 
-                  label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  formatter={(value: any, name: string) => {
-                    if (name === 'stress_time') return [formatTime(value), 'Stress tid'];
-                    if (name === 'rest_time') return [formatTime(value), 'Hviletid'];
-                    if (name === 'movingAverage7dTime') return [formatTime(value), '7-dagers snitt'];
-                    return [value, name];
+                <ThemedYAxis label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }} />
+                <ThemedTooltip
+                  formatter={(value: any, name: any) => {
+                    const key = String(name);
+                    if (key === 'stress_time') return [formatTime(value), 'Stress tid'];
+                    if (key === 'rest_time') return [formatTime(value), 'Hviletid'];
+                    if (key === 'movingAverage7dTime') return [formatTime(value), '7-dagers snitt'];
+                    return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
-                <Legend />
+                <ThemedLegend />
                 <Bar dataKey="stress_time" fill="#ef4444" name="Stress tid" />
                 <Bar dataKey="rest_time" fill="#10b981" name="Hviletid" />
                 {showTrend && (
@@ -545,28 +564,27 @@ export default function StressPage() {
           <ChartContainer>
             <ChartTitle>Stress-nivåer per dag (lav/middels/høy)</ChartTitle>
             <ResponsiveContainer width="100%" height={400}>
-              <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 60 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="date" 
+              <BarChart data={chartData} margin={CHART_MARGIN.legacy}>
+                <ThemedCartesianGrid />
+                <ThemedXAxis
+                  dataKey="date"
                   angle={-45}
                   textAnchor="end"
                   height={80}
                   interval="preserveStartEnd"
                 />
-                <YAxis 
-                  label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  formatter={(value: any, name: string) => {
-                    if (name === 'low_stress_time') return [formatTime(value), 'Lav stress'];
-                    if (name === 'medium_stress_time') return [formatTime(value), 'Middels stress'];
-                    if (name === 'high_stress_time') return [formatTime(value), 'Høy stress'];
-                    return [value, name];
+                <ThemedYAxis label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }} />
+                <ThemedTooltip
+                  formatter={(value: any, name: any) => {
+                    const key = String(name);
+                    if (key === 'low_stress_time') return [formatTime(value), 'Lav stress'];
+                    if (key === 'medium_stress_time') return [formatTime(value), 'Middels stress'];
+                    if (key === 'high_stress_time') return [formatTime(value), 'Høy stress'];
+                    return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
-                <Legend />
+                <ThemedLegend />
                 <Bar dataKey="low_stress_time" stackId="stress" fill="#fbbf24" name="Lav stress" />
                 <Bar dataKey="medium_stress_time" stackId="stress" fill="#f59e0b" name="Middels stress" />
                 <Bar dataKey="high_stress_time" stackId="stress" fill="#dc2626" name="Høy stress" />
