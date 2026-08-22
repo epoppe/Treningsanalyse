@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    # Redis (valgfritt)
-    REDIS_ENABLED: bool = True
+    # Redis (valgfritt — default av for lokal boot uten Redis)
+    REDIS_ENABLED: bool = False
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
@@ -85,6 +85,12 @@ class Settings(BaseSettings):
         "http://localhost:3000,http://localhost:3001,http://localhost:3002,"
         "http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002"
     )
+    # Tom = TrustedHostMiddleware av. Eksempel: "localhost,127.0.0.1,treningsanalyse.local"
+    ALLOWED_HOSTS: str = ""
+    # Eksponer /api/debug/* når true
+    DEBUG: bool = False
+    # local | production — påvirker logging/hints, ikke coaching
+    ENVIRONMENT: str = "local"
     # Hopp over Garmin-innlogging ved app-oppstart (dev/test)
     SKIP_GARMIN_INIT: bool = False
 
@@ -132,6 +138,10 @@ class Settings(BaseSettings):
     def cors_origin_list(self) -> List[str]:
         """Parse CORS_ORIGINS til liste uten tomme elementer."""
         return [part.strip() for part in self.CORS_ORIGINS.split(",") if part.strip()]
+
+    def allowed_host_list(self) -> List[str]:
+        """Parse ALLOWED_HOSTS. Tom liste = middleware ikke aktiv."""
+        return [part.strip() for part in self.ALLOWED_HOSTS.split(",") if part.strip()]
 
     def masked_garmin_email(self) -> str:
         """Maskert e-post for logger (aldri full adresse)."""

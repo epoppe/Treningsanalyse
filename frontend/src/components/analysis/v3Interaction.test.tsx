@@ -81,9 +81,10 @@ describe("ConnectionStatus", () => {
     expect(screen.getByText(/Treningsanalyse-serveren er ikke tilgjengelig/i)).toBeTruthy();
   });
 
-  it("shows subtle connected state", () => {
+  it("shows subtle connected state when probe succeeds", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true }) as unknown as typeof fetch;
     render(<ConnectionStatus online asOf="2026-08-22" />);
-    expect(screen.getByText(/Connected/i)).toBeTruthy();
+    expect(await screen.findByText(/Connected/i)).toBeTruthy();
   });
 });
 

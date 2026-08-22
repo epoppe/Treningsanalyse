@@ -6,8 +6,10 @@ Treningsanalyse is a Garmin training-analysis app: a FastAPI backend (`backend/`
 
 ### Services and how to run them (from repo root)
 - Backend (FastAPI, port 8000): `npm run dev:backend`. This wraps `backend/.venv/bin/python -m uvicorn app.main:app --reload` with `SKIP_GARMIN_INIT=true`, which lets the API boot **without** Garmin credentials. Standard run commands live in root `package.json`.
-- Frontend (Next.js, port 3000): `npm run dev`. The frontend proxies `/api/*` to `http://localhost:8000` via `frontend/next.config.js` rewrites, so the backend must be running for data to load.
+- Frontend (Next.js, port 3000): `npm run dev`. The frontend proxies `/api/*` and `/health*` to `http://localhost:8000` via `frontend/next.config.js` rewrites, so the backend must be running for data to load.
 - Both are dev servers with hot reload; run each in its own long-lived (tmux) session.
+- Prod-like local: `npm run start:local` (`scripts/start-local.sh`) or `docker compose up --build`. See `docs/DEPLOYMENT.md`.
+- Health probes: `/health/live` (liveness), `/health/ready` (200 ready / 503 not ready).
 
 ### Tests / lint / build
 - Backend tests: `npm test` (Python `unittest`). Note: ~6 advanced performance-metric tests (`test_performance_metrics`, parts of `test_analysis_atomicity`/`test_sync_metrics`/`test_coaching_analysis`) fail on a clean checkout independent of dependency versions — these are pre-existing app-logic failures, not an environment problem.
@@ -23,5 +25,6 @@ Treningsanalyse is a Garmin training-analysis app: a FastAPI backend (`backend/`
 - `main.py` honors `SKIP_GARMIN_INIT`; without it, startup runs garminconnect's login strategies (with intentional anti-WAF sleeps up to ~20s) and can be slow — always keep `SKIP_GARMIN_INIT=true` in dev.
 - Re-auth (401/MFA/changed login) sends a Telegram alert if `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` are set (see `app/services/telegram_notifier.py`); unset = no-op.
 - Activity detail pages (`/activities/{id}`) require a **numeric** `activity_id` (route is typed `int`); the statistics page needs monthly-summary data to leave its loading state. Both are data dependencies, not bugs.
-- Redis is optional: without it the backend logs a warning and uses an in-memory cache.
+- Redis is optional (default `REDIS_ENABLED=false`): without it the backend uses an in-memory cache. Set `REDIS_ENABLED=true` to use Redis.
 - `python3 -m venv` requires the system `python3-venv` package (already present in the VM snapshot).
+- `/api/debug/db-info` requires `DEBUG=true`. Do not expose the API publicly without an ACL (`docs/DEPLOYMENT.md`, `docs/SECURITY.md`).

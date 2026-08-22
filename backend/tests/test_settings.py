@@ -16,12 +16,15 @@ class SettingsConsolidationTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             # Unngå at prosjektets .env påvirker — bruk env_file som ikke finnes
             s = Settings(_env_file=None)
-        self.assertTrue(s.REDIS_ENABLED)
+        self.assertFalse(s.REDIS_ENABLED)
         self.assertEqual(s.REDIS_PORT, 6379)
         self.assertFalse(s.GARMIN_IS_CN)
         self.assertEqual(s.LOG_LEVEL, "INFO")
         self.assertIsNone(s.REDIS_PASSWORD)
         self.assertIsNone(s.GARMIN_TOKEN_FILE)
+        self.assertFalse(s.DEBUG)
+        self.assertEqual(s.ENVIRONMENT, "local")
+        self.assertEqual(s.allowed_host_list(), [])
 
     def test_bool_and_int_from_env_strings(self):
         env = {

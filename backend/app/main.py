@@ -1,6 +1,8 @@
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import logging
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
@@ -26,7 +28,11 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialiserer applikasjonen ved oppstart."""
-    logger.info("Starte applikasjonen... (v2 - med nye normaliseringer)")
+    logger.info(
+        "Starter applikasjonen... (environment=%s debug=%s)",
+        settings.ENVIRONMENT,
+        settings.DEBUG,
+    )
     
     # Logg konfigurasjonsdetaljer (aldri full e-post/passord)
     logger.info("Bruker Garmin e-post: %s", settings.masked_garmin_email())
@@ -89,6 +95,10 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(CacheHeadersMiddleware)
 
+_allowed_hosts = settings.allowed_host_list()
+if _allowed_hosts:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=_allowed_hosts)
+
 # Inkluder alle routere med korrekt prefix
 app.include_router(activities.router, prefix="/api", tags=["Aktiviteter"])
 app.include_router(garmin_data.router, prefix="/api", tags=["Garmin Data"])
@@ -131,7 +141,7 @@ def health_live():
 
 @app.get("/health/ready")
 def health_ready():
-    """Readiness: DB + schema på head."""
+    """Readiness: DB + schema på head. HTTP 503 når ikke klar (probe-vennlig)."""
     from sqlalchemy import text
 
     checks: dict = {}
@@ -155,7 +165,10 @@ def health_ready():
     checks["data_dir"] = "ok" if data_dir_ok else "missing"
 
     ready = checks["database"] == "ok" and checks["schema"] == "ok" and checks["data_dir"] == "ok"
-    return {"status": "ok" if ready else "not_ready", "checks": checks}
+    payload = {"status": "ok" if ready else "not_ready", "checks": checks}
+    if ready:
+        return payload
+    return JSONResponse(status_code=503, content=payload)
 
 
 @app.get("/health/data")
@@ -168,9 +181,10 @@ def health_data(db: Session = Depends(get_db)):
 
 @app.get("/api/debug/db-info")
 def debug_db_info(db: Session = Depends(get_db)):
-    """Debug: vis hvilken database som brukes og antall aktiviteter."""
+    """Debug: vis hvilken database som brukes og antall aktiviteter. Krever DEBUG=true."""
+    if not settings.DEBUG:
+        raise HTTPException(status_code=404, detail="Not found")
     from .database.models.activity import Activity
-    from .config import settings
     count = db.query(Activity).count()
     return {
         "database_url": settings.DATABASE_URL[:80] + "..." if len(settings.DATABASE_URL) > 80 else settings.DATABASE_URL,
