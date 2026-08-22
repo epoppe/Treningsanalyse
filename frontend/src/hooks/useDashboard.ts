@@ -46,3 +46,34 @@ export function useRecommendationHistory(limit = 30) {
     retry: 1,
   });
 }
+
+export const historicalSupportKeys = {
+  all: ["decision-historical-support"] as const,
+  detail: (workoutType?: string, date?: string) =>
+    [...historicalSupportKeys.all, workoutType || "auto", date || "today"] as const,
+};
+
+export function useDecisionHistoricalSupport(workoutType?: string, date?: string, enabled = true) {
+  return useQuery({
+    queryKey: historicalSupportKeys.detail(workoutType, date),
+    queryFn: () => todayApi.decisionHistoricalSupport(workoutType, date),
+    enabled,
+    staleTime: 60_000,
+    retry: 1,
+  });
+}
+
+export const comparableSessionsKeys = {
+  all: ["comparable-sessions"] as const,
+  activity: (id: string) => [...comparableSessionsKeys.all, id] as const,
+};
+
+export function useComparableSessions(activityId?: string) {
+  return useQuery({
+    queryKey: comparableSessionsKeys.activity(activityId || ""),
+    queryFn: () => todayApi.comparableSessions(activityId!),
+    enabled: Boolean(activityId),
+    staleTime: 60_000,
+    retry: 1,
+  });
+}

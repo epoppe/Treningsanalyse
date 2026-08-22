@@ -5,7 +5,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAppDispatch } from "@/store/hooks";
 import { useSyncListener } from "@/hooks/useSyncListener";
 import { todayKeys } from "@/hooks/useTodayDashboard";
-import { whatChangedKeys } from "@/hooks/useDashboard";
+import {
+  comparableSessionsKeys,
+  historicalSupportKeys,
+  whatChangedKeys,
+} from "@/hooks/useDashboard";
 import { planKeys } from "@/hooks/usePlan";
 import { todayApi } from "@/dashboard/todayApi";
 import { refreshActivitiesAfterSync } from "@/utils/syncRefresh";
@@ -63,6 +67,8 @@ export function SyncRefreshBridge() {
       queryClient.invalidateQueries({ queryKey: planKeys.all });
       queryClient.invalidateQueries({ queryKey: ["activities"] });
       queryClient.invalidateQueries({ queryKey: ["recommendation-history"] });
+      queryClient.invalidateQueries({ queryKey: historicalSupportKeys.all });
+      queryClient.invalidateQueries({ queryKey: comparableSessionsKeys.all });
     },
     [dispatch, pushToast, queryClient, setLastWhatChanged, setPostSyncSummary],
   );

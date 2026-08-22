@@ -1,5 +1,7 @@
 import type { TodayDashboardPayload } from "@/types/today";
 import type {
+  ComparableSessionsPayload,
+  HistoricalSupportPayload,
   PostSyncSummaryPayload,
   RecommendationHistoryPayload,
   WhatChangedPayload,
@@ -32,4 +34,17 @@ export const todayApi = {
     ),
   recommendationHistory: (limit = 30) =>
     getJson<RecommendationHistoryPayload>(`/api/dashboard/recommendation-history?limit=${limit}`),
+  decisionHistoricalSupport: (workoutType?: string, date?: string) => {
+    const params = new URLSearchParams();
+    if (workoutType) params.set("workout_type", workoutType);
+    if (date) params.set("target_date", date);
+    const q = params.toString();
+    return getJson<HistoricalSupportPayload>(
+      `/api/dashboard/decision-historical-support${q ? `?${q}` : ""}`,
+    );
+  },
+  comparableSessions: (activityId: string) =>
+    getJson<ComparableSessionsPayload>(
+      `/api/dashboard/comparable-sessions?activity_id=${encodeURIComponent(activityId)}`,
+    ),
 };

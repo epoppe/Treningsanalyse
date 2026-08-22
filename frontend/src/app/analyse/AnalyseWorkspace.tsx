@@ -8,6 +8,7 @@ import {
   useAnalysisUrlState,
 } from "@/components/analysis/AnalysisShell";
 import { AnalysisPresets } from "@/components/analysis/AnalysisPresets";
+import { SavedAnalysisViews } from "@/components/analysis/SavedAnalysisViews";
 import { BestPeriodBacktracePanel } from "@/components/analysis/BestPeriodBacktracePanel";
 import { DevelopmentTimeline } from "@/components/analysis/DevelopmentTimeline";
 import {
@@ -340,6 +341,7 @@ export default function AnalyseWorkspace() {
       </header>
 
       <AnalysisFiltersBar />
+      <SavedAnalysisViews />
       <AnalysisTabs />
 
       {state.tab === "utvikling" ? <UtviklingPanel /> : null}
