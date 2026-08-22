@@ -6,6 +6,7 @@ import { useAppDispatch } from "@/store/hooks";
 import { useSyncListener } from "@/hooks/useSyncListener";
 import { todayKeys } from "@/hooks/useTodayDashboard";
 import { whatChangedKeys } from "@/hooks/useDashboard";
+import { planKeys } from "@/hooks/usePlan";
 import { todayApi } from "@/dashboard/todayApi";
 import { refreshActivitiesAfterSync } from "@/utils/syncRefresh";
 import type { SyncJobStatusResponse } from "@/types/syncJob";
@@ -59,7 +60,7 @@ export function SyncRefreshBridge() {
       queryClient.invalidateQueries({ queryKey: todayKeys.all });
       queryClient.invalidateQueries({ queryKey: whatChangedKeys.all });
       queryClient.invalidateQueries({ queryKey: ["analysis"] });
-      queryClient.invalidateQueries({ queryKey: ["plan"] });
+      queryClient.invalidateQueries({ queryKey: planKeys.all });
       queryClient.invalidateQueries({ queryKey: ["activities"] });
       queryClient.invalidateQueries({ queryKey: ["recommendation-history"] });
     },

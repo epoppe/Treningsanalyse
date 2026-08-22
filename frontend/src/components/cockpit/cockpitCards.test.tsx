@@ -2,6 +2,9 @@ import { render, screen } from "@testing-library/react";
 import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
 import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
+import { PlanChangeTimeline } from "@/components/cockpit/PlanChangeTimeline";
+import { PlanVsActualTable } from "@/components/cockpit/PlanVsActualTable";
+import { MesocycleOverview } from "@/components/cockpit/MesocycleOverview";
 import type { TodayDashboardPayload } from "@/types/today";
 
 const thresholdPayload: TodayDashboardPayload = {
@@ -95,5 +98,60 @@ describe("WhyThisWorkout", () => {
       />,
     );
     expect(screen.getByText(/Kvalitetsøkt er due etter god spacing/i)).toBeInTheDocument();
+  });
+});
+
+describe("Plan cockpit components", () => {
+  it("renders plan change timeline with Norwegian reason", () => {
+    render(
+      <PlanChangeTimeline
+        history={[
+          {
+            version: 2,
+            created_at: "2026-08-20T10:00:00+00:00",
+            reason: ["no_quality_conflict"],
+            week_objective: "Bygg terskel",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Bygg terskel/i)).toBeInTheDocument();
+    expect(screen.getByText(/Ingen planendring nødvendig/i)).toBeInTheDocument();
+  });
+
+  it("renders plan vs actual table", () => {
+    render(
+      <PlanVsActualTable
+        days={[
+          {
+            date: "2026-08-18",
+            weekday: 0,
+            planned_type: "threshold",
+            actual_type: "threshold",
+            execution_status: "followed",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getAllByText(/Kontrollert terskel/i).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Fulgt/i)).toBeInTheDocument();
+  });
+
+  it("renders mesocycle overview", () => {
+    render(
+      <MesocycleOverview
+        weeks={[
+          {
+            week: 1,
+            phase: "build",
+            target_volume: [220, 320],
+            quality_sessions: 2,
+            primary_stimulus: "threshold",
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText(/Uke 1/i)).toBeInTheDocument();
+    expect(screen.getByText(/Oppbygging/i)).toBeInTheDocument();
   });
 });

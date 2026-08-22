@@ -69,7 +69,7 @@ export interface AthleteStatePayload {
 export interface PlannedSession {
   day_offset?: number;
   type?: string;
-  duration_min?: number;
+  duration_min?: number | number[];
   purpose?: string;
 }
 

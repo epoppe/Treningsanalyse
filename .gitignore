@@ -115,6 +115,8 @@ test_*.py
 !backend/tests/test_coaching_v9_operational.py
 !backend/tests/test_analysis_workspace_api.py
 !backend/tests/test_dashboard_api.py
+!backend/tests/test_plan_dashboard_api.py
+!backend/tests/test_plan_vs_actual_service.py
 !backend/tests/test_update_delta_service.py
 !backend/tests/test_analytics_metric_registry.py
 !backend/tests/test_pb_calibration_and_training_response.py

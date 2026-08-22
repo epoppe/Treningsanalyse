@@ -13,9 +13,18 @@ from ..database.models.coaching_v5 import RecommendationRecord
 from ..database.models.activity import Activity
 from ..services.coaching_orchestrator import CoachingOrchestrator
 from ..services.comparable_session_service import ComparableSessionService
+from ..services.goal_context_service import GoalContextService
+from ..services.mesocycle_planner import MesocyclePlanner
+from ..services.plan_adaptation_service import PlanAdaptationService
+from ..services.plan_stability import PlanStabilityService
+from ..services.plan_vs_actual_service import PlanVsActualService
+from ..services.ppap_metrics_service import PpapMetricsService
 from ..services.recommendation_ledger_service import RecommendationLedgerService
 from ..services.session_quality_service import SessionQualityService
+from ..services.training_phase_service import TrainingPhaseService
+from ..services.training_plan_store import TrainingPlanStore
 from ..services.update_delta_service import UpdateDeltaService
+from ..services.weekly_plan_service import WeeklyPlanService
 from ..storage import DataStorage
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -324,3 +333,133 @@ def get_recommendation_history(
             }
         )
     return {"status": "ok", "items": items, "count": len(items)}
+
+
+def _format_plan_sessions(sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    formatted: List[Dict[str, Any]] = []
+    for session in sessions or []:
+        formatted.append(
+            {
+                "day_offset": session.get("day_offset"),
+                "type": session.get("type"),
+                "duration_min": session.get("duration_min"),
+                "purpose": session.get("purpose"),
+                "prescription": session.get("prescription"),
+            }
+        )
+    return formatted
+
+
+def compose_plan_payload(
+    *,
+    day: date,
+    weekly: Dict[str, Any],
+    mesocycle: Dict[str, Any],
+    adaptation: Dict[str, Any],
+    goal: Dict[str, Any],
+    phase: Dict[str, Any],
+    version_history: List[Dict[str, Any]],
+    vs_actual: Dict[str, Any],
+    plan_stability: Dict[str, Any],
+    source: str,
+) -> Dict[str, Any]:
+    return {
+        "status": "ok",
+        "as_of": day.isoformat(),
+        "week_start": weekly.get("week_start") or day.isoformat(),
+        "source": source,
+        "goal": goal,
+        "training_phase": phase,
+        "weekly_plan": {
+            "plan_id": weekly.get("plan_id"),
+            "version": weekly.get("version"),
+            "week_objective": weekly.get("week_objective"),
+            "sessions": _format_plan_sessions(weekly.get("sessions") or []),
+            "target_volume_min": weekly.get("target_volume_min"),
+            "hard_sessions": weekly.get("hard_sessions"),
+            "scores": weekly.get("scores"),
+        },
+        "mesocycle": {
+            "start": mesocycle.get("start"),
+            "weeks": mesocycle.get("weeks"),
+            "selected_candidate": mesocycle.get("selected_candidate"),
+            "mesocycle": mesocycle.get("mesocycle") or [],
+            "goal": mesocycle.get("goal"),
+            "source": mesocycle.get("source"),
+            "evidence_strength": mesocycle.get("evidence_strength"),
+            "note": mesocycle.get("note"),
+        },
+        "plan_adaptation": {
+            "plan_status": adaptation.get("plan_status"),
+            "changes": adaptation.get("changes") or [],
+            "reason": adaptation.get("reason") or [],
+            "confidence": adaptation.get("confidence"),
+            "signals": adaptation.get("signals"),
+            "note": adaptation.get("note"),
+        },
+        "plan_stability": plan_stability.get("status"),
+        "plan_stability_detail": plan_stability,
+        "version_history": version_history,
+        "vs_actual": vs_actual,
+    }
+
+
+@router.get("/plan")
+def get_plan_dashboard(
+    target_date: Optional[date] = Query(None, description="Referansedato (YYYY-MM-DD)"),
+    mesocycle_weeks: int = Query(5, ge=4, le=6),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> dict:
+    """Dedicated plan cockpit — week, mesocycle, adaptation and plan vs actual."""
+    day = target_date or date.today()
+    try:
+        ppap = PpapMetricsService(db, storage)
+        goal_svc = GoalContextService(db, storage, ppap)
+        goal = goal_svc.build(day)
+        phase = TrainingPhaseService(db, storage, ppap, goal=goal).determine(day, goal=goal)
+        store = TrainingPlanStore(db)
+        stored = store.get_active_plan(day)
+        weekly_svc = WeeklyPlanService(db, storage, ppap, goal=goal)
+        weekly = stored or weekly_svc.build(day, goal=goal, persist=False, commit=False)
+        if stored:
+            weekly.setdefault("week_start", stored.get("week_start"))
+        else:
+            weekly.setdefault("week_start", day.isoformat())
+
+        adaptation = PlanAdaptationService(db, storage, ppap, goal=goal).assess(
+            day,
+            plan=weekly,
+            goal=goal,
+            persist=False,
+            commit=False,
+        )
+        mesocycle = MesocyclePlanner(db, storage, ppap, goal=goal).plan(
+            day,
+            weeks=mesocycle_weeks,
+            goal=goal,
+            compare_candidates=False,
+        )
+        version_history: List[Dict[str, Any]] = []
+        plan_id = weekly.get("plan_id")
+        if plan_id:
+            version_history = store.list_versions(plan_id, limit=8)
+
+        week_start = date.fromisoformat(str(weekly.get("week_start") or day.isoformat()))
+        vs_actual = PlanVsActualService(db, storage).compare(weekly, week_start=week_start)
+        plan_stability = PlanStabilityService().from_history(db, as_of=day)
+
+        return compose_plan_payload(
+            day=day,
+            weekly=weekly,
+            mesocycle=mesocycle,
+            adaptation=adaptation,
+            goal=goal,
+            phase=phase,
+            version_history=version_history,
+            vs_actual=vs_actual,
+            plan_stability=plan_stability,
+            source="stored" if stored else "live",
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
