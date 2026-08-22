@@ -3,7 +3,8 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import StoreProvider from "./StoreProvider";
 import StyledComponentsRegistry from "./registry";
-import Navbar from "../components/Navbar";
+import AppShell from "../components/navigation/AppShell";
+import { SyncRefreshBridge } from "../components/SyncRefreshBridge";
 import QueryProvider from "./QueryProvider";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -24,10 +25,10 @@ export default function RootLayout({
         <StyledComponentsRegistry>
           <QueryProvider>
             <StoreProvider>
-              <Navbar />
-              <main>
+              <SyncRefreshBridge />
+              <AppShell>
                 {children}
-              </main>
+              </AppShell>
             </StoreProvider>
           </QueryProvider>
         </StyledComponentsRegistry>
