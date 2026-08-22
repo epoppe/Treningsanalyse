@@ -1,4 +1,9 @@
 import type { TodayDashboardPayload } from "@/types/today";
+import type {
+  PostSyncSummaryPayload,
+  RecommendationHistoryPayload,
+  WhatChangedPayload,
+} from "@/types/dashboard";
 
 async function getJson<T>(url: string): Promise<T> {
   const res = await fetch(url, { headers: { Accept: "application/json" } });
@@ -17,4 +22,14 @@ export const todayApi = {
     const q = params.toString();
     return getJson<TodayDashboardPayload>(`/api/dashboard/today${q ? `?${q}` : ""}`);
   },
+  whatChanged: (refresh = true) =>
+    getJson<WhatChangedPayload>(
+      `/api/dashboard/what-changed?refresh=${refresh ? "true" : "false"}`,
+    ),
+  postSyncSummary: (activityId: string) =>
+    getJson<PostSyncSummaryPayload>(
+      `/api/dashboard/post-sync-summary?activity_id=${encodeURIComponent(activityId)}`,
+    ),
+  recommendationHistory: (limit = 30) =>
+    getJson<RecommendationHistoryPayload>(`/api/dashboard/recommendation-history?limit=${limit}`),
 };

@@ -90,6 +90,24 @@ class DashboardApiTests(unittest.TestCase):
         self.assertEqual(body["weekly_plan"]["sessions"][0]["type"], "threshold")
         self.assertIn("decision_explanation", body)
 
+    def test_what_changed_wraps_delta_service(self):
+        from app.main import app
+
+        self._override(app)
+        before = {"id": 1, "recommended_workout_type": "easy_run", "input_context": {}}
+        after = {"id": 2, "recommended_workout_type": "threshold", "input_context": {}}
+        with patch("app.routers.dashboard.RecommendationLedgerService") as ledger_cls:
+            ledger = ledger_cls.return_value
+            ledger.get_latest_active_recommendation.side_effect = [before, after]
+            with patch("app.routers.dashboard.CoachingOrchestrator") as orch:
+                orch.return_value.generate_live_decision.return_value = {"status": "ok"}
+                client = TestClient(app)
+                res = client.get("/api/dashboard/what-changed", params={"refresh": "true"})
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertTrue(body["recommendation_changed"])
+
 
 if __name__ == "__main__":
     unittest.main()

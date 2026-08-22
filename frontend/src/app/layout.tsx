@@ -4,6 +4,7 @@ import "./globals.css";
 import StoreProvider from "./StoreProvider";
 import StyledComponentsRegistry from "./registry";
 import AppShell from "../components/navigation/AppShell";
+import { CockpitSyncProvider } from "../components/cockpit/CockpitSyncProvider";
 import { SyncRefreshBridge } from "../components/SyncRefreshBridge";
 import QueryProvider from "./QueryProvider";
 
@@ -25,10 +26,12 @@ export default function RootLayout({
         <StyledComponentsRegistry>
           <QueryProvider>
             <StoreProvider>
-              <SyncRefreshBridge />
-              <AppShell>
-                {children}
-              </AppShell>
+              <CockpitSyncProvider>
+                <SyncRefreshBridge />
+                <AppShell>
+                  {children}
+                </AppShell>
+              </CockpitSyncProvider>
             </StoreProvider>
           </QueryProvider>
         </StyledComponentsRegistry>

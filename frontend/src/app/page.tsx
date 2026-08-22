@@ -7,11 +7,18 @@ import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
 import { AnalysisError, AnalysisSkeleton } from "@/components/analysis/ui";
 import { formatNorwegianDate, warningLabel } from "@/components/cockpit/cockpitUtils";
+import { PostSyncSummaryCard } from "@/components/cockpit/PostSyncSummaryCard";
+import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
+import { useCockpitSync } from "@/components/cockpit/CockpitSyncProvider";
+import { useWhatChanged } from "@/hooks/useDashboard";
 import { useTodayDashboard } from "@/hooks/useTodayDashboard";
 
 export default function TodayCockpitPage() {
   const query = useTodayDashboard();
+  const whatChangedQuery = useWhatChanged(false);
+  const { lastWhatChanged, postSyncSummary } = useCockpitSync();
   const data = query.data;
+  const whatChanged = lastWhatChanged || whatChangedQuery.data;
 
   if (query.isLoading) {
     return (
@@ -52,6 +59,9 @@ export default function TodayCockpitPage() {
       </header>
 
       <AthleteStateCard state={data.athlete_state} />
+
+      {postSyncSummary ? <PostSyncSummaryCard data={postSyncSummary} /> : null}
+      {whatChanged ? <WhatChangedCard data={whatChanged} /> : null}
 
       <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <NextWorkoutCard data={data} />

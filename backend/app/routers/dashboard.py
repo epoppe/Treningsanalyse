@@ -9,7 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db, get_data_storage
+from ..database.models.coaching_v5 import RecommendationRecord
+from ..database.models.activity import Activity
 from ..services.coaching_orchestrator import CoachingOrchestrator
+from ..services.comparable_session_service import ComparableSessionService
+from ..services.recommendation_ledger_service import RecommendationLedgerService
+from ..services.session_quality_service import SessionQualityService
+from ..services.update_delta_service import UpdateDeltaService
 from ..storage import DataStorage
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -177,3 +183,144 @@ def get_today_dashboard(
         return compose_today_payload(brief)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+def _ledger_predecessor(db: Session, current_id: int) -> Optional[Dict[str, Any]]:
+    row = (
+        db.query(RecommendationRecord)
+        .filter(RecommendationRecord.superseded_by_id == current_id)
+        .order_by(RecommendationRecord.generated_at.desc())
+        .first()
+    )
+    if row is None:
+        return None
+    return RecommendationLedgerService(db)._to_dict(row)
+
+
+@router.get("/what-changed")
+def get_what_changed(
+    target_date: Optional[date] = Query(None),
+    refresh: bool = Query(
+        True,
+        description="Refresh live coaching decision (persist) before comparing",
+    ),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> dict:
+    """Compare previous vs current recommendation context after data refresh."""
+    day = target_date or date.today()
+    ledger = RecommendationLedgerService(db)
+    before = ledger.get_latest_active_recommendation(as_of_date=day)
+
+    if refresh:
+        try:
+            CoachingOrchestrator(db, storage).generate_live_decision(day, detail="standard")
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    after = ledger.get_latest_active_recommendation(as_of_date=day)
+    if before and after and before.get("id") == after.get("id"):
+        compare_before = _ledger_predecessor(db, after["id"]) or before
+    else:
+        compare_before = before
+
+    delta = UpdateDeltaService().compute(compare_before, after)
+    return {
+        "status": "ok",
+        "as_of": day.isoformat(),
+        **delta,
+    }
+
+
+@router.get("/post-sync-summary")
+def get_post_sync_summary(
+    activity_id: str = Query(..., description="Synced activity id"),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> dict:
+    """Interpretation-first summary for a newly synced session."""
+    activity = (
+        db.query(Activity)
+        .filter(Activity.activity_id == str(activity_id))
+        .first()
+    )
+    if activity is None:
+        raise HTTPException(status_code=404, detail="activity_not_found")
+
+    quality = SessionQualityService(db, storage).evaluate(activity)
+    comparable = ComparableSessionService(db, storage).compare_to_personal_baseline(str(activity_id))
+
+    quality_label = "unknown"
+    score = quality.get("quality_score")
+    if score is not None:
+        if score >= 75:
+            quality_label = "good"
+        elif score >= 55:
+            quality_label = "moderate"
+        else:
+            quality_label = "weak"
+
+    percentile = comparable.get("percentile_vs_comparable")
+    comparison_label = None
+    if percentile is not None:
+        if percentile >= 70:
+            comparison_label = "above_average"
+        elif percentile <= 30:
+            comparison_label = "below_average"
+        else:
+            comparison_label = "typical"
+
+    return {
+        "status": "ok",
+        "activity_id": str(activity_id),
+        "activity_name": activity.activity_name,
+        "session_type": quality.get("session_type"),
+        "session_quality": {
+            "label": quality_label,
+            "score": score,
+            "flags": quality.get("flags") or [],
+            "confidence": quality.get("confidence"),
+        },
+        "comparable": {
+            "count": comparable.get("comparable_count") or 0,
+            "percentile": percentile,
+            "comparison_label": comparison_label,
+            "limitations": comparable.get("limitations") or [],
+        },
+        "interpretation": quality.get("interpretation"),
+        "plan_effect": {
+            "note": "Plan impact evaluated on next coaching refresh.",
+        },
+    }
+
+
+@router.get("/recommendation-history")
+def get_recommendation_history(
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Recent recommendation ledger entries for analytical review."""
+    ledger = RecommendationLedgerService(db)
+    rows = (
+        db.query(RecommendationRecord)
+        .filter(RecommendationRecord.is_shadow.is_(False))
+        .order_by(RecommendationRecord.generated_at.desc(), RecommendationRecord.id.desc())
+        .limit(limit)
+        .all()
+    )
+    items = []
+    for row in rows:
+        rec = ledger._to_dict(row)
+        items.append(
+            {
+                "id": rec.get("id"),
+                "as_of_date": rec.get("as_of_date"),
+                "generated_at": rec.get("generated_at"),
+                "recommended": rec.get("recommended_workout_type"),
+                "decision_status": rec.get("decision_status"),
+                "is_active": rec.get("is_active"),
+                "evidence_strength": rec.get("evidence_strength"),
+                "decision_confidence": rec.get("decision_confidence"),
+            }
+        )
+    return {"status": "ok", "items": items, "count": len(items)}

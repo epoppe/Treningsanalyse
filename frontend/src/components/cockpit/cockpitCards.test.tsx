@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
+import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
 import type { TodayDashboardPayload } from "@/types/today";
 
 const thresholdPayload: TodayDashboardPayload = {
@@ -56,6 +57,32 @@ describe("NextWorkoutCard", () => {
     expect(screen.getByText(/To trygge alternativer/i)).toBeInTheDocument();
     expect(screen.getByText(/Alternativ A/i)).toBeInTheDocument();
     expect(screen.getByText(/Rolig løp/i)).toBeInTheDocument();
+  });
+});
+
+describe("WhatChangedCard", () => {
+  it("renders recommendation change summary", () => {
+    render(
+      <WhatChangedCard
+        data={{
+          material_changes: [
+            {
+              metric: "hrv_delta_pct",
+              label: "HRV",
+              before: 2,
+              after: 6,
+              direction: "improved",
+            },
+          ],
+          recommendation_changed: true,
+          before_recommendation: "easy_run",
+          after_recommendation: "threshold",
+          summary: "Anbefaling endret.",
+        }}
+      />,
+    );
+    expect(screen.getByText(/Hva endret seg/i)).toBeInTheDocument();
+    expect(screen.getByText(/Rolig løp → Kontrollert terskel/i)).toBeInTheDocument();
   });
 });
 
