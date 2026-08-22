@@ -138,6 +138,31 @@ class TrainingPlanStore:
         plan = self.db.query(TrainingPlan).filter(TrainingPlan.id == plan_id).first()
         return self._to_dict(plan) if plan else None
 
+    def list_versions(
+        self,
+        plan_id: int,
+        *,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        rows = (
+            self.db.query(TrainingPlanVersion)
+            .filter(TrainingPlanVersion.plan_id == plan_id)
+            .order_by(TrainingPlanVersion.version.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "version": row.version,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "changes": row.changes_json or [],
+                "reason": row.reason_json or [],
+                "week_objective": row.week_objective,
+                "session_count": len(row.sessions_json or []),
+            }
+            for row in rows
+        ]
+
     @staticmethod
     def _to_dict(plan: TrainingPlan) -> Dict[str, Any]:
         version = plan.current_version
