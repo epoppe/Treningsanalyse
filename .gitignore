@@ -113,6 +113,8 @@ test_*.py
 !backend/tests/test_coaching_v8.py
 !backend/tests/test_coaching_correctness.py
 !backend/tests/test_coaching_v9_operational.py
+!backend/tests/test_analysis_workspace_api.py
+!backend/tests/test_analytics_metric_registry.py
 !backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
@@ -153,6 +155,11 @@ test_*.py
 !docs/COACHING_V9_OPERATIONAL_AUDIT.md
 !docs/COACHING_MODEL_GOVERNANCE.md
 !docs/COACHING_OPERATIONS.md
+!docs/FRONTEND_ANALYTICS_UX_AUDIT.md
+
+# Next.js helpers under frontend/src/lib (Python lib/ still ignored)
+!frontend/src/lib/
+!frontend/src/lib/**
 !backend/requirements.txt
 !backend/requirements-dev.txt
 !README.md

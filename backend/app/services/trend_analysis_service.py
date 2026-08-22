@@ -90,6 +90,17 @@ class TrendAnalysisService:
             "metrics": trends,
         }
 
+    def series_for_metric(
+        self,
+        metric: str,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> List[Dict[str, Any]]:
+        """HTTP-facing series points — same fetch path as analyze_metric (no new math)."""
+        points = self._fetch_series(metric, start_date, end_date)
+        return [{"date": day.isoformat(), "value": round(value, 4)} for day, value in points]
+
     def _window_applicable(self, metric: str, window_days: int) -> bool:
         if window_days == 365 and metric in {"hrv_rmssd", "sleep_score"}:
             return True

@@ -10,15 +10,17 @@ SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
 # Optimaliser SQLite med connection pooling og PRAGMA-settings
 if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    # Bruk StaticPool for SQLite for å holde én connection åpen
+    # NullPool: one connection per checkout. StaticPool shares a single connection
+    # across FastAPI's sync threadpool and causes sqlite3.InterfaceError under
+    # concurrent /api/analysis requests.
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
         connect_args={
             "check_same_thread": False,
-            "timeout": 30  # Timeout for locked database
+            "timeout": 30,  # Timeout for locked database
         },
-        poolclass=pool.StaticPool,  # Viktig for SQLite i single-process app
-        echo=False  # Sett til True for SQL query debugging
+        poolclass=pool.NullPool,
+        echo=False,  # Sett til True for SQL query debugging
     )
     
     # Konfigurer SQLite med PRAGMA for optimal ytelse

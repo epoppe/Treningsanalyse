@@ -73,6 +73,7 @@ jobs:
             tests/test_coaching_v9_operational.py \
             tests/test_adaptive_coaching_v5.py \
             tests/test_adaptive_coaching_v7.py \
+            tests/test_analysis_workspace_api.py \
             -v --tb=short
 
       - name: API smoke test
@@ -113,6 +114,9 @@ jobs:
 
       - name: TypeScript
         run: npx tsc --noEmit
+
+      - name: Jest
+        run: npm test -- --watchAll=false
 
       - name: Next.js build
         run: npm run build

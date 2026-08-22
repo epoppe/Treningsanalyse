@@ -860,6 +860,11 @@ DERIVED_METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
     "load.acwr": {"category": "training_load", "unit": "ratio", "scope": "daily", "heuristic": False},
     "load.monotony": {"category": "training_load", "unit": "ratio", "scope": "daily", "heuristic": False},
     "load.strain": {"category": "training_load", "unit": "score", "scope": "daily", "heuristic": False},
+    # Coaching decision metrics (compute already exists in _daily_metric_value)
+    "consistency.score": {"category": "coaching", "unit": "score", "scope": "daily", "heuristic": True},
+    "fitness.gain_rate": {"category": "fitness", "unit": "load_per_day", "scope": "daily", "heuristic": True},
+    "coaching.polarization_score": {"category": "coaching", "unit": "score", "scope": "daily", "heuristic": True},
+    "running.durability_score": {"category": "running", "unit": "score", "scope": "daily", "heuristic": True},
     "risk.overtraining_score": {"category": "risk", "unit": "score", "scope": "daily", "heuristic": True},
     "route.performance_delta_pct": {"category": "route", "unit": "%", "scope": "activity", "heuristic": False},
     "route.hr_delta_pct": {"category": "route", "unit": "%", "scope": "activity", "heuristic": False},
