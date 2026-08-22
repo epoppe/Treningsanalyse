@@ -142,3 +142,33 @@ export function useRelationshipLag(
     retry: 1,
   });
 }
+
+export function useHistoryYoy(months = 12, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "history-yoy", months],
+    queryFn: () => analysisApi.historyYoy(months),
+    enabled,
+    staleTime: 120_000,
+    retry: 1,
+  });
+}
+
+export function useHistoryPerformanceRecovery(months = 12, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "history-performance", months],
+    queryFn: () => analysisApi.historyPerformanceRecovery(months),
+    enabled,
+    staleTime: 120_000,
+    retry: 1,
+  });
+}
+
+export function useHistoryAnnotations(limit = 24, enabled = true) {
+  return useQuery({
+    queryKey: ["analysis", "history-annotations", limit],
+    queryFn: () => analysisApi.historyAnnotations(limit),
+    enabled,
+    staleTime: 120_000,
+    retry: 1,
+  });
+}

@@ -15,6 +15,9 @@ import {
   IntensityDistributionPanel,
 } from "@/components/analysis/DurationCurvePanel";
 import { HistoryTimeline } from "@/components/analysis/HistoryTimeline";
+import { HistoryAnnotationsPanel } from "@/components/analysis/HistoryAnnotationsPanel";
+import { PerformanceRecoveryHistoryPanel } from "@/components/analysis/PerformanceRecoveryHistoryPanel";
+import { YoYComparisonPanel } from "@/components/analysis/YoYComparisonPanel";
 import { WeekExplorer } from "@/components/analysis/WeekExplorer";
 import { MetricPicker } from "@/components/analysis/MetricPicker";
 import { PeriodComparison } from "@/components/analysis/PeriodComparison";
@@ -33,6 +36,9 @@ import {
   useDevelopment,
   useDurationCurveHistory,
   useHistory,
+  useHistoryAnnotations,
+  useHistoryPerformanceRecovery,
+  useHistoryYoy,
   useIntensityDistribution,
   usePeriodComparison,
   useRelationshipMatrix,
@@ -274,6 +280,9 @@ function HistorikkPanel() {
     state.period === "28d" || state.period === "90d" ? "2y" : state.period;
   const query = useHistory(historyPeriod);
   const weekQuery = useWeekExplorer(state.week || undefined);
+  const yoy = useHistoryYoy(12);
+  const performance = useHistoryPerformanceRecovery(12);
+  const annotations = useHistoryAnnotations(20);
 
   if (query.isLoading) return <AnalysisSkeleton className="h-64" />;
   if (query.isError) {
@@ -298,11 +307,16 @@ function HistorikkPanel() {
           onPreviousWeek={(weekStart) => setParams({ week: weekStart })}
         />
       ) : null}
+
+      <YoYComparisonPanel data={yoy.data} isLoading={yoy.isLoading} />
+      <PerformanceRecoveryHistoryPanel data={performance.data} isLoading={performance.isLoading} />
+      <HistoryAnnotationsPanel data={annotations.data} isLoading={annotations.isLoading} />
+
       <HistoryTimeline data={query.data} />
       <p className="text-xs text-slate-500">
-        Volum/YoY:{" "}
+        Full volum/YoY-graf:{" "}
         <Link href="/statistikk" className="underline">
-          /statistikk
+          /statistikk (legacy)
         </Link>
       </p>
     </div>

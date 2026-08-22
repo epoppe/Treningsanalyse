@@ -16,6 +16,7 @@ from ..database.models.activity import Activity
 from ..database.models.summaries import MonthlySummary, WeeklySummary
 from ..dependencies import get_db, get_data_storage
 from ..services.trend_analysis_service import METRIC_FETCHERS, TrendAnalysisService
+from ..services.history_cockpit_service import HistoryCockpitService
 from ..services.training_response_service import TrainingResponseService
 from ..services.mcp_derived_metrics_service import McpDerivedMetricsService
 from ..services.analytics_metric_registry import (
@@ -649,6 +650,51 @@ def get_history(
             "month_count": len(months),
             "note": "Hierarchical history from MonthlySummary — expand for weeks/sessions later.",
         }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/history/yoy")
+def get_history_yoy(
+    months: int = Query(12, ge=1, le=36),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Year-over-year monthly volume comparison for Historikk tab."""
+    try:
+        return HistoryCockpitService(db, storage).yoy_months(end_date=end_date, months=months)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/history/performance-recovery")
+def get_history_performance_recovery(
+    months: int = Query(12, ge=3, le=24),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Monthly performance/recovery snapshots."""
+    try:
+        return HistoryCockpitService(db, storage).performance_recovery_history(
+            end_date=end_date,
+            months=months,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/history/annotations")
+def get_history_annotations(
+    limit: int = Query(24, ge=1, le=60),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    storage: DataStorage = Depends(get_data_storage),
+) -> Dict[str, Any]:
+    """Notable plan/recommendation milestones for historical context."""
+    try:
+        return HistoryCockpitService(db, storage).annotations(end_date=end_date, limit=limit)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
