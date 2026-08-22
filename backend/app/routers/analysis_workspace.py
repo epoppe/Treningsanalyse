@@ -6,7 +6,7 @@ Does not invent coaching/analytics algorithms. Presentation payloads only.
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy import and_, func
@@ -90,6 +90,24 @@ def _period_days(period: str) -> int:
     return PERIOD_DAYS.get(period, 90)
 
 
+def _resolve_range(
+    period: str,
+    end_date: Optional[date] = None,
+    start_date: Optional[date] = None,
+) -> Tuple[date, date, int]:
+    """Resolve analysis window from period chips and/or explicit brush dates."""
+    end = end_date or date.today()
+    if start_date is not None:
+        start = start_date
+        if start > end:
+            start, end = end, start
+        days = max(1, (end - start).days + 1)
+        return start, end, days
+    days = _period_days(period)
+    start = end - timedelta(days=days - 1)
+    return start, end, days
+
+
 def _window_key(days: int) -> str:
     if days <= 28:
         return "28d"
@@ -170,6 +188,7 @@ def _period_explanation_nb(metric: str, diff: Optional[float], evidence: str) ->
 def get_development(
     period: str = Query("90d", description="28d|90d|6m|1y|2y|all"),
     end_date: Optional[date] = Query(None),
+    start_date: Optional[date] = Query(None),
     multi_horizon: bool = Query(
         False,
         description="Include 28d/90d/365d trend blocks per domain",
@@ -178,8 +197,7 @@ def get_development(
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
     """Domain summary cards for the Utvikling tab."""
-    end = end_date or date.today()
-    days = _period_days(period)
+    start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
     window = _window_key(min(days, 365))
     window_days = int(window.replace("d", ""))
     try:
@@ -204,6 +222,8 @@ def get_development(
             domains.append(domain)
         return {
             "date": end.isoformat(),
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
             "period": period,
             "period_days": days,
             "window": window,
@@ -229,12 +249,11 @@ def get_timeseries(
     ),
     period: str = Query("90d"),
     end_date: Optional[date] = Query(None),
+    start_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
-    end = end_date or date.today()
-    days = _period_days(period)
-    start = end - timedelta(days=days - 1)
+    start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
     keys = [m.strip() for m in metrics.split(",") if m.strip()][:4]
     if not keys:
         raise HTTPException(status_code=400, detail="At least one metric required")
@@ -527,11 +546,11 @@ def get_training_response_mode(
 def get_relationships(
     period: str = Query("1y"),
     end_date: Optional[date] = Query(None),
+    start_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
-    end = end_date or date.today()
-    lookback = _period_days(period)
+    _start, end, lookback = _resolve_range(period, end_date=end_date, start_date=start_date)
     try:
         raw = TrainingResponseService(db, storage).analyze_responses(
             end_date=end,
@@ -703,18 +722,19 @@ def get_history_annotations(
 def get_period_comparison(
     period: str = Query("90d"),
     end_date: Optional[date] = Query(None),
+    start_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
     """Compare last N days vs previous N days using TrendAnalysisService windows."""
-    end = end_date or date.today()
-    days = min(_period_days(period), 365)
+    start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
+    days = min(days, 365)
     window = _window_key(days)
     window_days = int(window.replace("d", ""))
     try:
         svc = TrendAnalysisService(db, storage)
         current = svc.analyze_all(end_date=end, windows=(window_days,))
-        previous_end = end - timedelta(days=days)
+        previous_end = start - timedelta(days=1)
         previous = svc.analyze_all(end_date=previous_end, windows=(window_days,))
         rows: List[Dict[str, Any]] = []
         for metric in sorted(METRIC_FETCHERS.keys()):
@@ -730,7 +750,7 @@ def get_period_comparison(
                 {
                     "metric": metric,
                     "period_a": {
-                        "label": f"Siste {days}d",
+                        "label": f"{start.isoformat()} – {end.isoformat()}",
                         "end": end.isoformat(),
                         "value": a_val,
                         "sample_count": a.get("sample_count") or 0,
@@ -759,6 +779,8 @@ def get_period_comparison(
         return {
             "period": period,
             "days": days,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
             "window": window,
             "rows": rows,
             "disclaimer": "Differences are descriptive. Low sample → insufficient evidence.",
@@ -873,12 +895,16 @@ def get_week(
                 "total_duration": weekly.total_duration if weekly else None,
                 "total_distance": weekly.total_distance if weekly else None,
                 "activity_count": weekly.total_activities if weekly else len(sessions),
+                "avg_heart_rate": weekly.avg_heart_rate if weekly else None,
             }
             if weekly or sessions
             else None,
             "sessions": sessions,
             "compare_links": {
                 "previous_week": (monday - timedelta(days=7)).isoformat(),
+                "following_week": (monday + timedelta(days=7)).isoformat(),
+                "following_4_weeks_start": (monday + timedelta(days=7)).isoformat(),
+                "following_4_weeks_end": (monday + timedelta(days=34)).isoformat(),
             },
         }
     except Exception as exc:
@@ -922,13 +948,12 @@ def get_intensity_distribution(
     period: str = Query("1y"),
     windows: str = Query("28,56,90"),
     end_date: Optional[date] = Query(None),
+    start_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
 ) -> Dict[str, Any]:
     """Rolling zone1/2/3 % history for intensity-distribution questions."""
-    end = end_date or date.today()
-    days = _period_days(period)
-    start = end - timedelta(days=days - 1)
+    start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
     window_list = [int(w.strip()) for w in windows.split(",") if w.strip().isdigit()][:3]
     if not window_list:
         window_list = [28, 56, 90]
