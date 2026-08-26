@@ -161,7 +161,11 @@ class SyncMetricsService:
                         from ..power_service import PowerService
 
                         power_service = PowerService(self.sync_service.storage)
-                        power_data = power_service.calculate_activity_power(activity_id_int, self.sync_service.db)
+                        power_data = power_service.calculate_activity_power(
+                            activity_id_int,
+                            self.sync_service.db,
+                            commit=False,
+                        )
                         if power_data:
                             results["power_calculated"] = True
                             logger.debug(
@@ -274,7 +278,10 @@ class SyncMetricsService:
                         self.sync_service.db,
                         self.sync_service.storage,
                     )
-                    fatigue = performance_service.calculate_fatigue_resistance_for_activity(activity)
+                    fatigue = performance_service.calculate_fatigue_resistance_for_activity(
+                        activity,
+                        commit=False,
+                    )
                     if fatigue:
                         results["fatigue_resistance_calculated"] = True
                         logger.debug(
@@ -286,7 +293,7 @@ class SyncMetricsService:
                         self._snapshot_recalc_pending = True
                         results["performance_snapshots_updated"] = False
                     else:
-                        performance_service.recalculate_performance_snapshots()
+                        performance_service.recalculate_performance_snapshots(commit=False)
                         results["performance_snapshots_updated"] = True
                 except Exception as exc:
                     logger.debug(f"Kunne ikke oppdatere performance metrics for aktivitet {activity_id}: {exc}")

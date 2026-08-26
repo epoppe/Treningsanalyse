@@ -151,6 +151,32 @@ def apply_activity_vo2_precise_backfill(activity: Activity, db: Session) -> Heal
     return result
 
 
+def backfill_activity_vo2_precise_in_range(
+    db: Session,
+    start_date: date,
+    end_date: date,
+) -> int:
+    """Fyll vo2_max_precise på aktiviteter i periode fra daglige performance-målinger."""
+    activities = (
+        db.query(Activity)
+        .filter(
+            Activity.vo2_max_precise.is_(None),
+            Activity.start_time.isnot(None),
+            func.date(Activity.start_time) >= start_date,
+            func.date(Activity.start_time) <= end_date,
+        )
+        .all()
+    )
+    updated = 0
+    for activity in activities:
+        result = apply_activity_vo2_precise_backfill(activity, db)
+        if result.changed:
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
 def apply_body_battery_field_backfill(row: BodyBattery) -> HealthBackfillResult:
     """
     Body Battery charged/drained krever wellness-tidsserie som ikke lagres i DB.
