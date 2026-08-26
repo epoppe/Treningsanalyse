@@ -9,6 +9,7 @@ Treningsanalyse is a Garmin training-analysis app: a FastAPI backend (`backend/`
 - Frontend (Next.js, port 3000): `npm run dev`. The frontend proxies `/api/*` and `/health*` to `http://localhost:8000` via `frontend/next.config.js` rewrites, so the backend must be running for data to load.
 - Both are dev servers with hot reload; run each in its own long-lived (tmux) session.
 - Prod-like local: `npm run start:local` (`scripts/start-local.sh`) or `docker compose up --build`. See `docs/DEPLOYMENT.md`.
+- Desktop smoke (Linux): `npm run desktop:smoke` after `npm run desktop:prepare`. See `docs/DESKTOP.md`.
 - Health probes: `/health/live` (liveness), `/health/ready` (200 ready / 503 not ready).
 
 ### Tests / lint / build

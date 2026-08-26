@@ -30,6 +30,8 @@ GitHub Actions: `.github/workflows/desktop-windows.yml` (workflow_dispatch + pat
 
 App icon: `desktop/assets/icon.svg` (source), `icon.png` / `icon.ico` for Electron/NSIS. PWA icons live in `frontend/public/icons/`. Regenerate `.ico` after PNG changes with `npm run icons --prefix desktop`.
 
+Production Next.js uses **Electron-as-Node** (`ELECTRON_RUN_AS_NODE=1` + `process.execPath`) so end users do not need a separate Node install. Windows CI may still bundle `node.exe` as an optional override.
+
 ## Import existing database
 
 **In the app:** Fil → Importer eksisterende database…
