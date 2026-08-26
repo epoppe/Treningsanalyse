@@ -51,14 +51,16 @@ python3 -m py_compile \
 echo "Kjører guardrail-tester..."
 export PYTHONPATH="$BACKEND_DIR"
 "$PY" -m unittest \
-  tests.test_sync_jobs \
-  tests.test_sync_job_acquire_guardrail \
-  tests.test_paths_and_fit \
-  tests.test_force_refresh_parquet \
-  tests.test_summary_activity_type_filter \
+  tests.test_sync_run_and_lock \
+  tests.test_no_asyncio_run_in_domain \
+  tests.test_sync_batch_commits \
+  tests.test_sync_checkpoint \
   tests.test_alembic_migrations \
-  tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_sleep_sync_retries_previously_missing_date_on_force_refresh \
-  tests.test_sleep_and_hrv_sync.SleepAndHrvSyncTests.test_hrv_sync_retries_previously_missing_date_on_force_refresh \
+  tests.test_runtime_hardening \
+  tests.test_layer_boundaries \
+  tests.test_security_headers \
+  tests.test_settings \
+  tests.test_metric_dependency_graph \
   -v
 
 echo "Starter API i testmodus (SKIP_GARMIN_INIT=true) for smoke..."
