@@ -8,6 +8,7 @@ on:
     paths:
       - "desktop/**"
       - "backend/packaging/**"
+      - "backend/tests/**"
       - "backend/app/desktop_backend.py"
       - "backend/app/config.py"
       - "scripts/desktop-prepare.sh"
