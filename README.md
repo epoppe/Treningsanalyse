@@ -36,6 +36,17 @@ npm run dev
 
 Åpne http://localhost:3000
 
+## 🪟 Windows-skrivebord (installer)
+
+Se **`docs/DESKTOP.md`**. Kort:
+
+```bash
+npm run desktop:prepare   # Next standalone (+ docs for PyInstaller)
+npm run desktop:dist      # NSIS installer (kjør på Windows / GitHub Actions)
+```
+
+Database: SQLite under `%LOCALAPPDATA%\Treningsanalyse\data\`. Portabilitet: `docs/DATABASE_PORTABILITY.md`.
+
 ## 🤖 Automatisk Beregningssystem
 
 **NYT!** Alle beregnede verdier beregnes automatisk ved synkronisering:
