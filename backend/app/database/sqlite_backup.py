@@ -83,10 +83,11 @@ def validate_sqlite_file(path: Path | str) -> dict:
             row = conn.execute(
                 "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
             ).fetchone()
-            result["tables"] = int(row[0]) if row else 0
+            tables = int(row[0]) if row else 0
+            result["tables"] = tables
             # Smoke query
             conn.execute("SELECT 1").fetchone()
-            result["ok"] = result["tables"] > 0
+            result["ok"] = tables > 0
             if not result["ok"]:
                 result["error"] = "no_tables"
         finally:
