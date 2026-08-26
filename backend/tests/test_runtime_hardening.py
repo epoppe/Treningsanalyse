@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import sessionmaker
+
+from app.database.migrations import run_migrations
+from app.database.session import get_db
+from tests.sqlite_test_utils import dispose_engine, file_sqlite_url, make_file_engine
 
 
 class RuntimeHardeningTests(unittest.TestCase):
@@ -43,44 +50,40 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual(res.status_code, 404)
 
     def test_debug_db_info_available_when_debug(self):
-        import tempfile
-        from pathlib import Path
-
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from sqlalchemy.pool import StaticPool
-
+        """Isolated temp DB — does not depend on backend/data/treningsanalyse.db."""
         from app import config as config_mod
-        from app.database.migrations import run_migrations
-        from app.database.session import get_db
+        import app.main as main_mod
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "debug.db"
-            url = f"sqlite:///{db_path.resolve().as_posix()}"
-            engine = create_engine(
-                url,
-                connect_args={"check_same_thread": False},
-                poolclass=StaticPool,
-            )
-            run_migrations(engine, url)
-            Session = sessionmaker(bind=engine)
-
-            def override_get_db():
-                db = Session()
-                try:
-                    yield db
-                finally:
-                    db.close()
-
-            self.app.dependency_overrides[get_db] = override_get_db
+            url = file_sqlite_url(db_path)
+            engine = make_file_engine(url)
             try:
-                with patch.object(config_mod.settings, "DEBUG", True):
-                    res = self.client.get("/api/debug/db-info")
-                self.assertEqual(res.status_code, 200)
-                self.assertIn("activity_count", res.json())
+                run_migrations(engine, url)
+                Session = sessionmaker(bind=engine)
+
+                def override_get_db():
+                    db = Session()
+                    try:
+                        yield db
+                    finally:
+                        db.close()
+
+                self.app.dependency_overrides[get_db] = override_get_db
+                try:
+                    with patch.object(config_mod.settings, "DEBUG", True), patch.object(
+                        main_mod, "db_engine", engine
+                    ):
+                        res = self.client.get("/api/debug/db-info")
+                    self.assertEqual(res.status_code, 200)
+                    body = res.json()
+                    self.assertEqual(body.get("activity_count"), 0)
+                    self.assertTrue(body.get("schema_at_head"))
+                    self.assertIsNotNone(body.get("schema_version"))
+                finally:
+                    self.app.dependency_overrides.clear()
             finally:
-                self.app.dependency_overrides.clear()
-                engine.dispose()
+                dispose_engine(engine)
 
 
 if __name__ == "__main__":
