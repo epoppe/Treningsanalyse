@@ -36,9 +36,18 @@ done
 ROOT_HTTP="$(curl -s -o /tmp/ci_smoke_root.json -w "%{http_code}" "$BASE_URL/")"
 OPENAPI_HTTP="$(curl -s -o /tmp/ci_smoke_openapi.json -w "%{http_code}" "$BASE_URL/openapi.json")"
 HEALTH_HTTP="$(curl -s -o /tmp/ci_smoke_health.json -w "%{http_code}" "$BASE_URL/health")"
+LIVE_HTTP="$(curl -s -o /tmp/ci_smoke_live.json -w "%{http_code}" "$BASE_URL/health/live")"
+READY_HTTP="$(curl -s -o /tmp/ci_smoke_ready.json -w "%{http_code}" "$BASE_URL/health/ready")"
 
-if [[ "$ROOT_HTTP" != "200" || "$OPENAPI_HTTP" != "200" || "$HEALTH_HTTP" != "200" ]]; then
-  echo "NO-GO: smoke feilet (root=$ROOT_HTTP openapi=$OPENAPI_HTTP health=$HEALTH_HTTP)"
+if [[ "$ROOT_HTTP" != "200" || "$OPENAPI_HTTP" != "200" || "$HEALTH_HTTP" != "200" || "$LIVE_HTTP" != "200" ]]; then
+  echo "NO-GO: smoke feilet (root=$ROOT_HTTP openapi=$OPENAPI_HTTP health=$HEALTH_HTTP live=$LIVE_HTTP)"
+  cat /tmp/ci_smoke_uvicorn.log || true
+  exit 1
+fi
+
+if [[ "$READY_HTTP" != "200" && "$READY_HTTP" != "503" ]]; then
+  echo "NO-GO: /health/ready forventet 200 eller 503, fikk $READY_HTTP"
+  cat /tmp/ci_smoke_ready.json || true
   cat /tmp/ci_smoke_uvicorn.log || true
   exit 1
 fi

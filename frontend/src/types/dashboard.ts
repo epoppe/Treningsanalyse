@@ -53,12 +53,18 @@ export interface RecommendationHistoryItem {
   is_active?: boolean;
   evidence_strength?: number;
   decision_confidence?: number;
+  execution_status?: string | null;
+  actual_type?: string | null;
+  activity_id?: string | null;
+  execution_quality?: number | null;
 }
 
 export interface RecommendationHistoryPayload {
   status?: string;
   items: RecommendationHistoryItem[];
   count: number;
+  filter?: string;
+  disclaimer?: string;
 }
 
 export interface HistoricalSupportItem {

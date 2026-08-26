@@ -1,10 +1,9 @@
 # Frontend V3 — Interaction, Interpretation & Daily-Usage Polish
 
-**Base:** `main` (merged PR #62)  
-**Follow-up:** `cursor/frontend-v3-depth-polish-7cfd`  
+**Base:** `main` (merged PR #62–#64)  
 **Constraint:** Coaching engine feature-frozen. No large redesign.
 
-## Status after V3 + depth polish
+## Status — waves complete
 
 | Priority | Status |
 |----------|--------|
@@ -17,16 +16,17 @@
 | 7–8 Coaching ↔ analytics | Done — drill-downs + historical support link |
 | 9–10 Post-sync / new session | Done — `SinceLastUpdate` |
 | 11 Activity detail V2 | Done — interpretation-first |
-| 12–14 Plan / ledger / annotations | Done — pre-existing |
+| 12–14 Plan / ledger / annotations | Done — recommendation history filters (followed/modified/skipped) |
 | 15 PWA | Done — manifest + SW offline shell |
-| 16 Connection status | Done |
+| 16 Connection status | Done — polls `/health/live` |
 | 17 Analysis performance | Done — staggered + selected-window |
 | 18 Legacy consolidation | Done — labeled Mer-nav (no deletes) |
-| 19 Tests | Done — range / inspector / backtrace / PWA / SW |
+| 19 Tests | Done — range / inspector / backtrace / PWA / SW / history |
+| Local-runtime hardening | Done — Compose, Dockerfiles, `/health/ready` 503, deploy docs |
 
 ## Definition of done flows
 
 TODAY → WHY → HISTORICAL SUPPORT → ANALYSIS → PERIOD → WEEK → SESSION  
 NEW SYNC → WHAT CHANGED → SESSION IMPACT → PLAN IMPACT → NEXT RECOMMENDATION
 
-**Next major work:** deployment / local-runtime hardening — not another analytics feature wave.
+**Roadmap status:** Planned Frontend V3 and local-runtime hardening waves are complete. Optional later work (public PaaS, API auth, Postgres, full offline sync) is explicitly out of scope for these waves.

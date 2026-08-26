@@ -36,13 +36,14 @@ export function usePostSyncSummary(activityId?: string) {
 
 export const recommendationHistoryKeys = {
   all: ["recommendation-history"] as const,
-  list: (limit: number) => [...recommendationHistoryKeys.all, limit] as const,
+  list: (limit: number, execution?: string) =>
+    [...recommendationHistoryKeys.all, limit, execution || "all"] as const,
 };
 
-export function useRecommendationHistory(limit = 30) {
+export function useRecommendationHistory(limit = 30, execution?: string) {
   return useQuery({
-    queryKey: recommendationHistoryKeys.list(limit),
-    queryFn: () => todayApi.recommendationHistory(limit),
+    queryKey: recommendationHistoryKeys.list(limit, execution),
+    queryFn: () => todayApi.recommendationHistory(limit, execution),
     ...COCKPIT_QUERY_DEFAULTS,
   });
 }

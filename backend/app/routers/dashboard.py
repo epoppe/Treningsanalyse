@@ -6,7 +6,8 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, joinedload
 
 from ..dependencies import get_db, get_data_storage
 from ..database.models.coaching_v5 import RecommendationRecord
@@ -307,20 +308,86 @@ def get_post_sync_summary(
 @router.get("/recommendation-history")
 def get_recommendation_history(
     limit: int = Query(30, ge=1, le=100),
+    execution: Optional[str] = Query(
+        None,
+        description="Filter: followed|modified|skipped|all (default all)",
+    ),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Recent recommendation ledger entries for analytical review."""
+    """Recent recommendation ledger entries for analytical review.
+
+    Observational only — filters describe execution match, not coaching quality.
+    """
+    from ..database.models.coaching_v5 import RecommendationExecution
+
     ledger = RecommendationLedgerService(db)
     rows = (
         db.query(RecommendationRecord)
         .filter(RecommendationRecord.is_shadow.is_(False))
         .order_by(RecommendationRecord.generated_at.desc(), RecommendationRecord.id.desc())
-        .limit(limit)
+        .limit(min(limit * 3, 200))
         .all()
     )
+    wanted = (execution or "all").strip().lower()
+    if wanted not in {"followed", "modified", "skipped", "all"}:
+        wanted = "all"
+
     items = []
     for row in rows:
         rec = ledger._to_dict(row)
+        exec_row = (
+            db.query(RecommendationExecution)
+            .filter(RecommendationExecution.recommendation_id == row.id)
+            .order_by(RecommendationExecution.linked_at.desc())
+            .first()
+        )
+        if exec_row is not None:
+            execution_status = (exec_row.execution_status or "").lower() or None
+            actual_type = exec_row.actual_type
+            activity_id = exec_row.activity_id
+            adherence = exec_row.overall_adherence
+        else:
+            # Fallback: compare recommended type to any running activity that day.
+            day = row.as_of_date
+            activity = (
+                db.query(Activity)
+                .options(joinedload(Activity.activity_type))
+                .filter(func.date(Activity.start_time) == day)
+                .order_by(Activity.duration.desc())
+                .first()
+            )
+            if activity is None:
+                execution_status = "skipped"
+                actual_type = None
+                activity_id = None
+                adherence = None
+            else:
+                from ..utils.activity_filters import is_running_activity
+                from ..services.session_classifier_service import SessionClassifierService
+
+                if is_running_activity(activity):
+                    classified = SessionClassifierService(db).classify_activity(
+                        activity, end_date=day
+                    )
+                    actual_type = classified.get("session_type")
+                else:
+                    actual_type = getattr(
+                        getattr(activity, "activity_type", None), "type_key", None
+                    )
+                activity_id = activity.activity_id
+                recommended = (rec.get("recommended_workout_type") or "").lower()
+                actual_norm = (actual_type or "").lower()
+                if recommended and actual_norm and recommended == actual_norm:
+                    execution_status = "followed"
+                elif actual_norm:
+                    execution_status = "modified"
+                else:
+                    execution_status = "skipped"
+                adherence = None
+
+        if wanted != "all" and execution_status != wanted:
+            continue
+
         items.append(
             {
                 "id": rec.get("id"),
@@ -331,9 +398,22 @@ def get_recommendation_history(
                 "is_active": rec.get("is_active"),
                 "evidence_strength": rec.get("evidence_strength"),
                 "decision_confidence": rec.get("decision_confidence"),
+                "execution_status": execution_status,
+                "actual_type": actual_type,
+                "activity_id": activity_id,
+                "execution_quality": adherence,
             }
         )
-    return {"status": "ok", "items": items, "count": len(items)}
+        if len(items) >= limit:
+            break
+
+    return {
+        "status": "ok",
+        "items": items,
+        "count": len(items),
+        "filter": wanted,
+        "disclaimer": "Execution labels are observational associations — not moral judgments.",
+    }
 
 
 def _format_plan_sessions(sessions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
