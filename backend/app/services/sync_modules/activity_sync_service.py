@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from ...database.models.activity import Activity, ActivityType
+from ...database.models.sync_state import SyncState
 from ..activity_field_extraction import (
     extract_activity_list_fields,
     extract_garmin_weather_fields,
