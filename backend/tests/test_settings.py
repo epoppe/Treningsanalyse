@@ -68,12 +68,12 @@ class SettingsConsolidationTests(unittest.TestCase):
 
     def test_trainingsanalyse_data_dir_derives_subdirs_and_db(self):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "appdata"
+            root = (Path(tmp) / "appdata").resolve()
             s = Settings(_env_file=None, TRAININGSANALYSE_DATA_DIR=str(root))
-            self.assertEqual(Path(s.DATA_DIR), root / "data")
-            self.assertEqual(Path(s.TOKEN_DIR), root / "tokens")
-            self.assertEqual(Path(s.LOG_DIR), root / "logs")
-            self.assertEqual(Path(s.BACKUP_DIR), root / "backups")
+            self.assertEqual(Path(s.DATA_DIR).resolve(), (root / "data").resolve())
+            self.assertEqual(Path(s.TOKEN_DIR).resolve(), (root / "tokens").resolve())
+            self.assertEqual(Path(s.LOG_DIR).resolve(), (root / "logs").resolve())
+            self.assertEqual(Path(s.BACKUP_DIR).resolve(), (root / "backups").resolve())
             self.assertTrue(s.DATABASE_URL.startswith("sqlite:///"))
             self.assertIn("treningsanalyse.db", s.DATABASE_URL)
             self.assertTrue(Path(s.DATA_DIR).is_dir())
