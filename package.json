@@ -21,7 +21,8 @@
     "coaching:ops": "bash backend/scripts/coaching_ops.sh",
     "ci:frontend": "npm ci --prefix frontend && npm run lint --prefix frontend && npm exec --prefix frontend -- tsc --noEmit && npm test --prefix frontend -- --watchAll=false && npm run build --prefix frontend",
     "sync:garmin-performance": "cd backend && SKIP_GARMIN_INIT=false PYTHONPATH=. .venv/bin/python scripts/run_garmin_performance_sync.py --days 90",
-    "backfill:vo2-precise": "cd backend && PYTHONPATH=. .venv/bin/python scripts/backfill_health_fields.py --activities-only"
+    "backfill:vo2-precise": "cd backend && PYTHONPATH=. .venv/bin/python scripts/backfill_health_fields.py --activities-only",
+    "diagnose:vo2max": "cd backend && PYTHONPATH=. .venv/bin/python scripts/diagnose_vo2max.py"
   },
   "dependencies": {
     "date-fns": "^4.1.0"
