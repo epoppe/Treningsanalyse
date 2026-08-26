@@ -29,3 +29,4 @@ Treningsanalyse is a Garmin training-analysis app: a FastAPI backend (`backend/`
 - Redis is optional (default `REDIS_ENABLED=false`): without it the backend uses an in-memory cache. Set `REDIS_ENABLED=true` to use Redis.
 - `python3 -m venv` requires the system `python3-venv` package (already present in the VM snapshot).
 - `/api/debug/db-info` requires `DEBUG=true`. Do not expose the API publicly without an ACL (`docs/DEPLOYMENT.md`, `docs/SECURITY.md`).
+- Windows desktop packaging: see `docs/DESKTOP.md`. Data root override: `TRAININGSANALYSE_DATA_DIR`. Database portability notes: `docs/DATABASE_PORTABILITY.md`.

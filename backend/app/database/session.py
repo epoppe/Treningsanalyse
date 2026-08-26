@@ -1,57 +1,71 @@
-from sqlalchemy import create_engine, event, pool
-from sqlalchemy.orm import sessionmaker
-from ..config import settings
+"""SQLAlchemy engine and session factory.
+
+SQLite-specific PRAGMA / pool settings are isolated here so business logic
+never needs to know the dialect.
+"""
+
+from __future__ import annotations
+
 import logging
+
+from sqlalchemy import create_engine, event, pool
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import sessionmaker
+
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-# Oppsett av database-URL fra innstillinger
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
-# Optimaliser SQLite med connection pooling og PRAGMA-settings
-if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
-    # NullPool: one connection per checkout. StaticPool shares a single connection
-    # across FastAPI's sync threadpool and causes sqlite3.InterfaceError under
-    # concurrent /api/analysis requests.
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={
-            "check_same_thread": False,
-            "timeout": 30,  # Timeout for locked database
-        },
-        poolclass=pool.NullPool,
-        echo=False,  # Sett til True for SQL query debugging
-    )
-    
-    # Konfigurer SQLite med PRAGMA for optimal ytelse
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, connection_record):
-        cursor = dbapi_conn.cursor()
-        # Aktiver WAL (Write-Ahead Logging) mode for bedre concurrency
+
+def configure_sqlite(dbapi_conn, connection_record) -> None:
+    """Apply desktop-friendly SQLite PRAGMAs on each new connection."""
+    cursor = dbapi_conn.cursor()
+    try:
         cursor.execute("PRAGMA journal_mode=WAL")
-        # Raskere synkronisering (trygt for de fleste bruksområder)
         cursor.execute("PRAGMA synchronous=NORMAL")
-        # Øk cache-størrelse til 64MB (fra standard 2MB)
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=30000")
         cursor.execute("PRAGMA cache_size=-64000")
-        # Bruk minne for midlertidige tabeller
         cursor.execute("PRAGMA temp_store=MEMORY")
-        # Optimaliser for ytelse
         cursor.execute("PRAGMA optimize")
+    finally:
         cursor.close()
-        logger.debug("SQLite PRAGMA settings applied for optimal performance")
-else:
-    # For andre databaser (PostgreSQL, etc.)
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        pool_pre_ping=True,  # Verifiser connections før bruk
+    logger.debug("SQLite PRAGMA settings applied")
+
+
+def create_db_engine(database_url: str | None = None) -> Engine:
+    """Create an engine for the given URL (defaults to settings.DATABASE_URL)."""
+    url = database_url or settings.DATABASE_URL
+    if url.startswith("sqlite"):
+        # NullPool: one connection per checkout. StaticPool shares a single connection
+        # across FastAPI's sync threadpool and causes sqlite3.InterfaceError under
+        # concurrent /api/analysis requests.
+        eng = create_engine(
+            url,
+            connect_args={
+                "check_same_thread": False,
+                "timeout": 30,
+            },
+            poolclass=pool.NullPool,
+            echo=False,
+        )
+        event.listen(eng, "connect", configure_sqlite)
+        return eng
+
+    return create_engine(
+        url,
+        pool_pre_ping=True,
         pool_size=10,
-        max_overflow=20
+        max_overflow=20,
     )
 
-# Opprett en SessionLocal-klasse som vi vil bruke for å lage database-sesjoner
+
+engine = create_db_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependency for å få database-sesjon
+
 def get_db():
     db = SessionLocal()
     try:
