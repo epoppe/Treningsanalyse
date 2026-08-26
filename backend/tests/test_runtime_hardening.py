@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from app.database.migrations import run_migrations
-from app.database.session import get_db
+from app.dependencies import get_db
 from tests.sqlite_test_utils import dispose_engine, file_sqlite_url, make_file_engine
 
 
