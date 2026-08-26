@@ -146,6 +146,8 @@ test_*.py
 !backend/tests/test_metric_dependency_graph.py
 !backend/tests/test_settings.py
 !backend/tests/test_security_headers.py
+!backend/tests/test_recommendation_history_api.py
+!backend/tests/test_runtime_hardening.py
 !ANALYTICS_METRICS.md
 !docs/METRIC_DEPENDENCIES.md
 !docs/SECURITY.md

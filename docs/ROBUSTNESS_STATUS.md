@@ -52,12 +52,19 @@ Sluttevaluering av arbeidslisten uten nye features.
 
 - **Mass-flytting av ~100 legacy-skript** på `backend/`-roten — dokumentert, ikke flyttet (risiko)
 - **API-brukerauth** — personlig app; nettverksbeskyttelse anbefales (se SECURITY.md)
-- **Kjente røde tester** i full suite (performance-metrics m.fl.) — pre-eksisterende, ikke regresjon fra denne listen
+
+## Oppdatert etter #66
+
+- FIT-timestamp ved parquet-lesing + atomisk metrics-commit → `tests.test_performance_metrics` grønn
+- VO2 precise backfill etter performance-synk + `npm run diagnose:vo2max`
 
 ## Verifikasjon (lokal)
 
 ```bash
-# Backend guardrails / subset
+# Backend guardrails (kritiske synk-/schema-/security-tester)
+npm run test:guardrails
+
+# Eller eksplisitt subset
 cd backend && PYTHONPATH=. .venv/bin/python -m pytest \
   tests/test_alembic_migrations.py \
   tests/test_layer_boundaries.py \
@@ -65,7 +72,8 @@ cd backend && PYTHONPATH=. .venv/bin/python -m pytest \
   tests/test_security_headers.py \
   tests/test_settings.py \
   tests/test_sync_checkpoint.py \
-  tests/test_sync_batch_commits.py -q
+  tests/test_sync_batch_commits.py \
+  tests/test_runtime_hardening.py -q
 
 # Frontend
 cd frontend && npm run lint && npm run build
