@@ -329,7 +329,7 @@ class CoachingInvariantSuite(unittest.TestCase):
 class AlembicOperationalTests(unittest.TestCase):
     def test_upgrade_from_previous_revision(self):
         from alembic.script import ScriptDirectory
-from app.database.migrations import get_alembic_config
+        from app.database.migrations import get_alembic_config
 
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "step.db"
