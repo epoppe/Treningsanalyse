@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Treningsanalyse">
   <rect width="512" height="512" rx="96" fill="#0f172a"/>
-  <!-- Heart-rate / activity line -->
   <path
     d="M72 360 H168 L200 312 L232 360 L264 296 L296 360 H440"
     fill="none"
@@ -9,7 +8,6 @@
     stroke-linecap="round"
     stroke-linejoin="round"
   />
-  <!-- Runner silhouette -->
   <g fill="#e2e8f0">
     <circle cx="292" cy="132" r="34"/>
     <path d="M248 188 C236 214 228 242 224 272 L248 276 L268 236 L312 252 L352 332 L392 316 L344 224 L296 204 Z"/>

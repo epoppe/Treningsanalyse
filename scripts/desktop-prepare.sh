@@ -31,6 +31,15 @@ if [[ -d "$ROOT/frontend/public" ]]; then
   cp -a "$ROOT/frontend/public" "$FRONTEND_OUT/public"
 fi
 
+# Packaged desktop runs Next via bundled node.exe on Windows
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == MSYS* ]] || [[ "${OS:-}" == Windows_NT ]]; then
+  if command -v node >/dev/null 2>&1; then
+    NODE_BIN="$(command -v node)"
+    cp "$NODE_BIN" "$FRONTEND_OUT/node.exe"
+    echo "Bundled Node → $FRONTEND_OUT/node.exe"
+  fi
+fi
+
 # Prefer server.js at frontend root (Next standalone layout nests by package name)
 if [[ ! -f "$FRONTEND_OUT/server.js" ]]; then
   FOUND="$(find "$FRONTEND_OUT" -maxdepth 3 -name server.js | head -1 || true)"

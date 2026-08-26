@@ -10,8 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json && electron .",
     "start": "electron .",
+    "icons": "node scripts/build-icons.js",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder --win nsis"
+    "dist": "npm run icons && npm run build && electron-builder --win nsis"
   },
   "dependencies": {
     "electron-log": "^5.2.4"
@@ -20,6 +21,7 @@
     "@types/node": "^20.19.0",
     "electron": "^33.2.1",
     "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
     "typescript": "^5.7.2"
   },
   "build": {
@@ -32,27 +34,36 @@
     },
     "files": [
       "dist/**/*",
+      "assets/icon.png",
+      "assets/icon.ico",
       "package.json"
     ],
     "extraResources": [
       {
         "from": "../dist/desktop/backend",
         "to": "backend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "../dist/desktop/frontend",
         "to": "frontend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
+      "icon": "assets/icon.ico",
       "artifactName": "Treningsanalyse Setup ${version}.${ext}"
     },
     "nsis": {
@@ -63,7 +74,10 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Treningsanalyse",
       "deleteAppDataOnUninstall": false,
-      "installerLanguages": ["nb_NO", "en_US"],
+      "installerLanguages": [
+        "nb_NO",
+        "en_US"
+      ],
       "language": "1044"
     },
     "publish": null

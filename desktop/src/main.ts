@@ -4,6 +4,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   shell,
 } from "electron";
 import path from "path";
@@ -29,6 +30,21 @@ if (!gotLock) {
   });
 }
 
+function resolveAppIcon(): Electron.NativeImage | undefined {
+  const candidates = [
+    path.join(__dirname, "..", "assets", "icon.png"),
+    path.join(process.resourcesPath, "assets", "icon.png"),
+  ];
+  for (const iconPath of candidates) {
+    if (fs.existsSync(iconPath)) {
+      return nativeImage.createFromPath(iconPath);
+    }
+  }
+  return undefined;
+}
+
+const appIcon = resolveAppIcon();
+
 function createSplash(): BrowserWindow {
   const win = new BrowserWindow({
     width: 420,
@@ -37,6 +53,7 @@ function createSplash(): BrowserWindow {
     resizable: false,
     show: true,
     backgroundColor: "#0f172a",
+    icon: appIcon,
   });
   win.loadURL(
     `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
@@ -56,6 +73,7 @@ function createMainWindow(frontendUrl: string): BrowserWindow {
     minHeight: 700,
     show: false,
     backgroundColor: "#f8fafc",
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

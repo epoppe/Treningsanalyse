@@ -28,6 +28,8 @@ npm run desktop:dist
 
 GitHub Actions: `.github/workflows/desktop-windows.yml` (workflow_dispatch + path filters) uploads the NSIS installer artifact.
 
+App icon: `desktop/assets/icon.svg` (source), `icon.png` / `icon.ico` for Electron/NSIS. PWA icons live in `frontend/public/icons/`. Regenerate `.ico` after PNG changes with `npm run icons --prefix desktop`.
+
 ## Import existing database
 
 **In the app:** Fil → Importer eksisterende database…

@@ -67,6 +67,12 @@ jobs:
           mkdir -p "$OUT/.next"
           cp -a frontend/.next/static "$OUT/.next/static"
           if [[ -d frontend/public ]]; then cp -a frontend/public "$OUT/public"; fi
+          # Next standalone needs Node at runtime (Electron does not ship node.exe)
+          if command -v node >/dev/null 2>&1; then
+            NODE_BIN="$(command -v node)"
+            cp "$NODE_BIN" "$OUT/node.exe"
+            echo "Bundled Node runtime → $OUT/node.exe"
+          fi
 
       - name: PyInstaller backend
         working-directory: backend

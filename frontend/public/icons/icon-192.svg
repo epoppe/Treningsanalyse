@@ -1,5 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img">
-  <rect width="192" height="192" rx="32" fill="#0f172a"/>
-  <path d="M36 128 L72 64 L96 104 L120 72 L156 128 Z" fill="none" stroke="#e2e8f0" stroke-width="10" stroke-linejoin="round"/>
-  <circle cx="156" cy="56" r="12" fill="#94a3b8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="Treningsanalyse">
+  <rect width="192" height="192" rx="36" fill="#0f172a"/>
+  <path
+    d="M27 135 H63 L75 117 L87 135 L99 111 L111 135 H165"
+    fill="none"
+    stroke="#14b8a6"
+    stroke-width="9"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <g fill="#e2e8f0">
+    <circle cx="109" cy="49" r="13"/>
+    <path d="M93 70 C88.5 80 85.5 90.5 84 102 L93 103.5 L100.5 88.5 L117 94.5 L132 124.5 L147 118.5 L129 84 L111 76.5 Z"/>
+    <path d="M84 102 L73.5 124.5 L87 130.5 L96 111 Z"/>
+    <path d="M117 94.5 L126 111 L139.5 103.5 L130.5 87 Z"/>
+  </g>
 </svg>
