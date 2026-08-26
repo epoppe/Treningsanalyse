@@ -66,6 +66,31 @@ class SettingsConsolidationTests(unittest.TestCase):
             self.assertTrue(Path(s.DATA_DIR).is_dir())
             self.assertTrue(Path(s.TOKEN_DIR).is_dir())
 
+    def test_trainingsanalyse_data_dir_derives_subdirs_and_db(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "appdata"
+            s = Settings(_env_file=None, TRAININGSANALYSE_DATA_DIR=str(root))
+            self.assertEqual(Path(s.DATA_DIR), root / "data")
+            self.assertEqual(Path(s.TOKEN_DIR), root / "tokens")
+            self.assertEqual(Path(s.LOG_DIR), root / "logs")
+            self.assertEqual(Path(s.BACKUP_DIR), root / "backups")
+            self.assertTrue(s.DATABASE_URL.startswith("sqlite:///"))
+            self.assertIn("treningsanalyse.db", s.DATABASE_URL)
+            self.assertTrue(Path(s.DATA_DIR).is_dir())
+            self.assertTrue(Path(s.TOKEN_DIR).is_dir())
+
+    def test_explicit_database_url_wins_over_data_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "appdata"
+            custom = Path(tmp) / "custom.db"
+            url = f"sqlite:///{custom.resolve().as_posix()}"
+            s = Settings(
+                _env_file=None,
+                TRAININGSANALYSE_DATA_DIR=str(root),
+                DATABASE_URL=url,
+            )
+            self.assertEqual(s.DATABASE_URL, url)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,71 @@
+{
+  "name": "treningsanalyse-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Treningsanalyse Windows desktop shell (Electron)",
+  "main": "dist/main.js",
+  "author": "epoppe",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json && electron .",
+    "start": "electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder --win nsis"
+  },
+  "dependencies": {
+    "electron-log": "^5.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2"
+  },
+  "build": {
+    "appId": "no.treningsanalyse.app",
+    "productName": "Treningsanalyse",
+    "copyright": "Copyright © Treningsanalyse",
+    "directories": {
+      "output": "release",
+      "buildResources": "assets"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist/desktop/backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../dist/desktop/frontend",
+        "to": "frontend",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "Treningsanalyse Setup ${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Treningsanalyse",
+      "deleteAppDataOnUninstall": false,
+      "installerLanguages": ["nb_NO", "en_US"],
+      "language": "1044"
+    },
+    "publish": null
+  }
+}

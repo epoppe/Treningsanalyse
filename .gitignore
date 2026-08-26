@@ -148,10 +148,15 @@ test_*.py
 !backend/tests/test_security_headers.py
 !backend/tests/test_recommendation_history_api.py
 !backend/tests/test_runtime_hardening.py
+!backend/tests/test_sqlite_desktop.py
 !ANALYTICS_METRICS.md
 !docs/METRIC_DEPENDENCIES.md
 !docs/SECURITY.md
 !docs/ROBUSTNESS_STATUS.md
+!docs/DATABASE_PORTABILITY.md
+!docs/DESKTOP.md
+!docs/DEPLOYMENT.md
+!docs/FRONTEND_V3_INTERACTION.md
 !backend/scripts/README.md
 !METRIC_QUALITY_REPORT.md
 !MCP_CURRENT_METRICS.md

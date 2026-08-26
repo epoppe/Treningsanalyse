@@ -99,7 +99,7 @@ def _stamp_head_if_legacy(connection: Connection, cfg: Config) -> bool:
     return True
 
 
-def run_migrations(engine: Engine, database_url: str) -> str:
+def run_migrations(engine: Engine, database_url: str, *, backup_before: bool = True) -> str:
     """Kjør alembic upgrade head på den gitte engine.
 
     For eksisterende databaser opprettet med create_all/migrate_*:
@@ -107,9 +107,23 @@ def run_migrations(engine: Engine, database_url: str) -> str:
 
     Gjenbruker engine-connection slik at sqlite:///:memory: med StaticPool fungerer.
 
+    Når backup_before=True og DB ikke er på head, tas en SQLite-sikker backup først.
+
     Returnerer gjeldende revisjon etter kjøring.
     """
     cfg = get_alembic_config(database_url)
+
+    if backup_before and database_url.startswith("sqlite") and ":memory:" not in database_url:
+        try:
+            current = get_current_revision(engine)
+            head = get_head_revision(database_url)
+            if current != head:
+                from .sqlite_backup import backup_sqlite_database
+
+                backup_sqlite_database(source_url=database_url, label="pre-migrate")
+        except Exception as exc:
+            # Backup-feil skal ikke stoppe migrasjon i tom/ny DB, men logges.
+            logger.warning("Kunne ikke ta pre-migrate backup: %s", exc)
 
     with engine.connect() as connection:
         _stamp_head_if_legacy(connection, cfg)

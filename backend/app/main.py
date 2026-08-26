@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 import logging
-from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 
 from .services.garmin_client import GarminClient
@@ -19,11 +18,11 @@ from .middleware.cache_headers import CacheHeadersMiddleware
 from .middleware.security_headers import SecurityHeadersMiddleware
 
 # Konfigurer logging 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+_log_level = getattr(logging, str(settings.LOG_LEVEL).upper(), logging.INFO)
+logging.basicConfig(level=_log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Last miljøvariabler
-load_dotenv()
+# .env lastes allerede i config.py (BACKEND_DIR/.env). Ikke last cwd-relativ .env på nytt.
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -38,6 +37,13 @@ async def lifespan(app: FastAPI):
     logger.info("Bruker Garmin e-post: %s", settings.masked_garmin_email())
     logger.info(f"Bruker token-mappe: {settings.TOKEN_DIR}")
     logger.info(f"Bruker datalagringsmappe: {settings.DATA_DIR}")
+    logger.info(
+        "DATABASE_URL dialect=%s desktop_mode=%s",
+        "sqlite" if settings.is_sqlite else "other",
+        settings.DESKTOP_MODE,
+    )
+    if settings.LOG_DIR:
+        logger.info("Loggmappe: %s", settings.LOG_DIR)
     
     # Initialiser Garmin-klienten
     logger.info("Initialiserer Garmin-klienten...")

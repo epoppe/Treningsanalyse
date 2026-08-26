@@ -1,0 +1,89 @@
+name: Desktop Windows packaging
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "desktop/**"
+      - "backend/packaging/**"
+      - "backend/app/desktop_backend.py"
+      - "backend/app/config.py"
+      - "scripts/desktop-prepare.sh"
+      - ".github/workflows/desktop-windows.yml"
+
+concurrency:
+  group: desktop-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend deps
+        working-directory: backend
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\pip install -r requirements.txt
+          .\.venv\Scripts\pip install pyinstaller
+
+      - name: Backend tests (subset)
+        working-directory: backend
+        env:
+          PYTHONPATH: .
+          SKIP_GARMIN_INIT: "true"
+        run: |
+          .\.venv\Scripts\python -m unittest tests.test_settings tests.test_sqlite_desktop tests.test_runtime_hardening tests.test_alembic_migrations -v
+
+      - name: Install frontend deps + build
+        run: |
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+
+      - name: Stage Next standalone
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT=dist/desktop/frontend
+          mkdir -p "$OUT"
+          cp -a frontend/.next/standalone/. "$OUT/"
+          mkdir -p "$OUT/.next"
+          cp -a frontend/.next/static "$OUT/.next/static"
+          if [[ -d frontend/public ]]; then cp -a frontend/public "$OUT/public"; fi
+
+      - name: PyInstaller backend
+        working-directory: backend
+        run: |
+          .\.venv\Scripts\pyinstaller packaging\treningsanalyse-backend.spec --distpath ..\dist\desktop\backend --workpath ..\dist\desktop\pyi-work --noconfirm
+
+      - name: Install desktop deps + build installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm ci
+          npm run dist
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: treningsanalyse-windows-installer
+          path: desktop/release/*.exe
+          if-no-files-found: warn

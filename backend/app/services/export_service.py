@@ -17,9 +17,11 @@ from app.database.models.activity import Activity
 class ExportService:
     """Service for dataeksport."""
     
-    def __init__(self, export_dir: str = "exports"):
-        self.export_dir = Path(export_dir)
-        self.export_dir.mkdir(exist_ok=True)
+    def __init__(self, export_dir: str | None = None):
+        from app.config import settings
+
+        self.export_dir = Path(export_dir or settings.EXPORT_DIR or "exports")
+        self.export_dir.mkdir(parents=True, exist_ok=True)
     
     def export_activities_to_csv(self, activities: List[Activity], filename: Optional[str] = None) -> str:
         """Eksporter aktiviteter til CSV."""
@@ -149,24 +151,22 @@ class ExportService:
     
     def create_backup(self, include_exports: bool = True) -> str:
         """Opprett backup av alle data."""
+        from app.config import path_from_sqlite_url, settings
+
         backup_filename = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
         backup_path = self.export_dir / backup_filename
         
         with zipfile.ZipFile(backup_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            # Backup database (portabel sti: backend/data/treningsanalyse.db)
-            backend_dir = Path(__file__).resolve().parent.parent.parent
-            db_path = backend_dir / "data" / "treningsanalyse.db"
-            if db_path.exists():
+            db_path = path_from_sqlite_url(settings.DATABASE_URL)
+            if db_path and db_path.exists():
                 zipf.write(db_path, "database/treningsanalyse.db")
             
-            # Backup data-filer
-            data_dir = backend_dir / "data"
+            data_dir = Path(settings.DATA_DIR)
             if data_dir.exists():
                 for file_path in data_dir.rglob("*"):
                     if file_path.is_file():
                         zipf.write(file_path, f"data/{file_path.relative_to(data_dir)}")
             
-            # Backup eksporter hvis ønsket
             if include_exports and self.export_dir.exists():
                 for file_path in self.export_dir.rglob("*"):
                     if file_path.is_file() and file_path != backup_path:
@@ -174,5 +174,6 @@ class ExportService:
         
         return str(backup_path)
 
-# Global export service
-export_service = ExportService() 
+# Global export service — lazy so settings are applied after env is set
+export_service = ExportService()
+ 
