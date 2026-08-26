@@ -11,6 +11,7 @@
     "desktop:dev": "npm run build --prefix desktop && npm run dev --prefix desktop",
     "desktop:build": "bash scripts/desktop-prepare.sh",
     "desktop:dist": "bash scripts/desktop-prepare.sh && npm run dist --prefix desktop",
+    "desktop:smoke": "bash scripts/desktop-smoke.sh",
     "build": "npm run build --prefix frontend",
     "start": "npm run start --prefix frontend",
     "lint": "npm run lint --prefix frontend",

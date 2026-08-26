@@ -1,4 +1,5 @@
 import { ChildProcess, spawn } from "child_process";
+import fs from "fs";
 import path from "path";
 import type { AppPaths } from "./paths";
 import { buildBackendEnv, isDev } from "./paths";
@@ -138,11 +139,14 @@ export class ProcessManager {
         detached: process.platform !== "win32",
       });
     } else {
-      const nodeBin = process.execPath; // Electron's node is not ideal; use bundled node if present
       const bundledNode = path.join(this.paths.frontendDir, "node.exe");
-      const exe = process.platform === "win32" && require("fs").existsSync(bundledNode)
-        ? bundledNode
-        : "node";
+      const hasBundledNode =
+        process.platform === "win32" && fs.existsSync(bundledNode);
+      // Prefer Electron-as-Node so end users do not need a separate Node install.
+      const exe = hasBundledNode ? bundledNode : process.execPath;
+      if (!hasBundledNode) {
+        env.ELECTRON_RUN_AS_NODE = "1";
+      }
       child = spawn(exe, [this.paths.frontendServer], {
         cwd: this.paths.frontendDir,
         env,
