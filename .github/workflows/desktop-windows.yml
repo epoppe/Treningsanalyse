@@ -12,6 +12,7 @@ on:
       - "backend/app/desktop_backend.py"
       - "backend/app/config.py"
       - "scripts/desktop-prepare.sh"
+      - "scripts/desktop-packaged-smoke.sh"
       - ".github/workflows/desktop-windows.yml"
 
 concurrency:
@@ -80,17 +81,45 @@ jobs:
         run: |
           .\.venv\Scripts\pyinstaller packaging\treningsanalyse-backend.spec --distpath ..\dist\desktop\backend --workpath ..\dist\desktop\pyi-work --noconfirm
 
-      - name: Install desktop deps + build installer
+      - name: Verify PyInstaller COLLECT layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          EXE=dist/desktop/backend/treningsanalyse-backend/treningsanalyse-backend.exe
+          [[ -f "$EXE" ]] || { echo "Missing COLLECT exe: $EXE"; ls -laR dist/desktop/backend || true; exit 1; }
+          echo "OK PyInstaller layout: $EXE"
+
+      - name: Install desktop deps + TypeScript + path unit test
+        working-directory: desktop
+        run: |
+          npm ci
+          npm run build
+          npm run test:paths
+
+      - name: Build unpacked Electron app
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: |
-          npm ci
-          npm run dist
+          npm run icons
+          npx electron-builder --win --dir
+
+      - name: Smoke packaged backend (/health/live)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/desktop-packaged-smoke.sh desktop/release/win-unpacked
+
+      - name: Build NSIS installer
+        working-directory: desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npx electron-builder --win nsis
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: treningsanalyse-windows-installer
           path: desktop/release/*.exe
-          if-no-files-found: warn
+          if-no-files-found: error

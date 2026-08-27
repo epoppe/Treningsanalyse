@@ -6,8 +6,10 @@ Electron shell around the existing FastAPI + Next.js stack. SQLite remains the d
 
 ```text
 Treningsanalyse.exe (Electron)
-  ├── treningsanalyse-backend.exe   # FastAPI on 127.0.0.1:<dynamic>
-  ├── Next.js standalone server.js  # 127.0.0.1:<dynamic>
+  ├── resources/backend/treningsanalyse-backend/
+  │     treningsanalyse-backend.exe   # PyInstaller COLLECT (FastAPI @ 127.0.0.1)
+  ├── resources/frontend/
+  │     server.js + node.exe          # Next.js standalone
   └── BrowserWindow → frontend
 ```
 
@@ -26,11 +28,11 @@ npm run desktop:dev
 npm run desktop:dist
 ```
 
-GitHub Actions: `.github/workflows/desktop-windows.yml` (workflow_dispatch + path filters) uploads the NSIS installer artifact.
+GitHub Actions: `.github/workflows/desktop-windows.yml` builds unpacked app, runs `scripts/desktop-packaged-smoke.sh` (layout + `/health/live`), then NSIS + artifact upload.
 
 App icon: `desktop/assets/icon.svg` (source), `icon.png` / `icon.ico` for Electron/NSIS. PWA icons live in `frontend/public/icons/`. Regenerate `.ico` after PNG changes with `npm run icons --prefix desktop`.
 
-Production Next.js uses **Electron-as-Node** (`ELECTRON_RUN_AS_NODE=1` + `process.execPath`) so end users do not need a separate Node install. Windows CI may still bundle `node.exe` as an optional override.
+Production Next.js prefers bundled `node.exe` under `resources/frontend/`; falls back to Electron-as-Node (`ELECTRON_RUN_AS_NODE=1`).
 
 ## Import existing database
 

@@ -11,6 +11,7 @@
     "dev": "tsc -p tsconfig.json && electron .",
     "start": "electron .",
     "icons": "node scripts/build-icons.js",
+    "test:paths": "node scripts/check-packaged-paths.js",
     "pack": "npm run build && electron-builder --dir",
     "dist": "npm run icons && npm run build && electron-builder --win nsis"
   },

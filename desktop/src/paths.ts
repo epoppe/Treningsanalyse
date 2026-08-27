@@ -1,6 +1,12 @@
 import { app } from "electron";
 import path from "path";
 import fs from "fs";
+import {
+  packagedBackendExe,
+  packagedBundledNode,
+  packagedFrontendDir,
+  packagedFrontendServer,
+} from "./packaged-paths";
 
 export type AppPaths = {
   userData: string;
@@ -16,10 +22,51 @@ export type AppPaths = {
   backendExe: string;
   frontendDir: string;
   frontendServer: string;
+  bundledNode: string | null;
 };
+
+export {
+  PACKAGED_BACKEND_DIR,
+  PACKAGED_BACKEND_EXE,
+  packagedBackendExe,
+  packagedBundledNode,
+  packagedFrontendDir,
+  packagedFrontendServer,
+} from "./packaged-paths";
 
 export function isDev(): boolean {
   return !app.isPackaged;
+}
+
+/**
+ * Fail fast if packaged resources are missing (avoids 120s health timeout).
+ * No-op in development.
+ */
+export function assertPackagedResources(paths: AppPaths): void {
+  if (isDev()) return;
+
+  const required: Array<{ label: string; filePath: string }> = [
+    { label: "Backend executable", filePath: paths.backendExe },
+    { label: "Frontend server", filePath: paths.frontendServer },
+  ];
+
+  // Windows CI bundles node.exe; Electron-as-Node is a fallback but node.exe is expected in packages.
+  if (process.platform === "win32") {
+    required.push({
+      label: "Bundled Node runtime (node.exe)",
+      filePath: paths.bundledNode ?? packagedBundledNode(paths.frontendDir),
+    });
+  }
+
+  const missing = required.filter(({ filePath }) => !fs.existsSync(filePath));
+  if (missing.length === 0) return;
+
+  const detail = missing
+    .map(({ label, filePath }) => `- ${label}:\n  ${filePath}`)
+    .join("\n");
+  throw new Error(
+    `Packaged resources missing (installer/build layout broken):\n${detail}`,
+  );
 }
 
 export function resolveAppPaths(): AppPaths {
@@ -43,15 +90,21 @@ export function resolveAppPaths(): AppPaths {
 
   const backendExe = isDev()
     ? path.resolve(__dirname, "..", "..", "backend")
-    : path.join(resourcesRoot, "backend", "treningsanalyse-backend.exe");
+    : packagedBackendExe(resourcesRoot);
 
   const frontendDir = isDev()
     ? path.resolve(__dirname, "..", "..", "frontend")
-    : path.join(resourcesRoot, "frontend");
+    : packagedFrontendDir(resourcesRoot);
 
   const frontendServer = isDev()
     ? path.join(frontendDir, "node_modules", "next", "dist", "bin", "next")
-    : path.join(frontendDir, "server.js");
+    : packagedFrontendServer(frontendDir);
+
+  const bundledNodePath = packagedBundledNode(frontendDir);
+  const bundledNode =
+    !isDev() && process.platform === "win32" && fs.existsSync(bundledNodePath)
+      ? bundledNodePath
+      : null;
 
   return {
     userData,
@@ -67,6 +120,7 @@ export function resolveAppPaths(): AppPaths {
     backendExe,
     frontendDir,
     frontendServer,
+    bundledNode,
   };
 }
 
