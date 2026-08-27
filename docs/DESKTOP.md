@@ -13,7 +13,20 @@ Treningsanalyse.exe (Electron)
   └── BrowserWindow → frontend
 ```
 
-Mutable data lives under Electron `app.getPath('userData')` (typically `%LOCALAPPDATA%\Treningsanalyse\`).
+Mutable data lives under Electron `app.getPath('userData')` (typically `%LOCALAPPDATA%\Treningsanalyse\` or `%APPDATA%\treningsanalyse-desktop\`):
+
+```text
+<userData>/
+  data/treningsanalyse.db
+  tokens/
+  fit/
+  cache/
+  logs/
+  backups/
+  exports/
+```
+
+`Program Files\Treningsanalyse\resources\` is **read-only**. `app.config` does not mkdir at import time; directories are created only after Settings resolves `TRAININGSANALYSE_DATA_DIR`.
 
 ## Developer commands (repo root)
 
