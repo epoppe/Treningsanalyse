@@ -34,10 +34,11 @@ def main() -> None:
     log.info("Starting desktop backend on %s:%s", host, args.port)
 
     # Ensure Settings are built after env vars (TRAININGSANALYSE_DATA_DIR, etc.) are set.
+    # Importing app.config must not mkdir under the package tree (Program Files is read-only).
     import app.config as config_mod
 
     config_mod.reset_settings_cache()
-    config_mod.settings = config_mod.get_settings()
+    config_mod.get_settings()  # resolves AppData paths + ensure_runtime_directories
 
     import uvicorn
     from app.main import app

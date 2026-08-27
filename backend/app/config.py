@@ -6,11 +6,13 @@ på feltene (unngår dobbelt lasting og type-feil).
 Desktop-modus: sett TRAININGSANALYSE_DATA_DIR (AppData) før prosess-start.
 Da utledes DATA_DIR / TOKEN_DIR / FIT / cache / logs / backups under den roten
 med mindre eksplisitte overrides er satt.
-"""
 
+Viktig: Denne modulen må ikke skrive til filsystemet ved import.
+Program Files / PyInstaller resources er read-only — mkdir skjer først når
+Settings er ferdig resolvert (typisk under AppData).
+"""
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
@@ -19,21 +21,21 @@ from dotenv import load_dotenv
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Absolutt sti til backend-mappen (kilde / utviklingslayout)
+# Absolutt sti til backend-mappen (kilde / utviklingslayout / PyInstaller _internal).
+# Kun for default-verdier og lesing av .env — aldri for mutable runtime-data.
 BACKEND_DIR = Path(__file__).parent.parent.absolute()
 ENV_FILE = BACKEND_DIR / ".env"
 
 # Last .env tidlig slik at annen kode som leser os.environ også ser verdiene.
 # Desktop/Electron setter miljøvariabler før oppstart — de vinner over .env.
+# load_dotenv leser bare; den oppretter ikke filer.
 load_dotenv(dotenv_path=ENV_FILE, override=False)
 
+# Konseptuelle defaults (ingen mkdir ved import)
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
+DEFAULT_TOKEN_DIR = str((BACKEND_DIR / "tokens").absolute())
 _db_path = (DEFAULT_DATA_DIR.absolute() / "treningsanalyse.db").resolve()
 DEFAULT_DATABASE_URL = "sqlite:///" + str(_db_path).replace("\\", "/")
-
-TOKEN_DIR = BACKEND_DIR / "tokens"
-TOKEN_DIR.mkdir(parents=True, exist_ok=True)
-DEFAULT_TOKEN_DIR = str(TOKEN_DIR.absolute())
 
 # Standard LTHR-pace 5:22 min/km → m/s
 _DEFAULT_LTHR_SPEED = 1000 / (5 * 60 + 22)
@@ -60,6 +62,66 @@ def path_from_sqlite_url(url: str) -> Optional[Path]:
         return None
     raw = url[idx + len(marker) :]
     return Path(raw)
+
+
+def ensure_runtime_directories(settings: "Settings") -> None:
+    """Opprett mutable kataloger etter at Settings er ferdig resolvert.
+
+    Kalles fra apply_data_root — aldri ved module import.
+    """
+    for path in (
+        settings.TOKEN_DIR,
+        settings.DATA_DIR,
+        settings.FIT_DATA_DIR,
+        settings.CACHE_DIR,
+        settings.LOG_DIR,
+        settings.BACKUP_DIR,
+        settings.EXPORT_DIR,
+    ):
+        if path:
+            Path(path).mkdir(parents=True, exist_ok=True)
+
+
+def _is_under(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _assert_desktop_paths_writable(settings: "Settings", root: Path) -> None:
+    """I desktop-modus skal ingen mutable sti ligge under pakke-/BACKEND_DIR."""
+    package_roots = [BACKEND_DIR]
+    # PyInstaller extract dir when frozen
+    import sys
+
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        package_roots.append(Path(meipass))
+
+    candidates = [
+        ("TOKEN_DIR", settings.TOKEN_DIR),
+        ("DATA_DIR", settings.DATA_DIR),
+        ("FIT_DATA_DIR", settings.FIT_DATA_DIR),
+        ("CACHE_DIR", settings.CACHE_DIR),
+        ("LOG_DIR", settings.LOG_DIR),
+        ("BACKUP_DIR", settings.BACKUP_DIR),
+        ("EXPORT_DIR", settings.EXPORT_DIR),
+    ]
+    for name, raw in candidates:
+        if not raw:
+            continue
+        path = Path(raw)
+        if not _is_under(path, root):
+            raise RuntimeError(
+                f"Desktop mode: {name}={path} must be under TRAININGSANALYSE_DATA_DIR={root}"
+            )
+        for pkg in package_roots:
+            if _is_under(path, pkg):
+                raise RuntimeError(
+                    f"Desktop mode: {name}={path} must not resolve under package dir {pkg}"
+                )
 
 
 class Settings(BaseSettings):
@@ -176,14 +238,19 @@ class Settings(BaseSettings):
     def apply_data_root(self) -> "Settings":
         """Når TRAININGSANALYSE_DATA_DIR er satt, utled undermapper / default DB."""
         root_raw = self.TRAININGSANALYSE_DATA_DIR
+        if self.DESKTOP_MODE and not root_raw:
+            raise RuntimeError(
+                "DESKTOP_MODE=true krever TRAININGSANALYSE_DATA_DIR "
+                "(Electron AppData). Mutable data kan ikke lagres under Program Files."
+            )
+
         if root_raw:
             root = Path(root_raw).expanduser().resolve()
             # Kun overstyr hvis felt fortsatt er default / unset
             default_data = str(DEFAULT_DATA_DIR.absolute())
             if self.DATA_DIR == default_data or not self.DATA_DIR:
                 object.__setattr__(self, "DATA_DIR", str(root / "data"))
-            default_token = DEFAULT_TOKEN_DIR
-            if self.TOKEN_DIR == default_token:
+            if self.TOKEN_DIR == DEFAULT_TOKEN_DIR:
                 object.__setattr__(self, "TOKEN_DIR", str(root / "tokens"))
             if self.FIT_DATA_DIR is None:
                 object.__setattr__(self, "FIT_DATA_DIR", str(root / "fit"))
@@ -202,6 +269,8 @@ class Settings(BaseSettings):
                     "DATABASE_URL",
                     sqlite_url_for_path(Path(self.DATA_DIR) / "treningsanalyse.db"),
                 )
+            if self.DESKTOP_MODE:
+                _assert_desktop_paths_writable(self, root)
         else:
             # Dev defaults for optional dirs under DATA_DIR
             data = Path(self.DATA_DIR)
@@ -216,17 +285,7 @@ class Settings(BaseSettings):
             if self.EXPORT_DIR is None:
                 object.__setattr__(self, "EXPORT_DIR", str(data / "exports"))
 
-        for path in (
-            self.TOKEN_DIR,
-            self.DATA_DIR,
-            self.FIT_DATA_DIR,
-            self.CACHE_DIR,
-            self.LOG_DIR,
-            self.BACKUP_DIR,
-            self.EXPORT_DIR,
-        ):
-            if path:
-                Path(path).mkdir(parents=True, exist_ok=True)
+        ensure_runtime_directories(self)
         return self
 
     def model_post_init(self, __context: object) -> None:
@@ -276,14 +335,21 @@ def get_settings() -> Settings:
 
 
 def reset_settings_cache() -> None:
-    """For tester — tøm Settings-singleton."""
+    """For tester / desktop — tøm Settings-singleton før re-init med nye env-verdier."""
     get_settings.cache_clear()
 
 
-# Bakoverkompatibel modul-global
-settings = get_settings()
+def __getattr__(name: str):
+    """Lazy `settings` — unngår filsystemskriving ved `import app.config`."""
+    if name == "settings":
+        return get_settings()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted([*globals().keys(), "settings"])
 
 
 def data_path(*parts: str) -> Path:
     """Bygger absolutt sti under konfigurert DATA_DIR."""
-    return Path(settings.DATA_DIR).joinpath(*parts)
+    return Path(get_settings().DATA_DIR).joinpath(*parts)

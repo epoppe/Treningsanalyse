@@ -58,11 +58,18 @@ class SettingsConsolidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp) / "data"
             tokens = Path(tmp) / "tokens"
-            s = Settings(
-                _env_file=None,
-                DATA_DIR=str(data),
-                TOKEN_DIR=str(tokens),
-            )
+            env_clear = {
+                "TRAININGSANALYSE_DATA_DIR": "",
+                "DESKTOP_MODE": "false",
+            }
+            with patch.dict(os.environ, env_clear, clear=False):
+                s = Settings(
+                    _env_file=None,
+                    DATA_DIR=str(data),
+                    TOKEN_DIR=str(tokens),
+                    DESKTOP_MODE=False,
+                    TRAININGSANALYSE_DATA_DIR=None,
+                )
             self.assertTrue(Path(s.DATA_DIR).is_dir())
             self.assertTrue(Path(s.TOKEN_DIR).is_dir())
 
@@ -70,12 +77,20 @@ class SettingsConsolidationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             # Pass non-canonical temp path (Windows CI may use 8.3 short names).
             root = Path(tmp) / "appdata"
-            s = Settings(_env_file=None, TRAININGSANALYSE_DATA_DIR=str(root))
+            with patch.dict(os.environ, {"DESKTOP_MODE": "false"}, clear=False):
+                s = Settings(
+                    _env_file=None,
+                    TRAININGSANALYSE_DATA_DIR=str(root),
+                    DESKTOP_MODE=False,
+                )
             expected_root = root.expanduser().resolve()
             self.assertEqual(Path(s.DATA_DIR).resolve(), (expected_root / "data").resolve())
             self.assertEqual(Path(s.TOKEN_DIR).resolve(), (expected_root / "tokens").resolve())
             self.assertEqual(Path(s.LOG_DIR).resolve(), (expected_root / "logs").resolve())
             self.assertEqual(Path(s.BACKUP_DIR).resolve(), (expected_root / "backups").resolve())
+            self.assertEqual(Path(s.FIT_DATA_DIR).resolve(), (expected_root / "fit").resolve())
+            self.assertEqual(Path(s.CACHE_DIR).resolve(), (expected_root / "cache").resolve())
+            self.assertEqual(Path(s.EXPORT_DIR).resolve(), (expected_root / "exports").resolve())
             self.assertTrue(s.DATABASE_URL.startswith("sqlite:///"))
             self.assertIn("treningsanalyse.db", s.DATABASE_URL)
             self.assertTrue(Path(s.DATA_DIR).is_dir())

@@ -149,6 +149,7 @@ test_*.py
 !backend/tests/test_recommendation_history_api.py
 !backend/tests/test_runtime_hardening.py
 !backend/tests/test_sqlite_desktop.py
+!backend/tests/test_packaged_readonly_config.py
 !ANALYTICS_METRICS.md
 !docs/METRIC_DEPENDENCIES.md
 !docs/SECURITY.md

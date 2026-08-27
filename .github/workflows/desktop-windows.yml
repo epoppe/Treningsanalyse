@@ -52,7 +52,7 @@ jobs:
           PYTHONPATH: .
           SKIP_GARMIN_INIT: "true"
         run: |
-          .\.venv\Scripts\python -m unittest tests.test_settings tests.test_sqlite_desktop tests.test_runtime_hardening tests.test_alembic_migrations -v
+          .\.venv\Scripts\python -m unittest tests.test_settings tests.test_sqlite_desktop tests.test_runtime_hardening tests.test_alembic_migrations tests.test_packaged_readonly_config -v
 
       - name: Install frontend deps + build
         run: |
