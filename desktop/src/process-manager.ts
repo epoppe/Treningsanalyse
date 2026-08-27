@@ -2,7 +2,7 @@ import { ChildProcess, spawn } from "child_process";
 import fs from "fs";
 import path from "path";
 import type { AppPaths } from "./paths";
-import { buildBackendEnv, isDev } from "./paths";
+import { assertPackagedResources, buildBackendEnv, isDev } from "./paths";
 import { findFreePort, waitForHttpOk } from "./ports";
 import type log from "electron-log";
 
@@ -49,6 +49,11 @@ export class ProcessManager {
     frontend: null,
   };
 
+  /** Rejects when a child fails to spawn (ENOENT) or exits before healthy. */
+  private earlyFailure: Promise<never> | null = null;
+  private earlyFailureReject: ((err: Error) => void) | null = null;
+  private healthy = false;
+
   constructor(
     private readonly paths: AppPaths,
     private readonly logger: typeof log,
@@ -59,6 +64,9 @@ export class ProcessManager {
   }
 
   async start(): Promise<ManagedServices> {
+    assertPackagedResources(this.paths);
+    this.resetEarlyFailure();
+
     const apiPort = await findFreePort();
     const frontendPort = await findFreePort();
     this.services.apiPort = apiPort;
@@ -67,30 +75,59 @@ export class ProcessManager {
 
     this.logger.info("Selected ports api=%s frontend=%s", apiPort, frontendPort);
     this.logger.info("Data dir=%s db=%s", this.paths.dataDir, this.paths.databaseFile);
+    this.logger.info("Backend exe=%s", this.paths.backendExe);
+    this.logger.info("Frontend server=%s", this.paths.frontendServer);
 
     await this.startBackend(apiPort);
-    await waitForHttpOk(`http://127.0.0.1:${apiPort}/health/live`, { timeoutMs: 120_000 });
+    await Promise.race([
+      waitForHttpOk(`http://127.0.0.1:${apiPort}/health/live`, { timeoutMs: 120_000 }),
+      this.earlyFailure!,
+    ]);
     this.logger.info("Backend healthy on %s", apiPort);
 
+    this.resetEarlyFailure();
     await this.startFrontend(apiPort, frontendPort);
-    await waitForHttpOk(this.services.frontendUrl, { timeoutMs: 120_000 });
+    await Promise.race([
+      waitForHttpOk(this.services.frontendUrl, { timeoutMs: 120_000 }),
+      this.earlyFailure!,
+    ]);
+    this.healthy = true;
     this.logger.info("Frontend healthy on %s", frontendPort);
 
     return this.services;
   }
 
+  private resetEarlyFailure(): void {
+    this.earlyFailure = new Promise<never>((_resolve, reject) => {
+      this.earlyFailureReject = reject;
+    });
+    // Prevent unhandled rejection if we never race against it
+    this.earlyFailure.catch(() => undefined);
+  }
+
+  private failEarly(err: Error): void {
+    this.logger.error("%s", err.message);
+    this.earlyFailureReject?.(err);
+  }
+
   private async startBackend(apiPort: number): Promise<void> {
     const env = buildBackendEnv(this.paths, apiPort);
-    // CORS must allow the frontend origin (different port)
     env.CORS_ORIGINS = `http://127.0.0.1:${apiPort},http://localhost:${apiPort}`;
 
     let child: ChildProcess;
+    let spawnTarget: string;
     if (isDev()) {
-      const python = process.platform === "win32"
-        ? path.join(this.paths.backendExe, ".venv", "Scripts", "python.exe")
-        : path.join(this.paths.backendExe, ".venv", "bin", "python");
+      spawnTarget =
+        process.platform === "win32"
+          ? path.join(this.paths.backendExe, ".venv", "Scripts", "python.exe")
+          : path.join(this.paths.backendExe, ".venv", "bin", "python");
+      if (!fs.existsSync(spawnTarget)) {
+        throw new Error(
+          `Backend executable not found / could not start:\n${spawnTarget}`,
+        );
+      }
       child = spawn(
-        python,
+        spawnTarget,
         ["-m", "app.desktop_backend", "--host", "127.0.0.1", "--port", String(apiPort)],
         {
           cwd: this.paths.backendExe,
@@ -101,18 +138,22 @@ export class ProcessManager {
         },
       );
     } else {
-      child = spawn(this.paths.backendExe, ["--host", "127.0.0.1", "--port", String(apiPort)], {
+      spawnTarget = this.paths.backendExe;
+      if (!fs.existsSync(spawnTarget)) {
+        throw new Error(
+          `Backend executable not found / could not start:\n${spawnTarget}`,
+        );
+      }
+      child = spawn(spawnTarget, ["--host", "127.0.0.1", "--port", String(apiPort)], {
+        cwd: path.dirname(spawnTarget),
         env,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
     }
 
-    this.attachLogs(child, "backend");
+    this.attachChild(child, "Backend", spawnTarget);
     this.services.backend = child;
-    child.on("exit", (code, signal) => {
-      this.logger.warn("Backend exited code=%s signal=%s", code, signal);
-    });
   }
 
   private async startFrontend(apiPort: number, frontendPort: number): Promise<void> {
@@ -125,12 +166,11 @@ export class ProcessManager {
       DESKTOP_RUNTIME_PROXY: "1",
     };
 
-    // Update CORS on backend for actual frontend port — backend already started;
-    // relative /api rewrites need Next to proxy to apiPort via NEXT_PUBLIC_API_URL.
     let child: ChildProcess;
+    let spawnTarget: string;
     if (isDev()) {
-      const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-      child = spawn(npmCmd, ["run", "start", "--", "-p", String(frontendPort), "-H", "127.0.0.1"], {
+      spawnTarget = process.platform === "win32" ? "npm.cmd" : "npm";
+      child = spawn(spawnTarget, ["run", "start", "--", "-p", String(frontendPort), "-H", "127.0.0.1"], {
         cwd: this.paths.frontendDir,
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -139,15 +179,17 @@ export class ProcessManager {
         detached: process.platform !== "win32",
       });
     } else {
-      const bundledNode = path.join(this.paths.frontendDir, "node.exe");
-      const hasBundledNode =
-        process.platform === "win32" && fs.existsSync(bundledNode);
-      // Prefer Electron-as-Node so end users do not need a separate Node install.
-      const exe = hasBundledNode ? bundledNode : process.execPath;
+      const hasBundledNode = Boolean(this.paths.bundledNode && fs.existsSync(this.paths.bundledNode));
+      spawnTarget = hasBundledNode ? this.paths.bundledNode! : process.execPath;
       if (!hasBundledNode) {
         env.ELECTRON_RUN_AS_NODE = "1";
       }
-      child = spawn(exe, [this.paths.frontendServer], {
+      if (!fs.existsSync(this.paths.frontendServer)) {
+        throw new Error(
+          `Frontend server not found / could not start:\n${this.paths.frontendServer}`,
+        );
+      }
+      child = spawn(spawnTarget, [this.paths.frontendServer], {
         cwd: this.paths.frontendDir,
         env,
         stdio: ["ignore", "pipe", "pipe"],
@@ -155,10 +197,30 @@ export class ProcessManager {
       });
     }
 
-    this.attachLogs(child, "frontend");
+    this.attachChild(child, "Frontend", spawnTarget);
     this.services.frontend = child;
+  }
+
+  private attachChild(child: ChildProcess, label: string, exePath: string): void {
+    this.attachLogs(child, label.toLowerCase());
+
+    child.on("error", (err) => {
+      this.failEarly(
+        new Error(
+          `${label} executable not found / could not start:\n${exePath}\n${err.message}`,
+        ),
+      );
+    });
+
     child.on("exit", (code, signal) => {
-      this.logger.warn("Frontend exited code=%s signal=%s", code, signal);
+      this.logger.warn("%s exited code=%s signal=%s", label, code, signal);
+      if (!this.healthy) {
+        this.failEarly(
+          new Error(
+            `${label} exited before becoming healthy (code=${code}, signal=${signal}):\n${exePath}`,
+          ),
+        );
+      }
     });
   }
 
@@ -173,6 +235,7 @@ export class ProcessManager {
 
   async stop(): Promise<void> {
     this.logger.info("Stopping child processes…");
+    this.healthy = true; // suppress early-failure noise during intentional stop
     treeKill(this.services.frontend, this.logger);
     treeKill(this.services.backend, this.logger);
     this.services.frontend = null;
