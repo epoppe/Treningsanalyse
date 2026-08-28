@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { Activity } from '../types';
-import type { SyncJobStatusResponse } from '../types/syncJob';
+import type { SyncJobStatusResponse, GarminSyncStatusResponse } from '../types/syncJob';
 
 // Bruk relativ URL slik at Next.js proxy (rewrite) sender til backend – unngår CORS
 export const BASE_URL = typeof window !== 'undefined' ? '' : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000');
@@ -602,6 +602,10 @@ export const syncApi = {
   /** Nye aktiviteter fra siste lagrede aktivitet + tilhørende helse/TE/BB (tung jobb). */
   syncNewActivities: () =>
     apiCall('post', '/sync/new-activities', { timeout: SYNC_TRIGGER_TIMEOUT_MS }),
+
+  /** Garmin credentials/tokens — pre-flight før synk. */
+  getGarminSyncStatus: () =>
+    apiCall<GarminSyncStatusResponse>('get', '/sync/garmin-status'),
 
   /**
    * Full synkronisering for periode: aktivitet, FIT, helse, TE, HRV, Body Battery, beregninger (POST /sync/full-sync).

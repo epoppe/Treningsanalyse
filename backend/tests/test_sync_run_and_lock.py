@@ -85,6 +85,17 @@ class SyncLockTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_cleanup_stale_sync_lock_releases_orphan(self):
+        from app.services.sync_lock_service import cleanup_stale_sync_lock
+
+        db = self.Session()
+        try:
+            self.assertTrue(try_acquire_lock(db, GLOBAL_SYNC_LOCK, "orphan-job-id"))
+            self.assertTrue(cleanup_stale_sync_lock(db, GLOBAL_SYNC_LOCK))
+            self.assertFalse(is_locked(db))
+        finally:
+            db.close()
+
     def test_acquire_job_slot_holds_global_lock(self):
         job_id, job, reused = acquire_job_slot("activities_sync", "test")
         self.assertFalse(reused)

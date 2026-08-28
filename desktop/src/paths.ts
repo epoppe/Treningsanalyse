@@ -7,6 +7,7 @@ import {
   packagedFrontendDir,
   packagedFrontendServer,
 } from "./packaged-paths";
+import { ensureDesktopConfigEnv } from "./config-env";
 
 export type AppPaths = {
   userData: string;
@@ -17,6 +18,7 @@ export type AppPaths = {
   logDir: string;
   backupDir: string;
   configDir: string;
+  configEnvFile: string;
   databaseFile: string;
   resourcesRoot: string;
   backendExe: string;
@@ -84,6 +86,9 @@ export function resolveAppPaths(): AppPaths {
     fs.mkdirSync(dir, { recursive: true });
   }
 
+  ensureDesktopConfigEnv(configDir);
+  const configEnvFile = path.join(configDir, ".env");
+
   const resourcesRoot = isDev()
     ? path.resolve(__dirname, "..", "..", "dist", "desktop")
     : process.resourcesPath;
@@ -115,6 +120,7 @@ export function resolveAppPaths(): AppPaths {
     logDir,
     backupDir,
     configDir,
+    configEnvFile,
     databaseFile,
     resourcesRoot,
     backendExe,

@@ -20,6 +20,10 @@ ACTIVE_JOB_STATUSES = frozenset({"queued", "processing"})
 _job_slot_lock = threading.RLock()
 
 
+class SyncInfrastructureError(RuntimeError):
+    """Database/lås-feil ved oppstart av synk — skal ikke mappes til HTTP 409."""
+
+
 class JobRecord(dict):
     """Jobb-dict som persisterer og oppdaterer SyncRun/lock ved endring."""
 
@@ -272,6 +276,8 @@ def acquire_job_slot(
     Returns:
         (job_id, job_dict, reused_existing)
     """
+    from .sync_lock_service import GLOBAL_SYNC_LOCK, try_acquire_lock, get_lock, cleanup_stale_sync_lock
+
     with _job_slot_lock:
         types_to_check = {job_type}
         if shared_job_types:
@@ -283,10 +289,9 @@ def acquire_job_slot(
 
         # Global sync-lås: umulig å kjøre to synker samtidig (på tvers av job_type)
         if acquire_sync_lock:
-            from .sync_lock_service import GLOBAL_SYNC_LOCK, try_acquire_lock, get_lock
-
             db = SessionLocal()
             try:
+                cleanup_stale_sync_lock(db, GLOBAL_SYNC_LOCK)
                 provisional_id = str(uuid.uuid4())
                 if not try_acquire_lock(db, GLOBAL_SYNC_LOCK, provisional_id):
                     lock = get_lock(db, GLOBAL_SYNC_LOCK)
@@ -300,6 +305,14 @@ def acquire_job_slot(
                 store = get_sync_jobs_store()
                 store[provisional_id] = _new_job_payload(job_type, message)
                 return provisional_id, store[provisional_id], False
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                logger.exception("Kunne ikke reservere synk-jobb (%s): %s", job_type, exc)
+                raise SyncInfrastructureError(
+                    "Kunne ikke starte synkronisering (database/lås-feil). "
+                    "Start appen på nytt og prøv igjen."
+                ) from exc
             finally:
                 db.close()
 

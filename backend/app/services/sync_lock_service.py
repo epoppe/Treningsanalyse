@@ -122,3 +122,38 @@ def is_locked(db: Session, lock_name: str = GLOBAL_SYNC_LOCK) -> bool:
         return False
     expires = _as_aware(row.expires)
     return expires is not None and expires > _utcnow()
+
+
+def cleanup_stale_sync_lock(db: Session, lock_name: str = GLOBAL_SYNC_LOCK) -> bool:
+    """Frigir utløpt lås eller lås uten aktiv jobb-eier. Returnerer True hvis lås ble fjernet."""
+    row = get_lock(db, lock_name)
+    if row is None:
+        return False
+
+    expires = _as_aware(row.expires)
+    now = _utcnow()
+    if expires is not None and expires <= now:
+        db.delete(row)
+        db.commit()
+        logger.info("Sync-lås '%s' fjernet (utløpt, owner=%s)", lock_name, row.owner)
+        return True
+
+    try:
+        from .sync_job_store import ACTIVE_JOB_STATUSES, get_job
+
+        holder = get_job(row.owner)
+        if holder is None or holder.get("status") not in ACTIVE_JOB_STATUSES:
+            owner = row.owner
+            db.delete(row)
+            db.commit()
+            logger.info(
+                "Sync-lås '%s' fjernet (ingen aktiv jobb for owner=%s, status=%s)",
+                lock_name,
+                owner,
+                holder.get("status") if holder else "missing",
+            )
+            return True
+    except Exception as exc:
+        logger.warning("Kunne ikke vurdere stale sync-lås '%s': %s", lock_name, exc)
+
+    return False

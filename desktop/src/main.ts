@@ -134,6 +134,15 @@ function buildMenu(paths: ReturnType<typeof resolveAppPaths>): void {
       label: "Hjelp",
       submenu: [
         {
+          label: "Åpne Garmin-innstillinger…",
+          click: () => shell.openPath(paths.configEnvFile),
+        },
+        {
+          label: "Åpne config-mappe",
+          click: () => shell.openPath(paths.configDir),
+        },
+        { type: "separator" },
+        {
           label: "Åpne loggmappe",
           click: () => shell.openPath(paths.logDir),
         },

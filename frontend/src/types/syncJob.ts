@@ -85,3 +85,17 @@ export interface SyncJobStatusResponse {
   result?: SyncJobResultPayload;
   is_active?: boolean;
 }
+
+/** GET /api/sync/garmin-status */
+export interface GarminSyncStatusResponse {
+  ready: boolean;
+  auth_state: 'authenticated' | 'token_cache' | 'credentials_only' | 'missing' | string;
+  has_credentials: boolean;
+  has_token_cache: boolean;
+  email_configured: boolean;
+  masked_email: string;
+  token_dir: string;
+  desktop_mode: boolean;
+  config_env_path?: string | null;
+  detail?: string | null;
+}

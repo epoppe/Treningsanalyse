@@ -13,6 +13,7 @@ Settings er ferdig resolvert (typisk under AppData).
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional
@@ -25,11 +26,41 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Kun for default-verdier og lesing av .env — aldri for mutable runtime-data.
 BACKEND_DIR = Path(__file__).parent.parent.absolute()
 ENV_FILE = BACKEND_DIR / ".env"
+USER_ENV_FILENAME = ".env"
+
+
+def user_config_env_path(data_root: str | Path | None = None) -> Optional[Path]:
+    """Skrivbar desktop-konfig (AppData/config/.env) når TRAININGSANALYSE_DATA_DIR er satt."""
+    root_raw = data_root if data_root is not None else os.environ.get("TRAININGSANALYSE_DATA_DIR")
+    if not root_raw:
+        return None
+    return Path(root_raw).expanduser().resolve() / "config" / USER_ENV_FILENAME
+
+
+def load_env_files(*, data_root: str | Path | None = None) -> None:
+    """Last backend-.env, deretter AppData config/.env.
+
+    Prioritet (høyest først):
+    1. Miljøvariabler satt av Electron/ prosess før Python startet
+    2. AppData config/.env (overstyrer repo/bundle .env)
+    3. backend/.env (default/dev)
+    """
+    pre_existing = set(os.environ.keys())
+    load_dotenv(dotenv_path=ENV_FILE, override=False)
+    user_env = user_config_env_path(data_root)
+    if user_env is not None and user_env.is_file():
+        from dotenv import dotenv_values
+
+        for key, value in dotenv_values(user_env).items():
+            if value is None or key in pre_existing:
+                continue
+            os.environ[key] = value
+
 
 # Last .env tidlig slik at annen kode som leser os.environ også ser verdiene.
 # Desktop/Electron setter miljøvariabler før oppstart — de vinner over .env.
 # load_dotenv leser bare; den oppretter ikke filer.
-load_dotenv(dotenv_path=ENV_FILE, override=False)
+load_env_files()
 
 # Konseptuelle defaults (ingen mkdir ved import)
 DEFAULT_DATA_DIR = BACKEND_DIR / "data"
@@ -337,6 +368,7 @@ def get_settings() -> Settings:
 def reset_settings_cache() -> None:
     """For tester / desktop — tøm Settings-singleton før re-init med nye env-verdier."""
     get_settings.cache_clear()
+    load_env_files()
 
 
 def __getattr__(name: str):
