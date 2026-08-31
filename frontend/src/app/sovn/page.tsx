@@ -1,9 +1,7 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import styled from 'styled-components';
-import { api } from '../../utils/api';
-import { format, subDays, subMonths, startOfYear } from 'date-fns';
+import { useEffect, useMemo, useState } from 'react';
+import { format, subMonths, startOfYear } from 'date-fns';
 import { nb } from 'date-fns/locale';
 import { useSleepData } from '../../hooks/useHealthData';
 import SleepScoreChart from '../../components/SleepScoreChart';
@@ -22,131 +20,16 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
-
-const Container = styled.div`
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-`;
-
-const Title = styled.h1`
-  color: #0f172a;
-  text-align: left;
-  margin-bottom: 2rem;
-  font-size: 2.2rem;
-`;
-
-const FilterContainer = styled.div`
-  background: white;
-  padding: 1.5rem;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  margin-bottom: 2rem;
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-  align-items: center;
-`;
-
-const FilterGroup = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-`;
-
-const Label = styled.label`
-  font-weight: 500;
-  color: #374151;
-  font-size: 0.9rem;
-`;
-
-const Input = styled.input`
-  padding: 0.5rem;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  font-size: 0.9rem;
-`;
-
-const Button = styled.button`
-  background-color: #0f172a;
-  color: white;
-  padding: 0.5rem 1rem;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  height: fit-content;
-  margin-top: 1.5rem;
-  &:hover { background-color: #1e293b; }
-  &:disabled { background-color: #9ca3af; cursor: not-allowed; }
-`;
-
-const QuickFilterButton = styled.button<{ $active?: boolean }>`
-  background-color: ${props => props.$active ? '#2563eb' : '#f3f4f6'};
-  color: ${props => props.$active ? 'white' : '#374151'};
-  padding: 0.5rem 1rem;
-  border: 1px solid #d1d5db;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s;
-  &:hover { background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'}; }
-`;
-
-const PeriodButtonContainer = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  align-items: center;
-`;
-
-const PeriodButton = styled.button<{ $active: boolean }>`
-  background-color: ${props => (props.$active ? '#3b82f6' : '#f3f4f6')};
-  color: ${props => (props.$active ? 'white' : '#374151')};
-  border: 1px solid ${props => (props.$active ? '#3b82f6' : '#d1d5db')};
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease-in-out;
-  
-  &:hover {
-    background-color: ${props => (props.$active ? '#2563eb' : '#e5e7eb')};
-    border-color: ${props => (props.$active ? '#2563eb' : '#9ca3af')};
-  }
-`;
-
-const ChartCard = styled.div`
-  background: white;
-  padding: 1rem;
-  border-radius: 0.75rem;
-  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  margin-bottom: 2rem;
-  height: 400px;
-`;
-
-const ChartTitle = styled.h3`
-  margin: 0 0 1rem 0;
-  color: #0f172a;
-`;
-
-const LoadingContainer = styled.div`
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 120px;
-  font-size: 1.1rem;
-  color: #666;
-`;
-
-const ErrorContainer = styled.div`
-  background: #fee2e2;
-  color: #dc2626;
-  padding: 1rem;
-  border-radius: 0.75rem;
-  margin-bottom: 2rem;
-  text-align: left;
-`;
+import { LegacyChartFrame } from '@/components/charts/ChartShell';
+import {
+  MetricAlert,
+  MetricDateField,
+  MetricFilterCard,
+  MetricLoading,
+  MetricPageLayout,
+  MetricPeriodChip,
+  MetricPrimaryButton,
+} from '@/components/layout/MetricPageLayout';
 
 type SleepDay = {
   date: string;
@@ -161,6 +44,15 @@ type SleepDay = {
   total_sleep?: number | null;  // minutter
 };
 
+const PERIODS = [
+  { id: '3m', label: '3 mnd' },
+  { id: '6m', label: '6 mnd' },
+  { id: 'ytd', label: 'År til dato' },
+  { id: '12m', label: '12 mnd' },
+  { id: '3y', label: '3 år' },
+  { id: 'all', label: 'Alt' },
+] as const;
+
 const formatDateShort = (iso: string) => format(new Date(iso), 'dd.MM', { locale: nb });
 
 export default function SovnPage() {
@@ -172,7 +64,7 @@ export default function SovnPage() {
   useEffect(() => {
     const today = new Date();
     const threeMonthsAgo = subMonths(today, 3);
-    
+
     setStartDate(format(threeMonthsAgo, 'yyyy-MM-dd'));
     setEndDate(format(today, 'yyyy-MM-dd'));
     setActivePeriod('3m');
@@ -270,71 +162,60 @@ export default function SovnPage() {
   }, [days]);
 
   return (
-    <Container>
-      <Title>Søvn</Title>
-
-      <FilterContainer>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', width: '100%' }}>
-          <PeriodButtonContainer>
-            <PeriodButton $active={activePeriod === '3m'} onClick={() => handlePeriodChange('3m')}>
-              3 mnd
-            </PeriodButton>
-            <PeriodButton $active={activePeriod === '6m'} onClick={() => handlePeriodChange('6m')}>
-              6 mnd
-            </PeriodButton>
-            <PeriodButton $active={activePeriod === 'ytd'} onClick={() => handlePeriodChange('ytd')}>
-              År til dato
-            </PeriodButton>
-            <PeriodButton $active={activePeriod === '12m'} onClick={() => handlePeriodChange('12m')}>
-              12 mnd
-            </PeriodButton>
-            <PeriodButton $active={activePeriod === '3y'} onClick={() => handlePeriodChange('3y')}>
-              3 år
-            </PeriodButton>
-            <PeriodButton $active={activePeriod === 'all'} onClick={() => handlePeriodChange('all')}>
-              Alt
-            </PeriodButton>
-          </PeriodButtonContainer>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginLeft: 'auto' }}>
-            <FilterGroup>
-              <Label htmlFor="startDate">Fra dato:</Label>
-              <Input
-                id="startDate"
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  setStartDate(e.target.value);
-                  setActivePeriod('');
-                }}
-              />
-            </FilterGroup>
-            <FilterGroup>
-              <Label htmlFor="endDate">Til dato:</Label>
-              <Input
-                id="endDate"
-                type="date"
-                value={endDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
-                  setActivePeriod('');
-                }}
-              />
-            </FilterGroup>
-            <Button onClick={handleFilterSubmit} disabled={!startDate || !endDate || loading} style={{ marginTop: 0 }}>
+    <MetricPageLayout
+      title="Søvn"
+      subtitle="Søvntid, faser og søvnscore over tid"
+    >
+      <MetricFilterCard>
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap gap-2">
+            {PERIODS.map((p) => (
+              <MetricPeriodChip
+                key={p.id}
+                active={activePeriod === p.id}
+                onClick={() => handlePeriodChange(p.id)}
+              >
+                {p.label}
+              </MetricPeriodChip>
+            ))}
+          </div>
+          <div className="ml-auto flex flex-wrap items-end gap-3">
+            <MetricDateField
+              id="sovn-start"
+              label="Fra dato"
+              value={startDate}
+              onChange={(v) => {
+                setStartDate(v);
+                setActivePeriod('');
+              }}
+            />
+            <MetricDateField
+              id="sovn-end"
+              label="Til dato"
+              value={endDate}
+              onChange={(v) => {
+                setEndDate(v);
+                setActivePeriod('');
+              }}
+            />
+            <MetricPrimaryButton
+              onClick={handleFilterSubmit}
+              disabled={!startDate || !endDate || loading}
+            >
               {loading ? 'Laster...' : 'Filtrer periode'}
-            </Button>
+            </MetricPrimaryButton>
           </div>
         </div>
-      </FilterContainer>
+      </MetricFilterCard>
 
-      {error && <ErrorContainer>{error}</ErrorContainer>}
+      {error ? <MetricAlert>{error}</MetricAlert> : null}
 
       {loading ? (
-        <LoadingContainer>Laster søvndata...</LoadingContainer>
+        <MetricLoading>Laster søvndata...</MetricLoading>
       ) : (
         <>
           {/* Overall Score graf */}
-          <SleepScoreChart 
+          <SleepScoreChart
             data={days.map(d => ({
               date: d.date,
               overall_score: d.overall_score ?? null,
@@ -344,43 +225,42 @@ export default function SovnPage() {
           />
 
           {/* Søvntid vs mål */}
-          <ChartCard>
-            <ChartTitle>Søvntid (timer) og søvnmål</ChartTitle>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={CHART_MARGIN.default}>
-                <ThemedCartesianGrid />
-                <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
-                <ThemedYAxis yAxisId="left" label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
-                <ThemedTooltip formatter={(v: any, n: any) => [n?.toLowerCase().includes('score') ? v : `${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
-                <ThemedLegend />
-                <Line yAxisId="left" type="monotone" dataKey="sleep_hours_merged" name="Søvntid" stroke="#3498db" dot={false} strokeWidth={2} connectNulls />
-                <Line yAxisId="left" type="monotone" dataKey="sleep_goal_hours" name="Mål" stroke="#95a5a6" dot={false} strokeDasharray="5 5" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
+          <LegacyChartFrame title="Søvntid (timer) og søvnmål" height="400px">
+            <div className="h-[400px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={CHART_MARGIN.default}>
+                  <ThemedCartesianGrid />
+                  <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
+                  <ThemedYAxis yAxisId="left" label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
+                  <ThemedTooltip formatter={(v: any, n: any) => [n?.toLowerCase().includes('score') ? v : `${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
+                  <ThemedLegend />
+                  <Line yAxisId="left" type="monotone" dataKey="sleep_hours_merged" name="Søvntid" stroke="#3498db" dot={false} strokeWidth={2} connectNulls />
+                  <Line yAxisId="left" type="monotone" dataKey="sleep_goal_hours" name="Mål" stroke="#95a5a6" dot={false} strokeDasharray="5 5" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </LegacyChartFrame>
 
           {/* Søvnfaser */}
-          <ChartCard>
-            <ChartTitle>Søvnfaser per dag (timer)</ChartTitle>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} margin={CHART_MARGIN.default}>
-                <ThemedCartesianGrid />
-                <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
-                <ThemedYAxis label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
-                <ThemedTooltip formatter={(v: any, n: any) => [`${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
-                <ThemedLegend />
-                <Bar stackId="sleep" dataKey="deep_hours" name="Dyp" fill="#2ecc71" />
-                <Bar stackId="sleep" dataKey="light_hours" name="Lett" fill="#3498db" />
-                <Bar stackId="sleep" dataKey="rem_hours" name="REM" fill="#9b59b6" />
-                <Bar stackId="sleep" dataKey="awake_hours" name="Våken" fill="#e74c3c" />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-
-          
+          <LegacyChartFrame title="Søvnfaser per dag (timer)" height="400px">
+            <div className="h-[400px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={CHART_MARGIN.default}>
+                  <ThemedCartesianGrid />
+                  <ThemedXAxis dataKey="date" tickFormatter={formatDateShort} />
+                  <ThemedYAxis label={{ value: 'Timer', angle: -90, position: 'insideLeft' }} />
+                  <ThemedTooltip formatter={(v: any, n: any) => [`${v?.toFixed ? v.toFixed(1) : v} t`, n]} labelFormatter={(l) => format(new Date(l), 'EEEE, dd. MMMM yyyy', { locale: nb })} />
+                  <ThemedLegend />
+                  <Bar stackId="sleep" dataKey="deep_hours" name="Dyp" fill="#2ecc71" />
+                  <Bar stackId="sleep" dataKey="light_hours" name="Lett" fill="#3498db" />
+                  <Bar stackId="sleep" dataKey="rem_hours" name="REM" fill="#9b59b6" />
+                  <Bar stackId="sleep" dataKey="awake_hours" name="Våken" fill="#e74c3c" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </LegacyChartFrame>
         </>
       )}
-    </Container>
+    </MetricPageLayout>
   );
 }
-
