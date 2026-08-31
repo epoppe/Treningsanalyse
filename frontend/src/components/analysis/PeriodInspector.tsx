@@ -99,7 +99,7 @@ export function PeriodInspector({
 
   return (
     <aside
-      className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
       aria-label="Periodeinspektør"
     >
       <header className="border-b border-slate-100 pb-2">

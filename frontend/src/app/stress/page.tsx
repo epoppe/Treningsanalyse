@@ -28,22 +28,28 @@ import { nb } from 'date-fns/locale';
 const stressDef = getMetricDefinition('stressLevel');
 
 const PageContainer = styled.div`
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 2rem;
-  text-align: center;
+  color: #0f172a;
+  margin-bottom: 1rem;
+  text-align: left;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const FilterContainer = styled.div`
   background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-bottom: 2rem;
   display: flex;
   gap: 1rem;
@@ -77,7 +83,7 @@ const Input = styled.input`
 `;
 
 const Button = styled.button`
-  background-color: #3b82f6;
+  background-color: #0f172a;
   color: white;
   padding: 0.5rem 1rem;
   border: none;
@@ -88,7 +94,7 @@ const Button = styled.button`
   margin-top: 1.5rem;
   
   &:hover {
-    background-color: #2563eb;
+    background-color: #1e293b;
   }
   
   &:disabled {
@@ -98,8 +104,8 @@ const Button = styled.button`
 `;
 
 const QuickFilterButton = styled.button<{ $active?: boolean }>`
-  background-color: ${props => props.$active ? '#2563eb' : '#f3f4f6'};
-  color: ${props => props.$active ? 'white' : '#374151'};
+  background-color: ${props => props.$active ? '#0f172a' : '#f8fafc'};
+  color: ${props => props.$active ? 'white' : '#334155'};
   padding: 0.5rem 1rem;
   border: 1px solid #d1d5db;
   border-radius: 4px;
@@ -108,7 +114,7 @@ const QuickFilterButton = styled.button<{ $active?: boolean }>`
   transition: all 0.2s;
   
   &:hover {
-    background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'};
+    background-color: ${props => props.$active ? '#1e293b' : '#f1f5f9'};
   }
 `;
 
@@ -307,7 +313,7 @@ export default function StressPage() {
 
   return (
     <PageContainer>
-      <Title>Stress Historikk</Title>
+      <Title>Stress</Title>
 
       <FilterContainer>
         <FilterGroup>

@@ -31,7 +31,7 @@ const DateInput = styled.input`
 
 const Button = styled.button`
   padding: 0.5rem 1rem;
-  background: #3498db;
+  background: #0f172a;
   color: white;
   border: none;
   border-radius: 4px;
@@ -40,7 +40,7 @@ const Button = styled.button`
   transition: background 0.3s ease;
 
   &:hover {
-    background: #2980b9;
+    background: #1e293b;
   }
 
   &:disabled {
@@ -50,9 +50,9 @@ const Button = styled.button`
 `;
 
 const TimeFilterButton = styled.button<{ $active: boolean }>`
-  background-color: ${props => (props.$active ? '#3498db' : '#ecf0f1')};
-  color: ${props => (props.$active ? 'white' : '#2c3e50')};
-  border: 1px solid ${props => (props.$active ? '#3498db' : '#bdc3c7')};
+  background-color: ${props => (props.$active ? '#0f172a' : '#f8fafc')};
+  color: ${props => (props.$active ? 'white' : '#334155')};
+  border: 1px solid ${props => (props.$active ? '#0f172a' : '#e2e8f0')};
   padding: 0.5rem 1rem;
   border-radius: 4px;
   cursor: pointer;
@@ -60,7 +60,7 @@ const TimeFilterButton = styled.button<{ $active: boolean }>`
   transition: all 0.2s ease-in-out;
 
   &:hover {
-    background-color: ${props => (props.$active ? '#2980b9' : '#e0e5e9')};
+    background-color: ${props => (props.$active ? '#1e293b' : '#f1f5f9')};
   }
 `;
 

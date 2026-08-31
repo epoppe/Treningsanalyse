@@ -51,7 +51,7 @@ export function MetricPicker({
   const selectedMeta = metrics.filter((m) => selected.includes(m.key));
 
   return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">Metrikker</h3>
         <p className="text-[11px] text-slate-500">

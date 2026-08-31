@@ -27,7 +27,7 @@ export function HistoryAnnotationsPanel({
   }
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Milepæler og notater</h2>
       <ol className="mt-2 space-y-2">
         {items.map((item, index) => (

@@ -20,7 +20,7 @@ export function HistoryTimeline({ data }: { data: HistoryPayload }) {
         <p className="text-sm text-slate-500">Ingen månedssammendrag i perioden.</p>
       ) : (
         data.years.map((year) => (
-          <details key={year.year} open className="rounded-lg border border-slate-200 bg-white">
+          <details key={year.year} open className="rounded-xl border border-slate-200 bg-white">
             <summary className="cursor-pointer px-3 py-2 text-sm font-semibold text-slate-900">
               {year.year}
               <span className="ml-2 text-xs font-normal text-slate-500">

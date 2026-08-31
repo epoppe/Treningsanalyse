@@ -106,7 +106,7 @@ export function AnalysisFiltersBar() {
   const { state, setParams } = useAnalysisUrlState();
 
   return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
           Periode

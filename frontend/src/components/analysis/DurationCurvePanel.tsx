@@ -6,19 +6,39 @@ import {
   chartColor,
 } from "@/components/charts/chartTheme";
 import {
-  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
 } from "recharts";
 import {
   ThemedCartesianGrid,
+  ThemedLegend,
   ThemedTooltip,
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
+import {
+  axisLabelProps,
+  formatChartAxisDate,
+  formatChartTooltipDate,
+  formatWithUnit,
+} from "@/lib/chartFormatters";
 
 const ZONE_COLORS = [chartColor(0), chartColor(2), chartColor(1)];
+
+const ZONE_LABELS: Record<string, string> = {
+  "coaching.zone1_pct": "Sone 1 (%)",
+  "coaching.zone2_pct": "Sone 2 (%)",
+  "coaching.zone3_pct": "Sone 3 (%)",
+  zone1_pct: "Sone 1 (%)",
+  zone2_pct: "Sone 2 (%)",
+  zone3_pct: "Sone 3 (%)",
+};
+
+function zoneLabel(key: string) {
+  if (ZONE_LABELS[key]) return ZONE_LABELS[key];
+  return key.replace(/^coaching\./, "").replace(/_/g, " ");
+}
 
 function mergeZoneSeries(payload: IntensityDistributionPayload) {
   const keys = Object.keys(payload.series);
@@ -45,10 +65,10 @@ export function IntensityDistributionPanel({
 }) {
   const { keys, rows } = data ? mergeZoneSeries(data) : { keys: [], rows: [] };
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Intensitetsfordeling</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">
-        Zone 1/2/3 % over tid — nyttig for «endret fordeling før form?»
+        Andel tid i sone 1/2/3 — nyttig for å se om fordelingen endret seg før formendring
       </p>
       <div className="mt-3 h-48 w-full">
         {rows.length === 0 ? (
@@ -59,16 +79,26 @@ export function IntensityDistributionPanel({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={rows} margin={CHART_MARGIN.compact}>
               <ThemedCartesianGrid />
-              <ThemedXAxis dataKey="date" minTickGap={40} />
-              <ThemedYAxis width={36} unit="%" />
-              <ThemedTooltip />
-              <Legend wrapperStyle={{ fontSize: 11, color: "#475569" }} />
+              <ThemedXAxis
+                dataKey="date"
+                minTickGap={40}
+                tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
+              />
+              <ThemedYAxis width={40} label={axisLabelProps("Andel (%)")} />
+              <ThemedTooltip
+                labelFormatter={(label) => formatChartTooltipDate(String(label))}
+                formatter={(value: any, name: any) => [
+                  formatWithUnit(Number(value), "%", 1),
+                  zoneLabel(String(name)),
+                ]}
+              />
+              <ThemedLegend formatter={(value) => zoneLabel(String(value))} />
               {keys.map((key, i) => (
                 <Line
                   key={key}
                   type="monotone"
                   dataKey={key}
-                  name={key.replace("coaching.", "")}
+                  name={zoneLabel(key)}
                   stroke={ZONE_COLORS[i % ZONE_COLORS.length]}
                   dot={false}
                   strokeWidth={1.5}
@@ -86,10 +116,10 @@ export function IntensityDistributionPanel({
 
 export function DurationCurvePanel({ data }: { data?: DurationCurvePayload }) {
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
-      <h2 className="text-sm font-semibold text-slate-900">Duration curve (*_hist)</h2>
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <h2 className="text-sm font-semibold text-slate-900">Varighetskurve</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">
-        Nåværende vs forrige år vs beste i perioden — ikke snapshot-only.
+        Nåværende vs forrige år vs beste i perioden
       </p>
       {!data?.curves?.length ? (
         <p className="mt-3 text-xs text-slate-500">Ingen duration-curve historikk.</p>

@@ -59,7 +59,7 @@ export function SavedAnalysisViews() {
   };
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Lagrede analyser</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">
         Bokmerker lagres lokalt i nettleseren — delbar via URL.

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { Card, Title, Text, Metric, Flex, Badge } from '@tremor/react';
-import { analysisApi } from '../utils/api';
-import { apiErrorMessage, classifyApiError } from '../utils/apiErrors';
-import { initialMetricState, type MetricState } from '../utils/metricState';
+import { useState, useEffect, type ReactNode } from "react";
+import { analysisApi } from "../utils/api";
+import { apiErrorMessage, classifyApiError } from "../utils/apiErrors";
+import { initialMetricState, type MetricState } from "../utils/metricState";
+import { cn } from "@/lib/utils";
 
 interface NegativeSplitData {
   activity_id: number;
@@ -32,6 +32,45 @@ interface ActivityAnalyticsProps {
   activityId: number;
 }
 
+function AnalyticsCard({ children }: { children: ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      {children}
+    </section>
+  );
+}
+
+function StatusBadge({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  tone: "neutral" | "good" | "warn" | "bad";
+}) {
+  return (
+    <span
+      className={cn(
+        "rounded-md px-2 py-0.5 text-[11px] font-medium",
+        tone === "good" && "bg-emerald-50 text-emerald-800",
+        tone === "warn" && "bg-amber-50 text-amber-800",
+        tone === "bad" && "bg-red-50 text-red-800",
+        tone === "neutral" && "bg-slate-100 text-slate-700",
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function Row({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-3 text-sm">
+      <span className="text-slate-500">{label}</span>
+      <span className="tabular-nums text-slate-800">{value}</span>
+    </div>
+  );
+}
+
 const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
   const [negativeSplit, setNegativeSplit] = useState<MetricState<NegativeSplitData>>(
     initialMetricState<NegativeSplitData>(),
@@ -47,22 +86,18 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
       fetcher: () => Promise<T>,
       setter: (state: MetricState<T>) => void,
     ) => {
-      setter({ status: 'loading', data: null, error: null });
+      setter({ status: "loading", data: null, error: null });
       try {
         const data = await fetcher();
-        if (!cancelled) {
-          setter({ status: 'ready', data, error: null });
-        }
+        if (!cancelled) setter({ status: "ready", data, error: null });
       } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        if (classifyApiError(error) === 'not_found') {
-          setter({ status: 'missing', data: null, error: null });
+        if (cancelled) return;
+        if (classifyApiError(error) === "not_found") {
+          setter({ status: "missing", data: null, error: null });
           return;
         }
         setter({
-          status: 'error',
+          status: "error",
           data: null,
           error: apiErrorMessage(error),
         });
@@ -86,200 +121,164 @@ const ActivityAnalytics = ({ activityId }: ActivityAnalyticsProps) => {
   }, [activityId]);
 
   const formatPace = (pace: number | null | undefined) => {
-    if (pace === null || pace === undefined || isNaN(pace)) {
-      return 'N/A';
-    }
+    if (pace === null || pace === undefined || Number.isNaN(pace)) return "—";
     const minutes = Math.floor(pace);
     const seconds = Math.round((pace - minutes) * 60);
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
 
-  const getNegativeSplitBadge = (value: number | null | undefined) => {
-    if (value === null || value === undefined || isNaN(value)) {
-      return <Badge color="gray">Ingen data</Badge>;
+  const negativeSplitBadge = (value: number | null | undefined) => {
+    if (value == null || Number.isNaN(value)) {
+      return <StatusBadge tone="neutral">Ingen data</StatusBadge>;
     }
-    if (value < 0) {
-      return <Badge color="green">Negativ Split</Badge>;
-    } else if (value > 0) {
-      return <Badge color="red">Positiv Split</Badge>;
-    } else {
-      return <Badge color="gray">Jevn Split</Badge>;
-    }
+    if (value < 0) return <StatusBadge tone="good">Negativ split</StatusBadge>;
+    if (value > 0) return <StatusBadge tone="bad">Positiv split</StatusBadge>;
+    return <StatusBadge tone="neutral">Jevn split</StatusBadge>;
   };
 
-  const getDecouplingBadge = (value: number | null | undefined) => {
-    if (value === null || value === undefined || isNaN(value)) {
-      return <Badge color="gray">Ingen data</Badge>;
+  const decouplingBadge = (value: number | null | undefined) => {
+    if (value == null || Number.isNaN(value)) {
+      return <StatusBadge tone="neutral">Ingen data</StatusBadge>;
     }
-    if (value > 10) {
-      return <Badge color="red">Høy Decoupling</Badge>;
-    } else if (value >= 5) {
-      return <Badge color="yellow">Moderat Decoupling</Badge>;
-    } else {
-      return <Badge color="green">Lav Decoupling</Badge>;
-    }
+    if (value > 10) return <StatusBadge tone="bad">Høy decoupling</StatusBadge>;
+    if (value >= 5) return <StatusBadge tone="warn">Moderat decoupling</StatusBadge>;
+    return <StatusBadge tone="good">Lav decoupling</StatusBadge>;
   };
 
   const isLoading =
-    negativeSplit.status === 'loading' || decoupling.status === 'loading';
+    negativeSplit.status === "loading" || decoupling.status === "loading";
   const hasApiErrors =
-    negativeSplit.status === 'error' || decoupling.status === 'error';
+    negativeSplit.status === "error" || decoupling.status === "error";
   const hasAnyData =
-    negativeSplit.status === 'ready' || decoupling.status === 'ready';
+    negativeSplit.status === "ready" || decoupling.status === "ready";
 
   if (isLoading && !hasAnyData) {
     return (
-      <Card>
-        <Title>Løpsanalyse</Title>
-        <Text>Laster analysedata...</Text>
-      </Card>
+      <AnalyticsCard>
+        <h3 className="text-sm font-semibold text-slate-900">Løpsanalyse</h3>
+        <p className="mt-1 text-sm text-slate-500">Laster analysedata...</p>
+      </AnalyticsCard>
     );
   }
 
   if (hasApiErrors && !hasAnyData) {
     return (
-      <Card>
-        <Title>Løpsanalyse</Title>
-        <Text className="text-red-600">
-          Kunne ikke laste analysedata fra API-et.
-        </Text>
-        {negativeSplit.error && <Text className="mt-2">Negativ split: {negativeSplit.error}</Text>}
-        {decoupling.error && <Text className="mt-2">Decoupling: {decoupling.error}</Text>}
-      </Card>
+      <AnalyticsCard>
+        <h3 className="text-sm font-semibold text-slate-900">Løpsanalyse</h3>
+        <p className="mt-1 text-sm text-red-700">Kunne ikke laste analysedata.</p>
+      </AnalyticsCard>
     );
   }
 
   if (!hasAnyData && !hasApiErrors) {
     return (
-      <Card>
-        <Title>Løpsanalyse</Title>
-        <Text>Ingen analysedata tilgjengelig for denne aktiviteten.</Text>
-      </Card>
+      <AnalyticsCard>
+        <h3 className="text-sm font-semibold text-slate-900">Løpsanalyse</h3>
+        <p className="mt-1 text-sm text-slate-500">
+          Ingen analysedata tilgjengelig for denne aktiviteten.
+        </p>
+      </AnalyticsCard>
     );
   }
 
   return (
     <div className="space-y-4">
-      {hasApiErrors && (
-        <Card>
-          <Text className="text-amber-700">
+      {hasApiErrors ? (
+        <AnalyticsCard>
+          <p className="text-sm text-amber-800">
             Noen analysedata kunne ikke hentes.
-            {negativeSplit.error ? ` Negativ split: ${negativeSplit.error}.` : ''}
-            {decoupling.error ? ` Decoupling: ${decoupling.error}.` : ''}
-          </Text>
-        </Card>
-      )}
+            {negativeSplit.error ? ` Negativ split: ${negativeSplit.error}.` : ""}
+            {decoupling.error ? ` Decoupling: ${decoupling.error}.` : ""}
+          </p>
+        </AnalyticsCard>
+      ) : null}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {negativeSplit.status === 'ready' && negativeSplit.data && (
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Title>Negativ Split</Title>
-              {getNegativeSplitBadge(negativeSplit.data.negative_split_percent)}
-            </Flex>
-
-            <Metric className="mt-4">
-              {negativeSplit.data.negative_split_percent > 0 ? '+' : ''}
-              {negativeSplit.data.negative_split_percent?.toFixed(2) || '0.00'}%
-            </Metric>
-
-            <div className="mt-4 space-y-2">
-              <div className="flex justify-between">
-                <Text>Første halvdel:</Text>
-                <Text>{formatPace(negativeSplit.data.first_half_pace)} min/km</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Andre halvdel:</Text>
-                <Text>{formatPace(negativeSplit.data.second_half_pace)} min/km</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Datapunkter:</Text>
-                <Text>{negativeSplit.data.data_points?.toLocaleString() || 'N/A'}</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Kilde:</Text>
-                <Text>
-                  {negativeSplit.data.calculation_method === 'cached' ? 'Cache' : 'FIT-data'}
-                </Text>
-              </div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {negativeSplit.status === "ready" && negativeSplit.data ? (
+          <AnalyticsCard>
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-900">Negativ split</h3>
+              {negativeSplitBadge(negativeSplit.data.negative_split_percent)}
             </div>
-
-            <div className="mt-4">
-              <Text className="text-sm text-gray-600">
-                {negativeSplit.data.negative_split_percent &&
-                negativeSplit.data.negative_split_percent < 0
-                  ? 'Løp raskere i andre halvdel - bra pacing!'
-                  : negativeSplit.data.negative_split_percent &&
-                      negativeSplit.data.negative_split_percent > 0
-                    ? 'Løp saktere i andre halvdel - vurder pacing-strategi.'
-                    : 'Ikke nok data for pacing-analyse.'}
-              </Text>
+            <p className="mt-3 text-2xl font-semibold tabular-nums text-slate-900">
+              {negativeSplit.data.negative_split_percent > 0 ? "+" : ""}
+              {negativeSplit.data.negative_split_percent?.toFixed(1) || "0.0"}%
+            </p>
+            <div className="mt-3 space-y-1.5">
+              <Row
+                label="Første halvdel"
+                value={`${formatPace(negativeSplit.data.first_half_pace)} /km`}
+              />
+              <Row
+                label="Andre halvdel"
+                value={`${formatPace(negativeSplit.data.second_half_pace)} /km`}
+              />
+              <Row
+                label="Datapunkter"
+                value={negativeSplit.data.data_points?.toLocaleString("nb-NO") || "—"}
+              />
+              <Row
+                label="Kilde"
+                value={
+                  negativeSplit.data.calculation_method === "cached" ? "Cache" : "FIT-data"
+                }
+              />
             </div>
-          </Card>
-        )}
+            <p className="mt-3 text-xs text-slate-500">
+              {negativeSplit.data.negative_split_percent < 0
+                ? "Raskere i andre halvdel — god pacing."
+                : negativeSplit.data.negative_split_percent > 0
+                  ? "Saktere i andre halvdel — vurder pacing-strategi."
+                  : "Ikke nok data for pacing-analyse."}
+            </p>
+          </AnalyticsCard>
+        ) : null}
 
-        {decoupling.status === 'ready' && decoupling.data && (
-          <Card>
-            <Flex justifyContent="between" alignItems="center">
-              <Title>Cardiac-Aerobic Decoupling</Title>
-              {getDecouplingBadge(decoupling.data.decoupling_percent)}
-            </Flex>
-
-            <Metric className="mt-4">
-              {decoupling.data.decoupling_percent > 0 ? '+' : ''}
-              {decoupling.data.decoupling_percent?.toFixed(2) || '0.00'}%
-            </Metric>
-
-            <div className="mt-4 space-y-2">
-              <div className="flex justify-between">
-                <Text>Første halvdel:</Text>
-                <Text>
-                  HR {decoupling.data.first_half_hr?.toFixed(0) || 'N/A'} / Speed{' '}
-                  {decoupling.data.first_half_speed?.toFixed(2) || 'N/A'}
-                </Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Andre halvdel:</Text>
-                <Text>
-                  HR {decoupling.data.second_half_hr?.toFixed(0) || 'N/A'} / Speed{' '}
-                  {decoupling.data.second_half_speed?.toFixed(2) || 'N/A'}
-                </Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>HR:Speed ratio 1. del:</Text>
-                <Text>{decoupling.data.first_half_ratio?.toFixed(2) || 'N/A'}</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>HR:Speed ratio 2. del:</Text>
-                <Text>{decoupling.data.second_half_ratio?.toFixed(2) || 'N/A'}</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Datapunkter:</Text>
-                <Text>{decoupling.data.data_points?.toLocaleString() || 'N/A'}</Text>
-              </div>
-              <div className="flex justify-between">
-                <Text>Kilde:</Text>
-                <Text>
-                  {decoupling.data.calculation_method === 'cached' ? 'Cache' : 'FIT-data'}
-                </Text>
-              </div>
+        {decoupling.status === "ready" && decoupling.data ? (
+          <AnalyticsCard>
+            <div className="flex items-start justify-between gap-2">
+              <h3 className="text-sm font-semibold text-slate-900">
+                Cardiac-aerobic decoupling
+              </h3>
+              {decouplingBadge(decoupling.data.decoupling_percent)}
             </div>
-
-            <div className="mt-4">
-              <Text className="text-sm text-gray-600">
-                {decoupling.data.decoupling_percent && decoupling.data.decoupling_percent > 10
-                  ? 'Høy decoupling kan indikere tretthet eller dehydrering.'
-                  : decoupling.data.decoupling_percent &&
-                      decoupling.data.decoupling_percent >= 5
-                    ? 'Moderat decoupling - vær oppmerksom på tretthet.'
-                    : decoupling.data.decoupling_percent &&
-                        decoupling.data.decoupling_percent < 5
-                      ? 'Lav decoupling - god aerob effektivitet!'
-                      : 'Ikke nok data for decoupling-analyse.'}
-              </Text>
+            <p className="mt-3 text-2xl font-semibold tabular-nums text-slate-900">
+              {decoupling.data.decoupling_percent > 0 ? "+" : ""}
+              {decoupling.data.decoupling_percent?.toFixed(1) || "0.0"}%
+            </p>
+            <div className="mt-3 space-y-1.5">
+              <Row
+                label="Første halvdel"
+                value={`HR ${decoupling.data.first_half_hr?.toFixed(0) || "—"} / ${decoupling.data.first_half_speed?.toFixed(2) || "—"} m/s`}
+              />
+              <Row
+                label="Andre halvdel"
+                value={`HR ${decoupling.data.second_half_hr?.toFixed(0) || "—"} / ${decoupling.data.second_half_speed?.toFixed(2) || "—"} m/s`}
+              />
+              <Row
+                label="HR:fart 1. del"
+                value={decoupling.data.first_half_ratio?.toFixed(2) || "—"}
+              />
+              <Row
+                label="HR:fart 2. del"
+                value={decoupling.data.second_half_ratio?.toFixed(2) || "—"}
+              />
+              <Row
+                label="Datapunkter"
+                value={decoupling.data.data_points?.toLocaleString("nb-NO") || "—"}
+              />
             </div>
-          </Card>
-        )}
+            <p className="mt-3 text-xs text-slate-500">
+              {decoupling.data.decoupling_percent > 10
+                ? "Høy decoupling kan indikere tretthet eller dehydrering."
+                : decoupling.data.decoupling_percent >= 5
+                  ? "Moderat decoupling — vær oppmerksom på tretthet."
+                  : decoupling.data.decoupling_percent < 5
+                    ? "Lav decoupling — god aerob effektivitet."
+                    : "Ikke nok data for decoupling-analyse."}
+            </p>
+          </AnalyticsCard>
+        ) : null}
       </div>
     </div>
   );

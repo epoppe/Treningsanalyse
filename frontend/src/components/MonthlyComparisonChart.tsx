@@ -17,6 +17,7 @@ import {
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
 import { LegacyChartFrame } from '@/components/charts/ChartShell';
+import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
 import { Activity } from '../types';
 import { useEffect, useMemo, useState } from 'react';
 
@@ -121,9 +122,6 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
     return base;
   }, [activities, metric, serverData, useServerSummaries, years]);
 
-  // Debug logging
-  console.log(`[MonthlyComparisonChart] ${title}: source=${useServerSummaries && serverData ? 'server' : 'client'}, years=${years.length}`);
-
   // Konverter til format som Recharts kan bruke
   const chartData = monthNames.map(month => {
     const monthData: any = { month };
@@ -136,14 +134,20 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
   const getYAxisLabel = () => {
     switch (metric) {
       case 'distance':
-        return 'Kilometer';
+        return 'Distanse (km)';
       case 'time':
-        return 'Timer';
+        return 'Tid (timer)';
       case 'tss':
         return 'TSS';
       default:
         return '';
     }
+  };
+
+  const getUnit = () => {
+    if (metric === 'distance') return 'km';
+    if (metric === 'time') return 'timer';
+    return 'TSS';
   };
 
   // Konverter tid til timer hvis nødvendig (TSS trenger ingen konvertering)
@@ -173,34 +177,22 @@ export default function MonthlyComparisonChart({ activities, metric, title, useS
           <BarChart data={finalChartData} margin={CHART_MARGIN.labeled}>
             <ThemedCartesianGrid />
             <ThemedXAxis dataKey="month" />
-            <ThemedYAxis
-              label={{
-                value: getYAxisLabel(),
-                angle: -90,
-                position: 'insideLeft',
-              }}
-            />
+            <ThemedYAxis label={axisLabelProps(getYAxisLabel())} />
             <ThemedTooltip
               content={({ active, payload, label }) => {
                 if (active && payload && payload.length) {
                   return (
                     <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
                       <p className="font-semibold text-slate-900">{label}</p>
-                    {payload.map((entry, index) => {
-                      const rawValue = entry.value as number | string | undefined;
-                      let formattedValue: string;
-                      if (metric === 'tss') {
-                        formattedValue = typeof rawValue === 'number' ? Math.round(rawValue).toString() : String(rawValue ?? '0');
-                      } else {
-                        formattedValue = typeof rawValue === 'number' ? rawValue.toFixed(1) : String(rawValue ?? '');
-                      }
-                      const unit = metric === 'tss' ? '' : ` ${getYAxisLabel().toLowerCase()}`;
-                      return (
-                        <p key={index} style={{ color: entry.color }}>
-                          {`${entry.dataKey}: ${formattedValue}${unit}`}
-                        </p>
-                      );
-                    })}
+                      {payload.map((entry, index) => {
+                        const rawValue = Number(entry.value ?? 0);
+                        const decimals = metric === 'tss' ? 0 : 1;
+                        return (
+                          <p key={index} style={{ color: entry.color }} className="text-slate-700">
+                            {String(entry.dataKey)}: {formatWithUnit(rawValue, getUnit(), decimals)}
+                          </p>
+                        );
+                      })}
                     </div>
                   );
                 }

@@ -1,12 +1,16 @@
 "use client";
 
-import { Card, Text } from '@tremor/react';
-import dynamic from 'next/dynamic';
-import type { AsyncLoadState } from '@/utils/metricState';
+import dynamic from "next/dynamic";
+import type { AsyncLoadState } from "@/utils/metricState";
+import { ChartShell } from "@/components/charts/ChartShell";
 
-const PlotlyChart = dynamic(() => import('@/components/PlotlyChart'), {
+const PlotlyChart = dynamic(() => import("@/components/PlotlyChart"), {
   ssr: false,
-  loading: () => <Text>Laster graf...</Text>,
+  loading: () => (
+    <p className="flex h-full items-center justify-center text-sm text-slate-500">
+      Laster graf...
+    </p>
+  ),
 });
 
 interface ActivityDetailsChartsProps {
@@ -14,58 +18,53 @@ interface ActivityDetailsChartsProps {
   detailsData: Record<string, unknown>[];
 }
 
-const ActivityDetailsCharts = ({ detailsState, detailsData }: ActivityDetailsChartsProps) => {
-  if (detailsState === 'missing') {
+const ActivityDetailsCharts = ({
+  detailsState,
+  detailsData,
+}: ActivityDetailsChartsProps) => {
+  if (detailsState === "missing") {
     return (
-      <Card className="mt-6">
-        <Text>Ingen tidsseriedata (FIT-detaljer) tilgjengelig for denne aktiviteten.</Text>
-      </Card>
+      <ChartShell title="Øktdetaljer" isEmpty emptyMessage="Ingen tidsseriedata (FIT-detaljer) tilgjengelig for denne aktiviteten." />
     );
   }
 
-  if (detailsState !== 'ready') {
+  if (detailsState !== "ready") {
     return null;
   }
 
   return (
-    <>
-      <Card className="mt-6">
-        <div className="h-96">
-          <PlotlyChart
-            data={detailsData}
-            xKey="timestamp"
-            yKeys={['heart_rate']}
-            title="Puls over tid"
-            yAxisTitle="Puls (bpm)"
-          />
-        </div>
-      </Card>
+    <div className="mt-4 space-y-4">
+      <ChartShell title="Puls over tid" heightClassName="h-96">
+        <PlotlyChart
+          data={detailsData}
+          xKey="timestamp"
+          yKeys={["heart_rate"]}
+          title="Puls over tid"
+          yAxisTitle="Puls (bpm)"
+        />
+      </ChartShell>
 
-      <Card className="mt-6">
-        <div className="h-96">
-          <PlotlyChart
-            data={detailsData}
-            xKey="elapsed_time"
-            yKeys={['speed']}
-            title="Fart over tid"
-            xAxisTitle="Tid (sek)"
-            yAxisTitle="Fart (km/t)"
-          />
-        </div>
-      </Card>
+      <ChartShell title="Fart over tid" heightClassName="h-96">
+        <PlotlyChart
+          data={detailsData}
+          xKey="elapsed_time"
+          yKeys={["speed"]}
+          title="Fart over tid"
+          xAxisTitle="Tid (sek)"
+          yAxisTitle="Fart (km/t)"
+        />
+      </ChartShell>
 
-      <Card className="mt-6">
-        <div className="h-96">
-          <PlotlyChart
-            data={detailsData}
-            xKey="timestamp"
-            yKeys={['altitude']}
-            title="Høydeprofil"
-            yAxisTitle="Høydemeter (moh)"
-          />
-        </div>
-      </Card>
-    </>
+      <ChartShell title="Høydeprofil" heightClassName="h-96">
+        <PlotlyChart
+          data={detailsData}
+          xKey="timestamp"
+          yKeys={["altitude"]}
+          title="Høydeprofil"
+          yAxisTitle="Høydemeter (moh)"
+        />
+      </ChartShell>
+    </div>
   );
 };
 
