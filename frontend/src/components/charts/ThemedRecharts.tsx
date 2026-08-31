@@ -22,29 +22,27 @@ export { CHART_MARGIN, chartColor, yearComparisonColors } from "./chartTheme";
  * Recharts 2.x registers X/Y axes from children by displayName + defaultProps.
  * Function wrappers that return <XAxis/> break axis context — subclass instead.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class ThemedXAxis extends (XAxis as any) {
+export const ThemedXAxis = class ThemedXAxis extends XAxis {
   static displayName = "XAxis";
   static defaultProps = {
-    ...(XAxis.defaultProps as object),
+    ...XAxis.defaultProps,
     tick: CHART_AXIS.tick,
     axisLine: { stroke: CHART_AXIS.stroke },
     tickLine: { stroke: CHART_AXIS.stroke },
     minTickGap: 24,
   };
-}
+} as typeof XAxis;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class ThemedYAxis extends (YAxis as any) {
+export const ThemedYAxis = class ThemedYAxis extends YAxis {
   static displayName = "YAxis";
   static defaultProps = {
-    ...(YAxis.defaultProps as object),
+    ...YAxis.defaultProps,
     width: 48,
     tick: CHART_AXIS.tick,
     axisLine: { stroke: CHART_AXIS.stroke },
     tickLine: { stroke: CHART_AXIS.stroke },
   };
-}
+} as typeof YAxis;
 
 /**
  * CartesianGrid is a rendering function component — plain wrapper without
