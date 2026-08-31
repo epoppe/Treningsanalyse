@@ -30,16 +30,20 @@ function readinessLabel(score: number): string {
   return 'Svært dårlig';
 }
 
+function todayIso(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
 export default function DagligReadinessPage() {
-  const [selectedDate, setSelectedDate] = useState('');
+  const [selectedDate, setSelectedDate] = useState(todayIso);
   const [readinessData, setReadinessData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
-    setSelectedDate(today);
-    fetchReadiness(today);
+    fetchReadiness(selectedDate);
+    // Initial load for today's date only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchReadiness = async (date: string) => {
@@ -56,7 +60,7 @@ export default function DagligReadinessPage() {
   };
 
   const handleTodayClick = () => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayIso();
     setSelectedDate(today);
     fetchReadiness(today);
   };

@@ -115,7 +115,13 @@ export default function TrainingStatusPage() {
           />
           <MetricStatCard
             label="VO2Max trend"
-            value={data.vo2max.trend === 'improving' ? '📈 Forbedring' : '➡️ Stabil'}
+            value={
+              data.vo2max.trend === 'improving'
+                ? 'Forbedring'
+                : data.vo2max.trend === 'declining'
+                  ? 'Nedgang'
+                  : 'Stabil'
+            }
             accent={trendAccent(data.vo2max.trend)}
           />
           <MetricStatCard

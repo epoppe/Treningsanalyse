@@ -5,8 +5,9 @@ import styled from 'styled-components';
 
 const ChatContainer = styled.div`
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
   height: 400px;
@@ -14,11 +15,11 @@ const ChatContainer = styled.div`
 `;
 
 const ChatHeader = styled.div`
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  background: #0f172a;
   color: white;
   padding: 1rem 1.25rem;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.95rem;
 `;
 
 const MessagesContainer = styled.div`
@@ -64,16 +65,16 @@ const Input = styled.input`
 
 const SendButton = styled.button`
   padding: 0.75rem 1.25rem;
-  background: #2563eb;
+  background: #0f172a;
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 0.5rem;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.2s;
 
   &:hover {
-    background: #1d4ed8;
+    background: #1e293b;
   }
 
   &:disabled {
@@ -149,7 +150,16 @@ export default function ReadinessChat({ selectedDate, onSendMessage }: Readiness
 
   return (
     <ChatContainer>
-      <ChatHeader>💬 Spør om readiness for {new Date(selectedDate + 'T12:00:00').toLocaleDateString('nb-NO', { weekday: 'long', day: 'numeric', month: 'long' })}</ChatHeader>
+      <ChatHeader>
+        Spør om readiness
+        {selectedDate
+          ? ` for ${new Date(`${selectedDate}T12:00:00`).toLocaleDateString('nb-NO', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+            })}`
+          : ''}
+      </ChatHeader>
       <MessagesContainer>
         {messages.length === 0 ? (
           <EmptyState>
