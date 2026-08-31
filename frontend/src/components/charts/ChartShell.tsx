@@ -46,32 +46,44 @@ export function ChartShell({
   );
 }
 
-/** Styled-components replacement for legacy metric charts */
+/**
+ * Legacy chart frame — visually aligned with ChartShell/cockpit cards.
+ * Prefer ChartShell for new charts; this wrapper keeps existing call sites stable.
+ */
 export function LegacyChartFrame({
   title,
+  subtitle,
   children,
   controls,
   className,
   height = "600px",
 }: {
   title: string;
+  subtitle?: string;
   children: ReactNode;
   controls?: ReactNode;
   className?: string;
   height?: string;
 }) {
   return (
-    <div
+    <section
       className={cn(
-        "mb-4 rounded-lg border border-slate-200 bg-white p-3 shadow-sm",
+        "mb-4 rounded-xl border border-slate-200 bg-white shadow-sm",
         className,
       )}
       style={{ minHeight: height }}
     >
-      <h3 className="mb-2 text-base font-semibold text-slate-900">{title}</h3>
-      {controls ? <div className="mb-3 flex flex-wrap gap-2">{controls}</div> : null}
-      {children}
-    </div>
+      <header className="border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">{title}</h3>
+            {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
+          </div>
+          {controls ? <div className="flex flex-wrap gap-2">{controls}</div> : null}
+        </div>
+      </header>
+      <div className="px-4 py-3">{children}</div>
+    </section>
   );
 }
 

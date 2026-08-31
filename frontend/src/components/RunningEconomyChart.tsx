@@ -20,6 +20,10 @@ import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartSh
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
+import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
+import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
+
+const economyDef = getMetricDefinition('runningEconomy');
 
 interface RunningEconomyChartProps {
   activities: Activity[];
@@ -249,15 +253,23 @@ export default function RunningEconomyChart({
           <ThemedCartesianGrid vertical={false} />
           <ThemedXAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <ThemedYAxis
-            label={{ value: 'Hastighet/Puls', angle: -90, position: 'insideLeft' }}
+            label={axisLabelProps(economyDef.axisLabel)}
             domain={yAxisDomain()}
             tickFormatter={(tick) => tick.toFixed(2)}
           />
           <ThemedTooltip
             formatter={(value: any, name: any) => {
-              const formattedName =
-                name === "movingAverage" ? "Gj.snitt" : "Verdi";
-              return [typeof value === 'number' ? value.toFixed(2) : value, formattedName];
+              const isTrend =
+                name === 'movingAverage' ||
+                name === SERIES_LABELS.trend6m ||
+                String(name).includes('Trend');
+              const formattedName = isTrend ? SERIES_LABELS.trend6m : economyDef.displayName;
+              return [
+                typeof value === 'number'
+                  ? formatWithUnit(value, economyDef.unit, 2)
+                  : value,
+                formattedName,
+              ];
             }}
             labelFormatter={(label, payload) => {
               if (
@@ -273,7 +285,9 @@ export default function RunningEconomyChart({
           />
           <ThemedLegend
             formatter={(value) =>
-              value === "movingAverage" ? "Gjennomsnitt" : "Hastighet/Puls"
+              value === 'movingAverage' || value === SERIES_LABELS.trend6m
+                ? SERIES_LABELS.trend6m
+                : economyDef.displayName
             }
           />
           <Line
@@ -288,7 +302,7 @@ export default function RunningEconomyChart({
               type="monotone"
               dataKey="movingAverage"
               stroke={LEGACY_SERIES_COLORS.form}
-              name="Trend (6mnd snitt)"
+              name={SERIES_LABELS.trend6m}
               strokeWidth={2}
               dot={false}
               connectNulls

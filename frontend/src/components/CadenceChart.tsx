@@ -19,6 +19,10 @@ import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartSh
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
+import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
+import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
+
+const cadenceDef = getMetricDefinition('cadence');
 
 interface CadenceChartProps {
   activities: Activity[];
@@ -181,18 +185,30 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
           <ThemedCartesianGrid vertical={false} />
           <ThemedXAxis dataKey="date" interval={0} tick={<CustomAxisTick data={dataWithMovingAverage} />} />
           <ThemedYAxis
-            label={{ value: 'Skritt/min', angle: -90, position: 'insideLeft' }}
+            label={axisLabelProps(cadenceDef.axisLabel)}
             domain={yAxisDomain()}
             tickFormatter={(tick) => String(Math.round(tick))}
           />
           <ThemedTooltip
             formatter={(value: any, name: any) => {
-              const formattedName = name === 'movingAverage' ? 'Gj.snitt' : 'Verdi';
-              return [typeof value === 'number' ? value.toFixed(1) : value, formattedName];
+              const formattedName =
+                name === 'movingAverage' || name === SERIES_LABELS.movingAverage
+                  ? SERIES_LABELS.movingAverage
+                  : cadenceDef.displayName;
+              return [
+                typeof value === 'number'
+                  ? formatWithUnit(value, cadenceDef.unit, 1)
+                  : value,
+                formattedName,
+              ];
             }}
             labelFormatter={(label) => `Dato: ${label}`}
           />
-          <ThemedLegend formatter={(value) => value === 'movingAverage' ? 'Gjennomsnitt' : 'Kadens'} />
+          <ThemedLegend
+            formatter={(value) =>
+              value === 'movingAverage' ? SERIES_LABELS.movingAverage : cadenceDef.displayName
+            }
+          />
           <Line
             type="monotone"
             dataKey="cadence"
@@ -206,7 +222,7 @@ export default function CadenceChart({ activities, title, timeFilter }: CadenceC
               type="monotone"
               dataKey="movingAverage"
               stroke={LEGACY_SERIES_COLORS.vo2}
-              name="movingAverage"
+              name={SERIES_LABELS.movingAverage}
               dot={false}
             />
           )}

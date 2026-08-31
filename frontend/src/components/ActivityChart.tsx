@@ -17,9 +17,11 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
+import { ChartShell } from '@/components/charts/ChartShell';
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { axisLabelProps, formatChartNumber, formatWithUnit } from '@/lib/chartFormatters';
+import { getMetricDefinition } from '@/lib/metrics';
 
 interface ActivityChartProps {
   activities: Activity[];
@@ -28,6 +30,12 @@ interface ActivityChartProps {
   useDynamicYAxis?: boolean;
 }
 
+const METRIC_KEYS = {
+  distance: 'distance',
+  duration: 'duration',
+  calories: 'calories',
+} as const;
+
 const CustomAxisTick = ({ x, y, payload, data }: any) => {
   const currentYear = data[payload.index]?.year;
   const prevYear = payload.index > 0 ? data[payload.index - 1]?.year : null;
@@ -35,7 +43,7 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   if (currentYear !== prevYear) {
     return (
       <g transform={`translate(${x},${y})`}>
-        <text x={0} y={0} dy={16} textAnchor="middle" fill="#666" fontWeight="bold">
+        <text x={0} y={0} dy={16} textAnchor="middle" fill="#64748b" fontWeight="bold" fontSize={10}>
           {currentYear}
         </text>
       </g>
@@ -45,31 +53,19 @@ const CustomAxisTick = ({ x, y, payload, data }: any) => {
   return null;
 };
 
+function normalizeMetricValue(metric: ActivityChartProps['metric'], raw: number): number {
+  if (metric === 'distance') return raw / 1000;
+  if (metric === 'duration') return raw / 60;
+  return raw;
+}
+
 function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
+  const def = getMetricDefinition(METRIC_KEYS[metric]);
+  const groupingSuffix = activities.length === 0 ? '' : '';
+
   if (activities.length === 0) {
     return (
-      <Card
-        className="h-[280px]"
-        style={{
-          border: '1px solid rgba(226, 232, 240, 0.9)',
-          borderRadius: '18px',
-          background: '#fff',
-          marginBottom: '1rem',
-          height: '280px',
-        }}
-      >
-        <CardHeader style={{ padding: '1rem 1rem 0.15rem 1rem' }}>
-          <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
-            {title}
-          </CardTitle>
-        </CardHeader>
-        <CardContent
-          className="flex h-full items-center justify-center text-sm text-muted-foreground"
-          style={{ padding: '0 1rem 0.4rem 1rem', color: '#475569', fontSize: '0.95rem' }}
-        >
-          Ingen data å vise for denne perioden.
-        </CardContent>
-      </Card>
+      <ChartShell title={title} isEmpty heightClassName="h-[280px]" />
     );
   }
 
@@ -81,80 +77,70 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
   const groupByMonth = yearSpan >= 2;
 
   let chartData;
-  let groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
+  const groupingTitle = groupByMonth ? '(per måned)' : '(per uke)';
 
   if (groupByMonth) {
-    // Først, grupper eksisterende data per måned
     const monthlyDataMap = activities.reduce((acc, activity) => {
       const date = new Date(activity.startTimeLocal);
       const year = getYear(date);
       const month = getMonth(date);
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      
+
       if (!acc[monthKey]) {
         acc[monthKey] = {
           date: format(startOfMonth(date), 'MMM yy'),
           groupKey: monthKey,
-          year: year,
-          [metric]: 0
+          year,
+          [metric]: 0,
         };
       }
       acc[monthKey][metric] += activity[metric] || 0;
       return acc;
     }, {} as Record<string, any>);
 
-    // Konverter til kilometer hvis metrikken er distanse
-    if (metric === 'distance') {
-      for (const key in monthlyDataMap) {
-        monthlyDataMap[key][metric] /= 1000;
-      }
+    for (const key in monthlyDataMap) {
+      monthlyDataMap[key][metric] = normalizeMetricValue(metric, monthlyDataMap[key][metric]);
     }
 
-    // Deretter, generer en komplett liste over alle måneder i tidsrommet
     const allMonths = eachMonthOfInterval({ start: minDate, end: maxDate });
 
     chartData = allMonths.map(monthStart => {
       const year = getYear(monthStart);
       const month = getMonth(monthStart);
       const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
-      
+
       return monthlyDataMap[monthKey] || {
         date: format(monthStart, 'MMM yy'),
         groupKey: monthKey,
-        year: year,
-        [metric]: null // Bruk null for å skape et tomt rom i grafen
+        year,
+        [metric]: null,
       };
     });
   } else {
-    // Først, grupper eksisterende data per uke
     const weeklyDataMap = activities.reduce((acc, activity) => {
       const date = new Date(activity.startTimeLocal);
       const week = getISOWeek(date);
       const year = getYear(date);
       const weekKey = `${year}-W${String(week).padStart(2, '0')}`;
-      
+
       if (!acc[weekKey]) {
         acc[weekKey] = {
           date: format(startOfISOWeek(date), 'dd.MM.yy'),
           groupKey: weekKey,
-          year: year,
-          [metric]: 0
+          year,
+          [metric]: 0,
         };
       }
       acc[weekKey][metric] += activity[metric] || 0;
       return acc;
     }, {} as Record<string, any>);
 
-    // Konverter til kilometer hvis metrikken er distanse
-    if (metric === 'distance') {
-      for (const key in weeklyDataMap) {
-        weeklyDataMap[key][metric] /= 1000;
-      }
+    for (const key in weeklyDataMap) {
+      weeklyDataMap[key][metric] = normalizeMetricValue(metric, weeklyDataMap[key][metric]);
     }
 
-    // Deretter, generer en komplett liste over alle uker i tidsrommet
     const allWeeks = eachWeekOfInterval({ start: minDate, end: maxDate }, { weekStartsOn: 1 });
-    
+
     chartData = allWeeks.map(weekStart => {
       const year = getYear(weekStart);
       const week = getISOWeek(weekStart);
@@ -163,101 +149,69 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
       return weeklyDataMap[weekKey] || {
         date: format(weekStart, 'dd.MM.yy'),
         groupKey: weekKey,
-        year: year,
-        [metric]: null // Bruk null for å skape et tomt rom i grafen
+        year,
+        [metric]: null,
       };
     });
   }
 
-  // Beregn dynamisk Y-akse hvis ønsket
-  const getYAxisDomain = () => {
-    if (useDynamicYAxis && metric === 'distance') {
-      const maxValue = Math.max(...chartData.map(d => d[metric] || 0));
-      // Bruk mindre intervaller for bedre skala
-      const roundedMax = Math.ceil(maxValue / 25) * 25; // Runder opp til nærmeste 25
-      return [0, Math.max(roundedMax, 50)]; // Minimum 50km
+  const getYAxisDomain = (): [number, number] => {
+    const values = chartData.map((d) => d[metric]).filter((v): v is number => v != null && Number.isFinite(v));
+    const maxValue = values.length ? Math.max(...values) : 0;
+    if (useDynamicYAxis) {
+      const step = metric === 'distance' ? 25 : metric === 'duration' ? 60 : 100;
+      const roundedMax = Math.ceil(maxValue / step) * step;
+      const floor = metric === 'distance' ? 50 : metric === 'duration' ? 30 : 200;
+      return [0, Math.max(roundedMax, floor)];
     }
-    return [0, 450]; // Fast maksimum for "vis alle"
-  };
-
-  const getYAxisLabel = () => {
-    switch (metric) {
-      case 'distance':
-        return 'Kilometer';
-      case 'duration':
-        return 'Minutter';
-      case 'calories':
-        return 'Kalorier';
-      default:
-        return '';
-    }
+    if (metric === 'distance') return [0, Math.max(Math.ceil(maxValue / 25) * 25, 50)];
+    if (metric === 'duration') return [0, Math.max(Math.ceil(maxValue / 60) * 60, 120)];
+    return [0, Math.max(Math.ceil(maxValue / 50) * 50, 450)];
   };
 
   return (
-    <Card
-      className="h-[280px]"
-      style={{
-        border: '1px solid rgba(226, 232, 240, 0.9)',
-        borderRadius: '18px',
-        background: '#fff',
-        marginBottom: '1rem',
-        height: '280px',
-      }}
-    >
-      <CardHeader className="pb-2" style={{ padding: '1rem 1rem 0.15rem 1rem' }}>
-        <CardTitle className="text-lg font-semibold" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#0f172a' }}>
-          {title} {groupingTitle}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="h-[260px]" style={{ padding: '0 1rem 0.4rem 1rem', height: '260px' }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={CHART_MARGIN.labeled}>
-            <ThemedCartesianGrid />
-            <ThemedXAxis
-              dataKey="groupKey"
-              height={50}
-              interval={0}
-              tick={<CustomAxisTick data={chartData} />}
-            />
-            <ThemedYAxis
-              label={{
-                value: getYAxisLabel(),
-                angle: -90,
-                position: 'insideLeft',
-                fill: '#64748b',
-                fontSize: 12,
-              }}
-              domain={getYAxisDomain()}
-            />
-            <ThemedTooltip
-              content={({ active, payload }) => {
-                if (active && payload && payload.length && payload[0].value) {
-                  return (
-                    <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
-                      <p className="font-semibold text-slate-900">
-                        {groupByMonth ? 'Måned' : 'Uke (start)'}: {payload[0].payload.date}
-                      </p>
-                      <p className="text-slate-600">
-                        {`Total ${getYAxisLabel().toLowerCase()}: ${Number(payload[0].value).toFixed(2)}`}
-                      </p>
-                    </div>
-                  );
-                }
-                return null;
-              }}
-            />
-            <Bar
-              dataKey={metric}
-              fill={chartColor(0)}
-              name={getYAxisLabel()}
-              radius={CHART_BAR.radius}
-            />
-          </BarChart>
-        </ResponsiveContainer>
-      </CardContent>
-    </Card>
+    <ChartShell title={`${title} ${groupingTitle}${groupingSuffix}`} heightClassName="h-[280px]">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} margin={CHART_MARGIN.labeled}>
+          <ThemedCartesianGrid />
+          <ThemedXAxis
+            dataKey="groupKey"
+            height={50}
+            interval={0}
+            tick={<CustomAxisTick data={chartData} />}
+          />
+          <ThemedYAxis
+            label={axisLabelProps(def.axisLabel)}
+            domain={getYAxisDomain()}
+            tickFormatter={(tick) => formatChartNumber(Number(tick), def.decimals ?? 0)}
+          />
+          <ThemedTooltip
+            content={({ active, payload }) => {
+              if (active && payload && payload.length && payload[0].value != null) {
+                return (
+                  <div className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+                    <p className="font-semibold text-slate-900">
+                      {groupByMonth ? 'Måned' : 'Uke (start)'}: {payload[0].payload.date}
+                    </p>
+                    <p className="text-slate-600">
+                      {def.displayName}: {formatWithUnit(Number(payload[0].value), def.unit, def.decimals ?? 1)}
+                    </p>
+                  </div>
+                );
+              }
+              return null;
+            }}
+          />
+          <Bar
+            dataKey={metric}
+            fill={chartColor(0)}
+            name={def.displayName}
+            radius={CHART_BAR.radius}
+          />
+        </BarChart>
+      </ResponsiveContainer>
+    </ChartShell>
   );
 }
 
-// Wrap component with React.memo for performance
-export default memo(ActivityChart); 
+export default memo(ActivityChart);

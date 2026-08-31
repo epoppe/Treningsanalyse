@@ -48,9 +48,9 @@ const ActivityDetailsCharts = ({ detailsState, detailsData }: ActivityDetailsCha
             xKey="elapsed_time"
             yKeys={['speed']}
             title="Fart over tid"
+            xAxisTitle="Tid (sek)"
             yAxisTitle="Fart (km/t)"
           />
-        </div>
       </Card>
 
       <Card className="mt-6">

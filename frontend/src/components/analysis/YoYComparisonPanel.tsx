@@ -15,15 +15,16 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
+import { axisLabelProps } from "@/lib/chartFormatters";
 import { AnalysisSkeleton } from "./ui";
 
 type YoYMetric = "duration" | "distance" | "activities" | "tss";
 
 const METRIC_OPTIONS: Array<{ id: YoYMetric; label: string }> = [
-  { id: "duration", label: "Running duration" },
-  { id: "distance", label: "Distance" },
-  { id: "activities", label: "Session count" },
-  { id: "tss", label: "TSS / load" },
+  { id: "duration", label: "Løpetid" },
+  { id: "distance", label: "Distanse" },
+  { id: "activities", label: "Antall økter" },
+  { id: "tss", label: "TSS / belastning" },
 ];
 
 function valueFor(
@@ -35,6 +36,13 @@ function valueFor(
   if (metric === "distance") return (side.distance_m || 0) / 1000;
   if (metric === "tss") return side.tss || 0;
   return side.activities || 0;
+}
+
+function yAxisLabel(metric: YoYMetric) {
+  if (metric === "duration") return "Tid (timer)";
+  if (metric === "distance") return "Distanse (km)";
+  if (metric === "tss") return "TSS";
+  return "Antall økter";
 }
 
 function unitLabel(metric: YoYMetric) {
@@ -76,7 +84,7 @@ export function YoYComparisonPanel({
   const colors = yearComparisonColors(2);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">År-over-år</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">
         Én metrikk om gangen ({chart.previousYear} vs {chart.currentYear}). EF / durability / LT2 /
@@ -103,7 +111,7 @@ export function YoYComparisonPanel({
           <BarChart data={chart.bars} margin={CHART_MARGIN.compact}>
             <ThemedCartesianGrid />
             <ThemedXAxis dataKey="label" minTickGap={16} />
-            <ThemedYAxis width={40} />
+            <ThemedYAxis width={44} label={axisLabelProps(yAxisLabel(metric))} />
             <ThemedTooltip
               formatter={(value: any) => [
                 typeof value === "number" ? value.toFixed(1) : value,

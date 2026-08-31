@@ -11,8 +11,9 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
+import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
+import { getMetricDefinition } from '@/lib/metrics';
 import { LegacyChartFrame } from '@/components/charts/ChartShell';
-import { analysisApi } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
@@ -162,6 +163,8 @@ interface VO2MaxResponse {
   vo2max_history: VO2MaxData[];
   total_records: number;
 }
+
+const vo2Def = getMetricDefinition('vo2max');
 
 export default function VO2MaxPage() {
   const [data, setData] = useState<VO2MaxData[]>([]);
@@ -354,7 +357,7 @@ export default function VO2MaxPage() {
         </LoadingContainer>
       ) : data.length > 0 ? (
         <>
-          <LegacyChartFrame title="VO2Max over tid">
+          <LegacyChartFrame title="VO₂max over tid">
             <div className="h-[400px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={CHART_MARGIN.legacy}>
@@ -367,15 +370,15 @@ export default function VO2MaxPage() {
                   interval="preserveStartEnd"
                 />
                 <ThemedYAxis
-                  label={{ value: 'VO2Max', angle: -90, position: 'insideLeft' }}
+                  label={axisLabelProps(vo2Def.axisLabel)}
                   domain={['dataMin - 2', 'dataMax + 2']}
+                  tickFormatter={(tick) => String(Number(tick).toFixed(1))}
                 />
                 <ThemedTooltip
-                  formatter={(value: any, name: any) => {
-                    const key = String(name);
-                    if (key === 'vo2max') return [Number(value).toFixed(1), 'VO2Max'];
-                    return [value, key];
-                  }}
+                  formatter={(value: any) => [
+                    formatWithUnit(Number(value), vo2Def.unit, 1),
+                    vo2Def.displayName,
+                  ]}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
                 <ThemedLegend />
@@ -385,7 +388,7 @@ export default function VO2MaxPage() {
                   stroke={LEGACY_SERIES_COLORS.vo2}
                   strokeWidth={2}
                   dot={false}
-                  name="VO2Max"
+                  name="VO₂max"
                 />
               </LineChart>
             </ResponsiveContainer>

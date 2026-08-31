@@ -13,6 +13,7 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
+import { axisLabelProps } from "@/lib/chartFormatters";
 
 export function LagChart({ data }: { data?: RelationshipLagPayload }) {
   const rows =
@@ -32,8 +33,15 @@ export function LagChart({ data }: { data?: RelationshipLagPayload }) {
         <BarChart data={rows} margin={CHART_MARGIN.compact}>
           <ThemedCartesianGrid />
           <ThemedXAxis dataKey="lag" />
-          <ThemedYAxis width={32} domain={[-1, 1]} />
-          <ThemedTooltip />
+          <ThemedYAxis
+            width={36}
+            domain={[-1, 1]}
+            label={axisLabelProps("Effektstørrelse")}
+          />
+          <ThemedTooltip
+            formatter={(value: number) => [Number(value).toFixed(2), "Effekt"]}
+            labelFormatter={(label) => `Lag: ${label}`}
+          />
           <Bar dataKey="effect" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>

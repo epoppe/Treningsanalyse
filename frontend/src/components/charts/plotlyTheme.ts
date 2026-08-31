@@ -1,4 +1,10 @@
+import { PLOTLY_TRACE_LABELS } from "@/lib/metrics";
 import { CHART_AXIS, CHART_GRID, CHART_PRIMARY, chartColor } from "./chartTheme";
+
+function humanizeTraceName(yKey: string): string {
+  if (PLOTLY_TRACE_LABELS[yKey]) return PLOTLY_TRACE_LABELS[yKey];
+  return yKey.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+}
 
 export function buildPlotlyLayout({
   title,
@@ -61,7 +67,7 @@ export function buildPlotlyTraces({
   return yKeys.map((yKey, index) => ({
     x: data.map((item) => item[xKey]),
     y: data.map((item) => item[yKey]),
-    name: yKey.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+    name: humanizeTraceName(yKey),
     type: "scatter" as const,
     mode: traceMode,
     line: { color: index === 0 ? CHART_PRIMARY : chartColor(index), width: 2 },

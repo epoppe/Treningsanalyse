@@ -21,6 +21,10 @@ import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartSh
 import { Activity } from '../types';
 import { getISOWeek, startOfISOWeek, format, getYear, getMonth, startOfMonth, differenceInYears, parseISO, eachWeekOfInterval, eachMonthOfInterval } from 'date-fns';
 import { useState } from 'react';
+import { axisLabelProps } from '@/lib/chartFormatters';
+import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
+
+const strideDef = getMetricDefinition('strideLength');
 
 interface StrideLengthChartProps {
   activities: Activity[];
@@ -184,6 +188,7 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
           <ThemedYAxis 
             yAxisId="left" 
             domain={yAxisDomain()}
+            label={axisLabelProps(strideDef.axisLabel)}
             tickFormatter={(value) => value.toFixed(2)}
             />
           <ThemedTooltip content={<CustomTooltip />} />
@@ -201,7 +206,7 @@ export default function StrideLengthChart({ activities, title, timeFilter }: Str
             yAxisId="left"
             type="monotone" 
             dataKey="movingAverage" 
-            name="Trend (4 punkter)" 
+            name={SERIES_LABELS.trend4p} 
             stroke={LEGACY_SERIES_COLORS.form} 
             strokeWidth={2}
             dot={false}

@@ -18,6 +18,10 @@ import {
 import { LegacyChartFrame } from '@/components/charts/ChartShell';
 import { format, parseISO } from 'date-fns';
 import { nb } from 'date-fns/locale';
+import { axisLabelProps, formatChartTooltipDate } from '@/lib/chartFormatters';
+import { getMetricDefinition } from '@/lib/metrics';
+
+const bodyBatteryDef = getMetricDefinition('bodyBattery');
 
 interface BodyBatteryData {
   date: string;
@@ -48,7 +52,7 @@ const CustomAxisTick = ({ x, y, payload }: any) => (
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
-    const date = format(parseISO(label), 'EEEE, dd. MMMM yyyy', { locale: nb });
+    const date = formatChartTooltipDate(label);
     
     return (
       <div style={{
@@ -65,7 +69,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
             color: entry.color,
             fontSize: '14px'
           }}>
-            {entry.name}: {entry.value !== null ? `${entry.value}%` : 'Ingen data'}
+            {entry.name}: {entry.value !== null ? `${entry.value} poeng` : 'Ingen data'}
           </p>
         ))}
       </div>
@@ -141,7 +145,8 @@ const BodyBatteryChart: React.FC<BodyBatteryChartProps> = ({ data, title, moving
           />
           <ThemedYAxis
             domain={[0, 100]}
-            tickFormatter={(value) => `${value}%`}
+            label={axisLabelProps(bodyBatteryDef.axisLabel)}
+            tickFormatter={(value) => `${value}`}
           />
           <ThemedTooltip content={<CustomTooltip />} />
           <ThemedLegend />

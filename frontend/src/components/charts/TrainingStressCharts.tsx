@@ -18,6 +18,13 @@ import {
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
 import { ChartShell } from "@/components/charts/ChartShell";
+import {
+  axisLabelProps,
+  formatChartAxisDate,
+  formatChartTooltipDate,
+  formatWithUnit,
+} from "@/lib/chartFormatters";
+import { getMetricDefinition } from "@/lib/metrics";
 
 export interface TrainingStressDailyPoint {
   date: string;
@@ -27,19 +34,11 @@ export interface TrainingStressDailyPoint {
   form: number;
 }
 
-function formatChartDate(dateString: string) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("nb-NO", { month: "short", day: "numeric", year: "numeric" });
-}
+const loadDef = getMetricDefinition("ctl");
+const formDef = getMetricDefinition("form");
 
-function formatTooltipDate(dateString: string) {
-  const date = new Date(dateString);
-  return date.toLocaleDateString("nb-NO", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
+function formatChartDate(dateString: string) {
+  return formatChartAxisDate(dateString, "dayMonthYear");
 }
 
 export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }) {
@@ -49,24 +48,39 @@ export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }
   }));
 
   return (
-    <ChartShell title="Training Load (CTL/ATL/TSS) Over Tid" heightClassName="h-[360px]">
+    <ChartShell
+      title="Treningsbelastning over tid"
+      subtitle="CTL (kronisk), ATL (akutt) og TSS (dagsbelastning)"
+      heightClassName="h-[360px]"
+    >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={CHART_MARGIN.labeled}>
           <ThemedCartesianGrid vertical={false} />
           <ThemedXAxis dataKey="label" minTickGap={28} />
-          <ThemedYAxis />
+          <ThemedYAxis label={axisLabelProps(loadDef.axisLabel)} width={48} />
           <ThemedTooltip
             labelFormatter={(_, payload) =>
               payload?.[0]?.payload?.date
-                ? formatTooltipDate(String(payload[0].payload.date))
+                ? formatChartTooltipDate(String(payload[0].payload.date))
                 : ""
             }
+            formatter={(value: number, name: string) => {
+              const labels: Record<string, string> = {
+                ctl: "CTL (kronisk belastning)",
+                atl: "ATL (akutt belastning)",
+                tss: "TSS (dagsbelastning)",
+              };
+              return [
+                formatWithUnit(Number(value), loadDef.unit, 1),
+                labels[name] || name,
+              ];
+            }}
           />
           <ThemedLegend />
           <Area
             type="monotone"
             dataKey="ctl"
-            name="CTL"
+            name="CTL (kronisk belastning)"
             stroke={LEGACY_SERIES_COLORS.ctl}
             fill={`${LEGACY_SERIES_COLORS.ctl}33`}
             strokeWidth={2}
@@ -75,7 +89,7 @@ export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }
           <Area
             type="monotone"
             dataKey="atl"
-            name="ATL"
+            name="ATL (akutt belastning)"
             stroke={LEGACY_SERIES_COLORS.atl}
             fill={`${LEGACY_SERIES_COLORS.atl}33`}
             strokeWidth={2}
@@ -84,7 +98,7 @@ export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }
           <Line
             type="monotone"
             dataKey="tss"
-            name="TSS"
+            name="TSS (dagsbelastning)"
             stroke={LEGACY_SERIES_COLORS.tss}
             strokeWidth={2}
             dot={{ r: 3, fill: LEGACY_SERIES_COLORS.tss }}
@@ -103,31 +117,38 @@ export function TrainingFormChart({ data }: { data: TrainingStressDailyPoint[] }
   }));
 
   return (
-    <ChartShell title="Form (Fitness/Fatigue) Over Tid" heightClassName="h-[320px]">
+    <ChartShell
+      title="Form over tid"
+      subtitle="Form = CTL − ATL · positiv = overskudd, negativ = tretthet"
+      heightClassName="h-[320px]"
+    >
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={rows} margin={CHART_MARGIN.labeled}>
           <ThemedCartesianGrid vertical={false} />
           <ThemedXAxis dataKey="label" minTickGap={28} />
-          <ThemedYAxis />
+          <ThemedYAxis label={axisLabelProps(formDef.axisLabel)} width={48} />
           <ThemedTooltip
             labelFormatter={(_, payload) =>
               payload?.[0]?.payload?.date
-                ? formatTooltipDate(String(payload[0].payload.date))
+                ? formatChartTooltipDate(String(payload[0].payload.date))
                 : ""
             }
-            formatter={(value: any) => {
+            formatter={(value: number) => {
               const numeric = Number(value);
-              let status = " (Tretthet)";
-              if (numeric >= 10) status = " (God form)";
-              else if (numeric >= 0) status = " (Nøytral)";
-              return [`Form: ${numeric.toFixed(1)}${status}`, "Form"];
+              let status = " (tretthet)";
+              if (numeric >= 10) status = " (god form)";
+              else if (numeric >= 0) status = " (nøytral)";
+              return [
+                `${formatWithUnit(numeric, formDef.unit, 1)}${status}`,
+                formDef.displayName,
+              ];
             }}
           />
           <ThemedLegend />
           <Area
             type="monotone"
             dataKey="form"
-            name="Form"
+            name="Form (CTL − ATL)"
             stroke={LEGACY_SERIES_COLORS.form}
             fill={`${LEGACY_SERIES_COLORS.form}33`}
             strokeWidth={2}
