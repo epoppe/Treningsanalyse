@@ -25,12 +25,14 @@ from ..services.hrv_service import HRVService
 from ..services.body_battery_service import BodyBatteryService
 from ..services.sync_job_store import (
     ACTIVE_JOB_STATUSES,
+    SyncInfrastructureError,
     acquire_job_slot,
     get_job as _store_get_job,
     get_sync_jobs_store,
     mark_job_processing as _store_mark_job_processing,
     set_job_phase,
 )
+from ..services.sync_garmin_readiness import assert_garmin_sync_ready, build_garmin_sync_status
 from ..services.sync_validation import build_sync_validation_report
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,8 @@ def _enqueue_sync_job(
             queue_message,
             shared_job_types=shared_job_types,
         )
+    except SyncInfrastructureError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -329,6 +333,14 @@ def _finalize_sync_job(
             "label": "Fullført",
         },
     })
+
+
+@router.get("/garmin-status")
+async def get_garmin_sync_status(
+    garmin_client: GarminClient = Depends(get_garmin_client),
+):
+    """Garmin-konfigurasjon og auth-status for synkroniseringssiden."""
+    return build_garmin_sync_status(garmin_client)
 
 
 @router.get("/status/{job_id}")
@@ -1226,6 +1238,7 @@ async def trigger_new_activities_sync(
     Starter synkronisering av nye aktiviteter fra siste lagrede aktivitet.
     Dette inkluderer aktiviteter, FIT-data, helsedata, Training Effect data og beregninger.
     """
+    assert_garmin_sync_ready(garmin_client)
     job_id, job, reused = _enqueue_sync_job(
         "new_activities_sync",
         "Synk av nye aktiviteter er køet.",

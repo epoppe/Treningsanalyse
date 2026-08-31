@@ -112,6 +112,15 @@ done
 [[ "$READY" -eq 1 ]] || fail "Timed out waiting for packaged backend /health/live on port $PORT"
 echo "OK /health/live → HTTP 200"
 
+echo "== POST /api/sync/new-activities (expect 422 without Garmin config) =="
+SYNC_HTTP="$(curl -s -o /tmp/desktop-sync-body.txt -w '%{http_code}' -X POST "http://127.0.0.1:${PORT}/api/sync/new-activities" -H "Content-Type: application/json")"
+if [[ "$SYNC_HTTP" != "422" && "$SYNC_HTTP" != "202" ]]; then
+  echo "Unexpected sync response body:" >&2
+  cat /tmp/desktop-sync-body.txt >&2 || true
+  fail "Expected HTTP 422 (no Garmin) or 202, got $SYNC_HTTP"
+fi
+echo "OK /api/sync/new-activities → HTTP $SYNC_HTTP"
+
 echo "== Assert mutable dirs only under AppData root =="
 for sub in tokens data fit cache logs backups; do
   [[ -d "$TEST_DIR/$sub" ]] || fail "Expected writable dir missing: $TEST_DIR/$sub"

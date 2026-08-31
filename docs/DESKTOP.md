@@ -47,6 +47,21 @@ App icon: `desktop/assets/icon.svg` (source), `icon.png` / `icon.ico` for Electr
 
 Production Next.js prefers bundled `node.exe` under `resources/frontend/`; falls back to Electron-as-Node (`ELECTRON_RUN_AS_NODE=1`).
 
+## Garmin Connect (synkronisering)
+
+Synk mot Garmin krever enten:
+
+1. **Credentials** i `%LOCALAPPDATA%\Treningsanalyse\config\.env` (opprettes automatisk første gang):
+   ```env
+   GARMIN_EMAIL=din@epost.example
+   GARMIN_PASSWORD=ditt_passord
+   ```
+   Åpnes via **Fil → Garmin-innstillinger…** i desktop-appen.
+
+2. **Eller** kopier `tokens/garmin_tokens.json` (eller legacy `oauth2_token.json`) fra tidligere installasjon til AppData `tokens/`.
+
+Uten dette returnerer «Synk nye» en tydelig feilmelding (HTTP 422), ikke en generisk 500.
+
 ## Import existing database
 
 **In the app:** Fil → Importer eksisterende database…

@@ -8,7 +8,7 @@ import { api } from '../../utils/api';
 import CacheCalculationPanel from '../../components/CacheCalculationPanel';
 import { useAppDispatch } from '@/store/hooks';
 import { jobTypeLabel, syncStatusLabel } from '@/utils/syncJobLabels';
-import type { SyncJobStatusResponse } from '@/types/syncJob';
+import type { SyncJobStatusResponse, GarminSyncStatusResponse } from '@/types/syncJob';
 import { messageFromApiError } from '@/utils/httpErrorMessage';
 import { refreshActivitiesAfterSync } from '@/utils/syncRefresh';
 
@@ -38,6 +38,28 @@ const ErrorBanner = styled.div`
   border: 1px solid #f5c6cb;
   color: #721c24;
   font-size: 0.95rem;
+`;
+
+const WarningBanner = styled.div`
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  background: #fff3cd;
+  border: 1px solid #ffeeba;
+  color: #856404;
+  font-size: 0.95rem;
+  line-height: 1.45;
+`;
+
+const InfoBanner = styled.div`
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  background: #e8f4fd;
+  border: 1px solid #bee5eb;
+  color: #0c5460;
+  font-size: 0.95rem;
+  line-height: 1.45;
 `;
 
 const Container = styled.div`
@@ -298,8 +320,23 @@ export default function SynkroniseringPage() {
   const [activeJobs, setActiveJobs] = useState<Record<string, SyncJobStatusResponse>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [syncActionError, setSyncActionError] = useState<string | null>(null);
+  const [garminStatus, setGarminStatus] = useState<GarminSyncStatusResponse | null>(null);
   const dispatch = useAppDispatch();
   const removeJobTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    let cancelled = false;
+    api.getGarminSyncStatus()
+      .then((status) => {
+        if (!cancelled) setGarminStatus(status);
+      })
+      .catch((err) => {
+        console.warn('Kunne ikke hente Garmin-status:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => () => {
     removeJobTimeoutsRef.current.forEach(clearTimeout);
@@ -477,6 +514,15 @@ export default function SynkroniseringPage() {
 
       <SyncSection>
         <SectionTitle>Synkronisering</SectionTitle>
+        {garminStatus && !garminStatus.ready && garminStatus.detail && (
+          <WarningBanner role="status">{garminStatus.detail}</WarningBanner>
+        )}
+        {garminStatus?.ready && (
+          <InfoBanner role="status">
+            Garmin Connect er konfigurert ({garminStatus.masked_email}
+            {garminStatus.has_token_cache ? ', lagrede tokens' : ', innlogging ved første synk'}).
+          </InfoBanner>
+        )}
         {syncActionError && (
           <ErrorBanner role="alert">{syncActionError}</ErrorBanner>
         )}

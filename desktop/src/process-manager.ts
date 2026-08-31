@@ -78,7 +78,7 @@ export class ProcessManager {
     this.logger.info("Backend exe=%s", this.paths.backendExe);
     this.logger.info("Frontend server=%s", this.paths.frontendServer);
 
-    await this.startBackend(apiPort);
+    await this.startBackend(apiPort, frontendPort);
     await Promise.race([
       waitForHttpOk(`http://127.0.0.1:${apiPort}/health/live`, { timeoutMs: 120_000 }),
       this.earlyFailure!,
@@ -110,9 +110,14 @@ export class ProcessManager {
     this.earlyFailureReject?.(err);
   }
 
-  private async startBackend(apiPort: number): Promise<void> {
+  private async startBackend(apiPort: number, frontendPort: number): Promise<void> {
     const env = buildBackendEnv(this.paths, apiPort);
-    env.CORS_ORIGINS = `http://127.0.0.1:${apiPort},http://localhost:${apiPort}`;
+    env.CORS_ORIGINS = [
+      `http://127.0.0.1:${frontendPort}`,
+      `http://localhost:${frontendPort}`,
+      `http://127.0.0.1:${apiPort}`,
+      `http://localhost:${apiPort}`,
+    ].join(",");
 
     let child: ChildProcess;
     let spawnTarget: string;
