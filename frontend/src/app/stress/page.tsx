@@ -127,21 +127,22 @@ const StatsContainer = styled.div`
 
 const StatCard = styled.div`
   background: white;
-  border-radius: 8px;
+  border-radius: 0.75rem;
   padding: 1rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   text-align: center;
 `;
 
 const StatValue = styled.div`
   font-size: 1.5rem;
-  font-weight: bold;
-  color: #3b82f6;
+  font-weight: 600;
+  color: #0f172a;
   margin-bottom: 0.5rem;
 `;
 
 const StatLabel = styled.div`
-  color: #666;
+  color: #64748b;
   font-size: 0.9rem;
 `;
 

@@ -188,7 +188,7 @@ const DateLabel = styled.label`
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #2c3e50;
+  color: #0f172a;
 `;
 
 const DateContainer = styled.div`
