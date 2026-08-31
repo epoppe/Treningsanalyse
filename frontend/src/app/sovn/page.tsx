@@ -30,8 +30,8 @@ const Container = styled.div`
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  text-align: center;
+  color: #0f172a;
+  text-align: left;
   margin-bottom: 2rem;
   font-size: 2.2rem;
 `;
@@ -39,8 +39,8 @@ const Title = styled.h1`
 const FilterContainer = styled.div`
   background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-bottom: 2rem;
   display: flex;
   gap: 1rem;
@@ -68,7 +68,7 @@ const Input = styled.input`
 `;
 
 const Button = styled.button`
-  background-color: #3b82f6;
+  background-color: #0f172a;
   color: white;
   padding: 0.5rem 1rem;
   border: none;
@@ -77,7 +77,7 @@ const Button = styled.button`
   font-size: 0.9rem;
   height: fit-content;
   margin-top: 1.5rem;
-  &:hover { background-color: #2563eb; }
+  &:hover { background-color: #1e293b; }
   &:disabled { background-color: #9ca3af; cursor: not-allowed; }
 `;
 
@@ -119,15 +119,15 @@ const PeriodButton = styled.button<{ $active: boolean }>`
 const ChartCard = styled.div`
   background: white;
   padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-bottom: 2rem;
   height: 400px;
 `;
 
 const ChartTitle = styled.h3`
   margin: 0 0 1rem 0;
-  color: #2c3e50;
+  color: #0f172a;
 `;
 
 const LoadingContainer = styled.div`
@@ -143,9 +143,9 @@ const ErrorContainer = styled.div`
   background: #fee2e2;
   color: #dc2626;
   padding: 1rem;
-  border-radius: 8px;
+  border-radius: 0.75rem;
   margin-bottom: 2rem;
-  text-align: center;
+  text-align: left;
 `;
 
 type SleepDay = {
