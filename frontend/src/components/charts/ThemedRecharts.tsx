@@ -18,30 +18,38 @@ import {
 
 export { CHART_MARGIN, chartColor, yearComparisonColors } from "./chartTheme";
 
+/**
+ * Recharts 2.x registers X/Y axes from children by displayName + defaultProps.
+ * Function wrappers that return <XAxis/> break axis context — subclass instead.
+ */
+export const ThemedXAxis = class ThemedXAxis extends XAxis {
+  static displayName = "XAxis";
+  static defaultProps = {
+    ...XAxis.defaultProps,
+    tick: CHART_AXIS.tick,
+    axisLine: { stroke: CHART_AXIS.stroke },
+    tickLine: { stroke: CHART_AXIS.stroke },
+    minTickGap: 24,
+  };
+} as typeof XAxis;
+
+export const ThemedYAxis = class ThemedYAxis extends YAxis {
+  static displayName = "YAxis";
+  static defaultProps = {
+    ...YAxis.defaultProps,
+    width: 48,
+    tick: CHART_AXIS.tick,
+    axisLine: { stroke: CHART_AXIS.stroke },
+    tickLine: { stroke: CHART_AXIS.stroke },
+  };
+} as typeof YAxis;
+
+/**
+ * CartesianGrid is a rendering function component — plain wrapper without
+ * spoofing displayName so it renders as a normal chart child.
+ */
 export function ThemedCartesianGrid(props: ComponentProps<typeof CartesianGrid>) {
   return <CartesianGrid {...CHART_GRID} {...props} />;
-}
-
-export function ThemedXAxis(props: ComponentProps<typeof XAxis>) {
-  return (
-    <XAxis
-      tick={CHART_AXIS.tick}
-      axisLine={{ stroke: CHART_AXIS.stroke }}
-      tickLine={{ stroke: CHART_AXIS.stroke }}
-      {...props}
-    />
-  );
-}
-
-export function ThemedYAxis(props: ComponentProps<typeof YAxis>) {
-  return (
-    <YAxis
-      tick={CHART_AXIS.tick}
-      axisLine={{ stroke: CHART_AXIS.stroke }}
-      tickLine={{ stroke: CHART_AXIS.stroke }}
-      {...props}
-    />
-  );
 }
 
 export function ThemedTooltip(props: ComponentProps<typeof Tooltip>) {

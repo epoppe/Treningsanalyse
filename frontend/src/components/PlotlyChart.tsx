@@ -1,7 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Text } from "@tremor/react";
 import { buildPlotlyLayout, buildPlotlyTraces } from "@/components/charts/plotlyTheme";
 
 const Plot = dynamic<any>(() => import("react-plotly.js"), {
@@ -30,7 +29,11 @@ const PlotlyChart = ({
   textKey,
 }: PlotlyChartProps) => {
   if (!data || data.length === 0) {
-    return <Text>Ingen data tilgjengelig for å vise grafen.</Text>;
+    return (
+      <p className="flex h-full items-center justify-center text-sm text-slate-500">
+        Ingen data tilgjengelig for å vise grafen.
+      </p>
+    );
   }
 
   const traces = buildPlotlyTraces({

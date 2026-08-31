@@ -19,27 +19,37 @@ import {
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
 import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartShell';
+import { axisLabelProps } from '@/lib/chartFormatters';
+import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
 import { api } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
+const stressDef = getMetricDefinition('stressLevel');
+
 const PageContainer = styled.div`
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 2rem;
-  text-align: center;
+  color: #0f172a;
+  margin-bottom: 1rem;
+  text-align: left;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const FilterContainer = styled.div`
   background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-bottom: 2rem;
   display: flex;
   gap: 1rem;
@@ -73,7 +83,7 @@ const Input = styled.input`
 `;
 
 const Button = styled.button`
-  background-color: #3b82f6;
+  background-color: #0f172a;
   color: white;
   padding: 0.5rem 1rem;
   border: none;
@@ -84,7 +94,7 @@ const Button = styled.button`
   margin-top: 1.5rem;
   
   &:hover {
-    background-color: #2563eb;
+    background-color: #1e293b;
   }
   
   &:disabled {
@@ -94,8 +104,8 @@ const Button = styled.button`
 `;
 
 const QuickFilterButton = styled.button<{ $active?: boolean }>`
-  background-color: ${props => props.$active ? '#2563eb' : '#f3f4f6'};
-  color: ${props => props.$active ? 'white' : '#374151'};
+  background-color: ${props => props.$active ? '#0f172a' : '#f8fafc'};
+  color: ${props => props.$active ? 'white' : '#334155'};
   padding: 0.5rem 1rem;
   border: 1px solid #d1d5db;
   border-radius: 4px;
@@ -104,7 +114,7 @@ const QuickFilterButton = styled.button<{ $active?: boolean }>`
   transition: all 0.2s;
   
   &:hover {
-    background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'};
+    background-color: ${props => props.$active ? '#1e293b' : '#f1f5f9'};
   }
 `;
 
@@ -117,21 +127,22 @@ const StatsContainer = styled.div`
 
 const StatCard = styled.div`
   background: white;
-  border-radius: 8px;
+  border-radius: 0.75rem;
   padding: 1rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   text-align: center;
 `;
 
 const StatValue = styled.div`
   font-size: 1.5rem;
-  font-weight: bold;
-  color: #3b82f6;
+  font-weight: 600;
+  color: #0f172a;
   margin-bottom: 0.5rem;
 `;
 
 const StatLabel = styled.div`
-  color: #666;
+  color: #64748b;
   font-size: 0.9rem;
 `;
 
@@ -303,7 +314,7 @@ export default function StressPage() {
 
   return (
     <PageContainer>
-      <Title>Stress Historikk</Title>
+      <Title>Stress</Title>
 
       <FilterContainer>
         <FilterGroup>
@@ -418,7 +429,7 @@ export default function StressPage() {
       ) : data.length > 0 ? (
         <>
           <LegacyChartFrame
-            title="Overall Stress Level Over Time"
+            title="Stressnivå over tid"
             controls={
               <LegacyChartToggle active={showTrend} onClick={() => setShowTrend(!showTrend)}>
                 {showTrend ? 'Skjul' : 'Vis'} 7-dagers glidende gjennomsnitt
@@ -446,14 +457,14 @@ export default function StressPage() {
                   interval="preserveStartEnd"
                 />
                 <ThemedYAxis
-                  domain={[17, 36]}
-                  label={{ value: 'Stress Level', angle: -90, position: 'insideLeft' }}
+                  domain={['dataMin - 3', 'dataMax + 3']}
+                  label={axisLabelProps(stressDef.axisLabel)}
                 />
                 <ThemedTooltip
                   formatter={(value: any, name: any) => {
                     const key = String(name);
-                    if (key === 'stress_level') return [Number(value).toFixed(0), 'Daglig stress-nivå'];
-                    if (key === 'movingAverage7d') return [Number(value).toFixed(1), '7-dagers gjennomsnitt'];
+                    if (key === 'stress_level') return [`${Number(value).toFixed(0)} poeng`, 'Daglig stressnivå'];
+                    if (key === 'movingAverage7d') return [`${Number(value).toFixed(1)} poeng`, SERIES_LABELS.rollingAvg7d];
                     return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
@@ -465,7 +476,7 @@ export default function StressPage() {
                   stroke="none"
                   fill={chartColor(1)}
                   dot={{ fill: chartColor(1), r: 4, strokeWidth: 0, fillOpacity: 0.7 }}
-                  name="Daily Stress Level"
+                  name="Daglig stressnivå"
                   isAnimationActive={false}
                 />
                 {showTrend && (
@@ -475,7 +486,7 @@ export default function StressPage() {
                     stroke={chartColor(2)}
                     strokeWidth={2.5}
                     dot={false}
-                    name="7-day Rolling Average"
+                    name={SERIES_LABELS.rollingAvg7d}
                     isAnimationActive
                   />
                 )}
@@ -503,19 +514,19 @@ export default function StressPage() {
                   height={80}
                   interval="preserveStartEnd"
                 />
-                <ThemedYAxis label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }} />
+                <ThemedYAxis label={axisLabelProps('Tid (min)')} />
                 <ThemedTooltip
                   formatter={(value: any, name: any) => {
                     const key = String(name);
-                    if (key === 'stress_time') return [formatTime(value), 'Stress tid'];
+                    if (key === 'stress_time') return [formatTime(value), 'Stresstid'];
                     if (key === 'rest_time') return [formatTime(value), 'Hviletid'];
-                    if (key === 'movingAverage7dTime') return [formatTime(value), '7-dagers snitt'];
+                    if (key === 'movingAverage7dTime') return [formatTime(value), SERIES_LABELS.rollingAvg7d];
                     return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
                 <ThemedLegend />
-                <Bar dataKey="stress_time" fill="#ef4444" name="Stress tid" />
+                <Bar dataKey="stress_time" fill="#ef4444" name="Stresstid" />
                 <Bar dataKey="rest_time" fill="#10b981" name="Hviletid" />
                 {showTrend && (
                   <Line 
@@ -525,7 +536,7 @@ export default function StressPage() {
                     strokeWidth={2}
                     strokeDasharray="5 5"
                     dot={false}
-                    name="7-dagers snitt"
+                    name={SERIES_LABELS.rollingAvg7d}
                   />
                 )}
               </ComposedChart>
@@ -545,7 +556,7 @@ export default function StressPage() {
                   height={80}
                   interval="preserveStartEnd"
                 />
-                <ThemedYAxis label={{ value: 'Minutter', angle: -90, position: 'insideLeft' }} />
+                <ThemedYAxis label={axisLabelProps('Tid (min)')} />
                 <ThemedTooltip
                   formatter={(value: any, name: any) => {
                     const key = String(name);

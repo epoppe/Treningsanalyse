@@ -15,20 +15,31 @@ import CadenceChart from '../../components/CadenceChart';
 import StrideLengthChart from '../../components/StrideLengthChart';
 
 const PageContainer = styled.div`
-  padding: 2rem;
-  background-color: #f4f7f6;
+  padding: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 2rem;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const ButtonContainer = styled.div`
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 `;
 
 const TIME_FILTERS: Array<{ id: string; label: string }> = [

@@ -15,7 +15,7 @@ export function RelationshipCard({
   const [open, setOpen] = useState(false);
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+    <article className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
       <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">{card.section}</p>
       <h3 className="mt-0.5 text-sm font-semibold text-slate-900">{card.question}</h3>
       <p className="mt-1 text-xs text-slate-600">

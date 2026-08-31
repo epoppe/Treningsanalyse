@@ -11,28 +11,36 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
+import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
+import { getMetricDefinition } from '@/lib/metrics';
 import { LegacyChartFrame } from '@/components/charts/ChartShell';
 import { analysisApi } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 
 const PageContainer = styled.div`
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 2rem;
-  text-align: center;
+  color: #0f172a;
+  margin-bottom: 1rem;
+  text-align: left;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const FilterContainer = styled.div`
   background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-bottom: 2rem;
   display: flex;
   gap: 1rem;
@@ -66,7 +74,7 @@ const Input = styled.input`
 `;
 
 const Button = styled.button`
-  background-color: #3b82f6;
+  background-color: #0f172a;
   color: white;
   padding: 0.5rem 1rem;
   border: none;
@@ -77,7 +85,7 @@ const Button = styled.button`
   margin-top: 1.5rem;
   
   &:hover {
-    background-color: #2563eb;
+    background-color: #1e293b;
   }
   
   &:disabled {
@@ -87,8 +95,8 @@ const Button = styled.button`
 `;
 
 const QuickFilterButton = styled.button<{ $active?: boolean }>`
-  background-color: ${props => props.$active ? '#2563eb' : '#f3f4f6'};
-  color: ${props => props.$active ? 'white' : '#374151'};
+  background-color: ${props => props.$active ? '#0f172a' : '#f8fafc'};
+  color: ${props => props.$active ? 'white' : '#334155'};
   padding: 0.5rem 1rem;
   border: 1px solid #d1d5db;
   border-radius: 4px;
@@ -97,7 +105,7 @@ const QuickFilterButton = styled.button<{ $active?: boolean }>`
   transition: all 0.2s;
   
   &:hover {
-    background-color: ${props => props.$active ? '#1d4ed8' : '#e5e7eb'};
+    background-color: ${props => props.$active ? '#1e293b' : '#f1f5f9'};
   }
 `;
 
@@ -162,6 +170,8 @@ interface VO2MaxResponse {
   vo2max_history: VO2MaxData[];
   total_records: number;
 }
+
+const vo2Def = getMetricDefinition('vo2max');
 
 export default function VO2MaxPage() {
   const [data, setData] = useState<VO2MaxData[]>([]);
@@ -249,7 +259,7 @@ export default function VO2MaxPage() {
 
   return (
     <PageContainer>
-      <Title>VO2Max Historikk</Title>
+      <Title>VO₂max</Title>
 
       <FilterContainer>
         <FilterGroup>
@@ -354,7 +364,7 @@ export default function VO2MaxPage() {
         </LoadingContainer>
       ) : data.length > 0 ? (
         <>
-          <LegacyChartFrame title="VO2Max over tid">
+          <LegacyChartFrame title="VO₂max over tid">
             <div className="h-[400px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={chartData} margin={CHART_MARGIN.legacy}>
@@ -367,15 +377,15 @@ export default function VO2MaxPage() {
                   interval="preserveStartEnd"
                 />
                 <ThemedYAxis
-                  label={{ value: 'VO2Max', angle: -90, position: 'insideLeft' }}
+                  label={axisLabelProps(vo2Def.axisLabel)}
                   domain={['dataMin - 2', 'dataMax + 2']}
+                  tickFormatter={(tick) => String(Number(tick).toFixed(1))}
                 />
                 <ThemedTooltip
-                  formatter={(value: any, name: any) => {
-                    const key = String(name);
-                    if (key === 'vo2max') return [Number(value).toFixed(1), 'VO2Max'];
-                    return [value, key];
-                  }}
+                  formatter={(value: any) => [
+                    formatWithUnit(Number(value), vo2Def.unit, 1),
+                    vo2Def.displayName,
+                  ]}
                   labelFormatter={(label) => `Dato: ${label}`}
                 />
                 <ThemedLegend />
@@ -385,7 +395,7 @@ export default function VO2MaxPage() {
                   stroke={LEGACY_SERIES_COLORS.vo2}
                   strokeWidth={2}
                   dot={false}
-                  name="VO2Max"
+                  name="VO₂max"
                 />
               </LineChart>
             </ResponsiveContainer>

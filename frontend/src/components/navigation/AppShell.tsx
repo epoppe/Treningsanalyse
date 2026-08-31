@@ -37,6 +37,7 @@ const MORE_NAV = [
   { href: "/sovn", label: "Søvn (drill-down)" },
   { href: "/body-battery", label: "Body Battery (drill-down)" },
   { href: "/vo2max", label: "VO₂max (drill-down)" },
+  { href: "/stress", label: "Stress (drill-down)" },
   { href: "/training-stress", label: "Training stress (drill-down)" },
   { href: "/statistikk", label: "Rå statistikk (legacy)" },
   { href: "/synkronisering", label: "Synkronisering" },

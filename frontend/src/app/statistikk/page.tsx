@@ -19,11 +19,11 @@ const Container = styled.div`
 
 const Header = styled.header`
   margin-bottom: 2rem;
-  text-align: center;
+  text-align: left;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
+  color: #0f172a;
   font-size: 2rem;
   margin-bottom: 0.5rem;
 `;
@@ -45,14 +45,14 @@ const FiltersContainer = styled.div`
 const FilterSection = styled.div`
   background: white;
   padding: 1rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   min-width: 300px;
 `;
 
 const FilterTitle = styled.h3`
   margin: 0 0 0.5rem 0;
-  color: #2c3e50;
+  color: #0f172a;
   font-size: 1rem;
 `;
 
@@ -88,7 +88,7 @@ const CheckboxText = styled.span`
 
 const SelectAllButton = styled.button`
   padding: 0.25rem 0.5rem;
-  background: #3498db;
+  background: #0f172a;
   color: white;
   border: none;
   border-radius: 4px;
@@ -136,7 +136,7 @@ const Select = styled.select`
 
 const FilterButton = styled.button`
   padding: 0.5rem 1rem;
-  background: #3498db;
+  background: #0f172a;
   color: white;
   border: none;
   border-radius: 4px;
@@ -163,18 +163,18 @@ const StatsGrid = styled.div`
 const StatCard = styled.div`
   background: white;
   padding: 1.5rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 `;
 
 const StatTitle = styled.h3`
-  color: #2c3e50;
+  color: #0f172a;
   margin: 0 0 0.5rem 0;
   font-size: 1.1rem;
 `;
 
 const StatValue = styled.p`
-  color: #3498db;
+  color: #0f172a;
   font-size: 2rem;
   font-weight: bold;
   margin: 0;
@@ -191,10 +191,10 @@ const PeriodSection = styled.div`
 `;
 
 const PeriodTitle = styled.h2`
-  color: #2c3e50;
+  color: #0f172a;
   font-size: 1.5rem;
   margin-bottom: 1rem;
-  text-align: center;
+  text-align: left;
 `;
 
 const ChartsContainer = styled.div`
@@ -203,7 +203,7 @@ const ChartsContainer = styled.div`
 
 const LoadingSpinner = styled.div`
   border: 4px solid #f3f3f3;
-  border-top: 4px solid #3498db;
+  border-top: 4px solid #0f172a;
   border-radius: 50%;
   width: 24px;
   height: 24px;

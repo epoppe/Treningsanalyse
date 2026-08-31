@@ -11,11 +11,19 @@ import type { TimeseriesPayload } from "@/types/analysis";
 import { ANALYSIS_CHART_COLORS, CHART_LINE, CHART_MARGIN } from "@/components/charts/chartTheme";
 import {
   ThemedCartesianGrid,
+  ThemedLegend,
   ThemedTooltip,
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
 import { formatRangeLabel } from "@/lib/analysisRange";
+import {
+  axisLabelProps,
+  formatChartAxisDate,
+  formatChartTooltipDate,
+  formatWithUnit,
+} from "@/lib/chartFormatters";
+import { getAnalysisMetricLabel } from "@/lib/metrics";
 
 const COLORS = [...ANALYSIS_CHART_COLORS];
 
@@ -61,6 +69,18 @@ export function DevelopmentTimeline({
   const { keys, rows } = data ? mergeSeries(data) : { keys: selected, rows: [] };
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const seriesMeta = useMemo(() => {
+    const meta: Record<string, { label: string; unit: string }> = {};
+    keys.forEach((key) => {
+      const s = data?.series[key];
+      meta[key] = {
+        label: getAnalysisMetricLabel(key, s),
+        unit: s?.unit || s?.unit_note || "",
+      };
+    });
+    return meta;
+  }, [data, keys]);
+
   const brushIndexes = useMemo(() => {
     if (!rangeFrom || !rangeTo || rows.length === 0) return undefined;
     const startIndex = rows.findIndex((r) => String(r.date) >= rangeFrom);
@@ -75,7 +95,7 @@ export function DevelopmentTimeline({
   const hasSelection = Boolean(rangeFrom && rangeTo);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Utvikling over tid</h2>
@@ -93,7 +113,7 @@ export function DevelopmentTimeline({
               onClick={onClearRange}
               className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
             >
-              CLEAR SELECTION
+              Nullstill utvalg
             </button>
           </div>
         ) : null}
@@ -101,6 +121,7 @@ export function DevelopmentTimeline({
       <div className="mt-2 flex flex-wrap gap-1">
         {available.map((m) => {
           const on = selected.includes(m);
+          const label = getAnalysisMetricLabel(m, data?.series[m]);
           return (
             <button
               key={m}
@@ -112,7 +133,7 @@ export function DevelopmentTimeline({
                   : "rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700"
               }
             >
-              {m}
+              {label}
             </button>
           );
         })}
@@ -126,21 +147,39 @@ export function DevelopmentTimeline({
           <ResponsiveContainer width="100%" height="100%">
             <LineChart
               data={rows}
-              margin={{ ...CHART_MARGIN.compact, bottom: 8 }}
+              margin={{ ...CHART_MARGIN.compact, bottom: 8, left: 8 }}
               onClick={(state) => {
                 const label = state?.activeLabel;
                 if (label && onSelectDate) onSelectDate(String(label));
               }}
             >
               <ThemedCartesianGrid />
-              <ThemedXAxis dataKey="date" minTickGap={32} />
-              <ThemedYAxis width={40} />
-              <ThemedTooltip labelFormatter={(label) => String(label)} />
+              <ThemedXAxis
+                dataKey="date"
+                minTickGap={32}
+                tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
+              />
+              <ThemedYAxis width={44} />
+              <ThemedTooltip
+                labelFormatter={(label) => formatChartTooltipDate(String(label))}
+                formatter={(value: any, name: any) => {
+                  const meta = seriesMeta[String(name)];
+                  const unit = meta?.unit || "";
+                  const formatted = unit
+                    ? formatWithUnit(Number(value), unit, 1)
+                    : String(value);
+                  return [formatted, meta?.label || String(name)];
+                }}
+              />
+              <ThemedLegend
+                formatter={(value) => seriesMeta[String(value)]?.label || String(value)}
+              />
               {keys.map((key, i) => (
                 <Line
                   key={key}
                   type="monotone"
                   dataKey={key}
+                  name={seriesMeta[key]?.label || key}
                   stroke={COLORS[i % COLORS.length]}
                   dot={CHART_LINE.dot}
                   strokeWidth={CHART_LINE.strokeWidth}
@@ -154,6 +193,7 @@ export function DevelopmentTimeline({
                 travellerWidth={8}
                 startIndex={brushIndexes?.startIndex}
                 endIndex={brushIndexes?.endIndex}
+                tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
                 onChange={(range) => {
                   if (!onRangeSelect || !range) return;
                   const startIndex = range.startIndex;

@@ -18,6 +18,12 @@ import {
   ThemedXAxis,
   ThemedYAxis,
 } from "@/components/charts/ThemedRecharts";
+import {
+  formatChartAxisDate,
+  formatChartTooltipDate,
+  formatWithUnit,
+} from "@/lib/chartFormatters";
+import { getAnalysisMetricLabel } from "@/lib/metrics";
 
 function mapOutcomeMetric(outcome: string): string | null {
   const map: Record<string, string> = {
@@ -44,6 +50,21 @@ function mapStimulusMetric(stimulus: string): string | null {
   return map[stimulus] || null;
 }
 
+function humanizeKey(key: string): string {
+  return getAnalysisMetricLabel(key) || key.replace(/_/g, " ");
+}
+
+function associationLabel(value?: string | null): string {
+  if (!value) return "—";
+  const map: Record<string, string> = {
+    positive: "Positiv",
+    negative: "Negativ",
+    neutral: "Nøytral",
+    mixed: "Blandet",
+  };
+  return map[value.toLowerCase()] || value.replace(/_/g, " ");
+}
+
 function AlignedTimeline({ metrics, period }: { metrics: string[]; period: string }) {
   const ts = useTimeseries(period, metrics.slice(0, 2));
   if (ts.isLoading) return <AnalysisSkeleton className="mt-2 h-36" />;
@@ -67,20 +88,39 @@ function AlignedTimeline({ metrics, period }: { metrics: string[]; period: strin
     return <p className="mt-2 text-[11px] text-slate-500">Ingen aligned tidsserie for dette paret.</p>;
   }
 
+  const labels = Object.fromEntries(
+    keys.map((key) => [key, getAnalysisMetricLabel(key, ts.data?.series[key])]),
+  );
+
   return (
     <div className="mt-2 h-40 w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={CHART_MARGIN.compact}>
           <ThemedCartesianGrid />
-          <ThemedXAxis dataKey="date" minTickGap={28} />
+          <ThemedXAxis
+            dataKey="date"
+            minTickGap={28}
+            tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
+          />
           <ThemedYAxis width={36} />
-          <ThemedTooltip />
-          <ThemedLegend />
+          <ThemedTooltip
+            labelFormatter={(label) => formatChartTooltipDate(String(label))}
+            formatter={(value: any, name: any) => {
+              const key = String(name);
+              const unit = ts.data?.series[key]?.unit || "";
+              return [
+                unit ? formatWithUnit(Number(value), unit, 1) : String(value),
+                labels[key] || key,
+              ];
+            }}
+          />
+          <ThemedLegend formatter={(value) => labels[String(value)] || String(value)} />
           {keys.map((key, i) => (
             <Line
               key={key}
               type="monotone"
               dataKey={key}
+              name={labels[key] || key}
               stroke={ANALYSIS_CHART_COLORS[i % ANALYSIS_CHART_COLORS.length]}
               strokeWidth={CHART_LINE.strokeWidth}
               dot={false}
@@ -111,40 +151,40 @@ export function RelationshipDetailPanel({
   const alignedMetrics = [stimulusMetric, outcomeMetric].filter(Boolean) as string[];
 
   return (
-    <div className="mt-3 space-y-3 rounded-lg border border-slate-100 bg-slate-50/80 p-3">
+    <div className="mt-3 space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900">
-        OBSERVATIONAL ASSOCIATION — assosiasjon over tid, ikke årsakssammenheng.
+        Observasjonell assosiasjon — sammenheng over tid, ikke årsakssammenheng.
       </div>
 
       <dl className="grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
         <div className="flex justify-between gap-2">
-          <dt className="text-slate-500">Predictor</dt>
-          <dd className="font-medium">{card.stimulus.replace(/_/g, " ")}</dd>
+          <dt className="text-slate-500">Stimulus</dt>
+          <dd className="font-medium">{humanizeKey(card.stimulus)}</dd>
         </div>
         <div className="flex justify-between gap-2">
-          <dt className="text-slate-500">Outcome</dt>
-          <dd className="font-medium">{card.outcome.replace(/_/g, " ")}</dd>
+          <dt className="text-slate-500">Utfall</dt>
+          <dd className="font-medium">{humanizeKey(card.outcome)}</dd>
         </div>
         <div className="flex justify-between gap-2">
-          <dt className="text-slate-500">Best-supported lag</dt>
+          <dt className="text-slate-500">Best støttet lag</dt>
           <dd className="font-medium">
             {lag.data?.best_lag_days ?? card.lag_days ?? "—"}
-            {(lag.data?.best_lag_days ?? card.lag_days) != null ? "d" : ""}
+            {(lag.data?.best_lag_days ?? card.lag_days) != null ? " dager" : ""}
           </dd>
         </div>
         <div className="flex justify-between gap-2">
-          <dt className="text-slate-500">Direction / effect</dt>
-          <dd className="font-medium capitalize">
-            {card.association}
+          <dt className="text-slate-500">Retning / effekt</dt>
+          <dd className="font-medium">
+            {associationLabel(card.association)}
             {card.effect != null ? ` · ${card.effect}` : ""}
           </dd>
         </div>
         <div className="flex justify-between gap-2">
-          <dt className="text-slate-500">Sample count</dt>
+          <dt className="text-slate-500">Antall observasjoner</dt>
           <dd className="font-medium">{card.sample_count}</dd>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <dt className="text-slate-500">Evidence</dt>
+          <dt className="text-slate-500">Evidens</dt>
           <dd>
             <EvidenceBadge evidence={card.evidence} />
           </dd>
@@ -152,13 +192,13 @@ export function RelationshipDetailPanel({
       </dl>
 
       <div>
-        <p className="text-xs font-semibold text-slate-800">1. Lag profile</p>
+        <p className="text-xs font-semibold text-slate-800">1. Lag-profil</p>
         {lag.isLoading ? <AnalysisSkeleton className="mt-2 h-32" /> : null}
         {lag.data ? <LagChart data={lag.data} /> : null}
       </div>
 
       <div>
-        <p className="text-xs font-semibold text-slate-800">2. Aligned predictor / outcome timeline</p>
+        <p className="text-xs font-semibold text-slate-800">2. Alignet tidslinje (stimulus / utfall)</p>
         {alignedMetrics.length >= 2 ? (
           <AlignedTimeline metrics={alignedMetrics} period={period} />
         ) : (
@@ -169,7 +209,7 @@ export function RelationshipDetailPanel({
       </div>
 
       <div>
-        <p className="text-xs font-semibold text-slate-800">3. Scatter (advanced)</p>
+        <p className="text-xs font-semibold text-slate-800">3. Scatter (avansert)</p>
         <Link href="/sammenhenger" className="mt-1 inline-block text-xs font-medium text-slate-800 underline">
           Åpne avansert scatter på /sammenhenger
         </Link>

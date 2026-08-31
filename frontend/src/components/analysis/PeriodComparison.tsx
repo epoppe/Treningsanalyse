@@ -13,7 +13,7 @@ export function PeriodComparison({
 }) {
   const notable = rows.filter((r) => r.difference != null).slice(0, 10);
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-3">
+    <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Periode-sammenligning</h2>
       <p className="mt-0.5 text-[11px] text-slate-500">Siste vindu vs forrige like lange vindu</p>
       <PeriodExplanationPanel rows={rows} />

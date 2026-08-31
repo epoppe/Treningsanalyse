@@ -48,19 +48,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div style={{
-        backgroundColor: 'white',
-        padding: '0.75rem',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-        color: '#333'
-      }}>
-        <p><strong>Dato: {format(parseISO(label), 'dd.MM.yyyy')}</strong></p>
-        <p>HRV (natt gj.snitt): <span style={{color: '#e74c3c'}}>{data.last_night_avg}ms</span></p>
-        <p>7-dagers snitt: <span style={{color: '#3b82f6'}}>{data.rolling_avg_7d?.toFixed(1)}ms</span></p>
-        <p>Baseline (balansert): {data.baseline_balanced_lower} - {data.baseline_balanced_upper}ms</p>
-        {data.status && <p>Status: <span style={{fontWeight: 'bold'}}>{data.status}</span></p>}
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+        <p className="font-semibold text-slate-900">{format(parseISO(label), 'dd.MM.yyyy')}</p>
+        <p className="text-slate-600">HRV (natt gj.snitt): <span className="font-medium text-red-600">{data.last_night_avg} ms</span></p>
+        <p className="text-slate-600">7-dagers snitt: <span className="font-medium text-blue-600">{data.rolling_avg_7d?.toFixed(1)} ms</span></p>
+        <p className="text-slate-600">Baseline (balansert): {data.baseline_balanced_lower} – {data.baseline_balanced_upper} ms</p>
+        {data.status && <p className="mt-1 text-slate-700">Status: <span className="font-semibold">{data.status}</span></p>}
       </div>
     );
   }

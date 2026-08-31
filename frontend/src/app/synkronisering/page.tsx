@@ -63,37 +63,45 @@ const InfoBanner = styled.div`
 `;
 
 const Container = styled.div`
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 2rem;
-  text-align: center;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+  text-align: left;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const SyncSection = styled.div`
   background: white;
-  border-radius: 8px;
+  border-radius: 0.75rem;
   padding: 1.5rem;
-  margin-bottom: 2rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  margin-bottom: 0.5rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 `;
 
 const SectionTitle = styled.h2`
-  color: #34495e;
+  color: #0f172a;
   margin-bottom: 1rem;
-  font-size: 1.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
 `;
 
 const StatusContainer = styled.div`
   margin-top: 1rem;
   padding: 1rem;
-  border-radius: 4px;
-  background-color: #f8f9fa;
-  border-left: 4px solid #3498db;
+  border-radius: 0.5rem;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #0f172a;
 `;
 
 const StatusText = styled.div<{ $status: string }>`
@@ -180,7 +188,7 @@ const DateLabel = styled.label`
   display: block;
   margin-bottom: 0.5rem;
   font-weight: 500;
-  color: #2c3e50;
+  color: #0f172a;
 `;
 
 const DateContainer = styled.div`
@@ -252,20 +260,21 @@ const ActionGroup = styled.div`
 
 const ActionBlock = styled.div`
   padding: 1.25rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fafbfc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  background: #f8fafc;
 `;
 
 const ActionBlockTitle = styled.h3`
   margin: 0 0 0.35rem;
   font-size: 1.05rem;
-  color: #2c3e50;
+  color: #0f172a;
+  font-weight: 600;
 `;
 
 const ActionBlockText = styled.p`
   margin: 0 0 1rem;
-  color: #566573;
+  color: #64748b;
   font-size: 0.92rem;
   line-height: 1.5;
   max-width: 42rem;
@@ -286,15 +295,15 @@ const DateFields = styled.div`
 `;
 
 const AdvancedDetails = styled.details`
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
   padding: 0.75rem 1rem;
   background: #fff;
 
   summary {
     cursor: pointer;
     font-weight: 600;
-    color: #34495e;
+    color: #0f172a;
     list-style: none;
   }
 

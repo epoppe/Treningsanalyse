@@ -20,7 +20,7 @@ export function TrendSummaryCard({ domain }: { domain: DevelopmentDomain }) {
   const horizons = domain.horizons;
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+    <article className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">{domain.label}</h3>
         <span className="text-base" aria-hidden>

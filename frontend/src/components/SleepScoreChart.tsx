@@ -21,9 +21,11 @@ import {
   LegacyChartToggle,
   LegacyInfoPanel,
 } from '@/components/charts/ChartShell';
+import { axisLabelProps, formatChartTooltipDate, formatWithUnit } from '@/lib/chartFormatters';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { nb } from 'date-fns/locale';
+import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
 
 interface SleepScoreData {
   date: string;
@@ -36,23 +38,22 @@ interface SleepScoreChartProps {
   title: string;
 }
 
+const sleepScoreDef = getMetricDefinition('sleepScore');
+
 // Tilpasset tooltip for søvnscore-data
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (active && payload && payload.length) {
     const data = payload[0].payload;
     return (
-      <div style={{
-        backgroundColor: 'white',
-        padding: '0.75rem',
-        border: '1px solid #ccc',
-        borderRadius: '4px',
-        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
-        color: '#333'
-      }}>
-        <p><strong>Dato: {format(parseISO(label), 'dd.MM.yyyy')}</strong></p>
-        <p>Overall score: <span style={{color: '#e74c3c'}}>{data.overall_score}</span></p>
-        {data.rolling_avg_7d && (
-          <p>7-dagers snitt: <span style={{color: '#3b82f6'}}>{data.rolling_avg_7d.toFixed(1)}</span></p>
+      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-md">
+        <p className="font-semibold text-slate-900">{formatChartTooltipDate(label)}</p>
+        <p className="text-slate-600">
+          {sleepScoreDef.displayName}: {formatWithUnit(data.overall_score, sleepScoreDef.unit, 0)}
+        </p>
+        {data.rolling_avg_7d != null && (
+          <p className="text-slate-600">
+            {SERIES_LABELS.rollingAvg7d}: {formatWithUnit(data.rolling_avg_7d, sleepScoreDef.unit, 1)}
+          </p>
         )}
       </div>
     );
@@ -183,7 +184,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
             height={80}
           />
           <ThemedYAxis
-            label={{ value: 'Overall Score', angle: -90, position: 'insideLeft' }}
+            label={axisLabelProps(sleepScoreDef.axisLabel)}
             domain={yAxisDomain()}
             tickFormatter={(tick) => String(Math.round(tick))}
           />
@@ -197,7 +198,7 @@ export default function SleepScoreChart({ data, title }: SleepScoreChartProps) {
             stroke="none"
             strokeWidth={0}
             dot={{ fill: LEGACY_SERIES_COLORS.vo2, strokeWidth: 1, r: 2.5 }}
-            name="Overall Score"
+            name="Søvnscore"
             connectNulls={false}
           />
 
