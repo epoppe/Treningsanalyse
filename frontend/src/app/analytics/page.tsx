@@ -34,59 +34,73 @@ import {
 } from '../../utils/api';
 
 const PageContainer = styled.div`
-  padding: 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  padding: 0;
+  max-width: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 `;
 
 const Title = styled.h1`
-  color: #2c3e50;
-  margin-bottom: 0.5rem;
+  color: #0f172a;
+  margin-bottom: 0.25rem;
+  font-size: 1.5rem;
+  font-weight: 600;
 `;
 
 const Subtitle = styled.p`
-  color: #666;
-  margin-bottom: 1.5rem;
+  color: #64748b;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
 `;
 
 const Controls = styled.div`
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-bottom: 1.5rem;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding: 1rem 1.25rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 `;
 
 const FilterButton = styled.button<{ $active?: boolean }>`
-  padding: 0.45rem 1rem;
-  border: 1px solid ${(props) => (props.$active ? '#3498db' : '#bdc3c7')};
-  background: ${(props) => (props.$active ? '#3498db' : 'white')};
-  color: ${(props) => (props.$active ? 'white' : '#2c3e50')};
-  border-radius: 4px;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid ${(props) => (props.$active ? '#0f172a' : '#e2e8f0')};
+  background: ${(props) => (props.$active ? '#0f172a' : 'white')};
+  color: ${(props) => (props.$active ? 'white' : '#334155')};
+  border-radius: 0.5rem;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 500;
 
   &:hover {
-    border-color: #3498db;
+    border-color: #94a3b8;
   }
 `;
 
 const Section = styled.section`
-  margin-bottom: 2rem;
+  margin-bottom: 0.5rem;
 `;
 
 const Card = styled.div`
   background: white;
   padding: 1.25rem;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+  border-radius: 0.75rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 `;
 
 const SectionTitle = styled.h2`
-  color: #2c3e50;
-  font-size: 1.2rem;
+  color: #0f172a;
+  font-size: 1.05rem;
+  font-weight: 600;
   margin: 0 0 1rem;
-  border-bottom: 2px solid #3498db;
-  padding-bottom: 0.4rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
 `;
 
 const Grid = styled.div`
@@ -97,27 +111,31 @@ const Grid = styled.div`
 `;
 
 const MetricLabel = styled.div`
-  color: #666;
-  font-size: 0.85rem;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 `;
 
 const MetricValue = styled.div`
-  color: #2c3e50;
+  color: #0f172a;
   font-size: 1.35rem;
-  font-weight: 700;
+  font-weight: 600;
 `;
 
 const EmptyState = styled.div`
-  color: #888;
+  color: #94a3b8;
   font-size: 0.9rem;
   padding: 0.75rem 0;
 `;
 
 const ErrorBox = styled.div`
-  background: #fff3f3;
-  color: #a33;
+  background: #fef2f2;
+  color: #991b1b;
   padding: 0.75rem 1rem;
-  border-radius: 6px;
+  border-radius: 0.5rem;
+  border: 1px solid #fecaca;
   margin-bottom: 1rem;
   font-size: 0.9rem;
 `;
@@ -135,25 +153,26 @@ const Table = styled.table`
   td {
     padding: 0.6rem 0.75rem;
     text-align: left;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid #e2e8f0;
     white-space: nowrap;
   }
 
   th {
-    color: #666;
+    color: #64748b;
     text-transform: uppercase;
     font-size: 0.75rem;
+    font-weight: 500;
   }
 
   tbody tr:hover {
-    background: #f9f9f9;
+    background: #f8fafc;
   }
 `;
 
 const Badge = styled.span<{ $tone?: 'good' | 'warn' | 'bad' | 'neutral' }>`
   display: inline-block;
   padding: 0.15rem 0.5rem;
-  border-radius: 999px;
+  border-radius: 0.375rem;
   font-size: 0.75rem;
   font-weight: 600;
   margin: 0.1rem 0.2rem 0.1rem 0;
@@ -161,13 +180,13 @@ const Badge = styled.span<{ $tone?: 'good' | 'warn' | 'bad' | 'neutral' }>`
     if (props.$tone === 'good') return '#d1fae5';
     if (props.$tone === 'warn') return '#fef3c7';
     if (props.$tone === 'bad') return '#fee2e2';
-    return '#e5e7eb';
+    return '#f1f5f9';
   }};
   color: ${(props) => {
     if (props.$tone === 'good') return '#065f46';
     if (props.$tone === 'warn') return '#92400e';
     if (props.$tone === 'bad') return '#991b1b';
-    return '#374151';
+    return '#334155';
   }};
 `;
 
@@ -177,12 +196,12 @@ const ChartBox = styled.div`
 `;
 
 const LoadingText = styled.div`
-  color: #666;
+  color: #64748b;
   padding: 2rem 0;
 `;
 
 const SmallMeta = styled.div`
-  color: #888;
+  color: #94a3b8;
   font-size: 0.85rem;
   margin-bottom: 0.75rem;
 `;
