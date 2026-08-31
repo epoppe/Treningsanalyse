@@ -14,7 +14,7 @@ export function ChartShell({
 }: {
   title?: string;
   subtitle?: string;
-  children: ReactNode;
+  children?: ReactNode;
   emptyMessage?: string;
   isEmpty?: boolean;
   className?: string;

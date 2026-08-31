@@ -14,6 +14,7 @@ import {
 import { axisLabelProps, formatWithUnit } from '@/lib/chartFormatters';
 import { getMetricDefinition } from '@/lib/metrics';
 import { LegacyChartFrame } from '@/components/charts/ChartShell';
+import { analysisApi } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
 import { nb } from 'date-fns/locale';
 

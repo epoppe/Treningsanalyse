@@ -39,7 +39,7 @@ export function LagChart({ data }: { data?: RelationshipLagPayload }) {
             label={axisLabelProps("Effektstørrelse")}
           />
           <ThemedTooltip
-            formatter={(value: number) => [Number(value).toFixed(2), "Effekt"]}
+            formatter={(value: any) => [Number(value).toFixed(2), "Effekt"]}
             labelFormatter={(label) => `Lag: ${label}`}
           />
           <Bar dataKey="effect" fill={CHART_PRIMARY} radius={[4, 4, 0, 0]} />

@@ -64,7 +64,7 @@ export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }
                 ? formatChartTooltipDate(String(payload[0].payload.date))
                 : ""
             }
-            formatter={(value: number, name: string) => {
+            formatter={(value: any, name: any) => {
               const labels: Record<string, string> = {
                 ctl: "CTL (kronisk belastning)",
                 atl: "ATL (akutt belastning)",
@@ -72,7 +72,7 @@ export function TrainingLoadChart({ data }: { data: TrainingStressDailyPoint[] }
               };
               return [
                 formatWithUnit(Number(value), loadDef.unit, 1),
-                labels[name] || name,
+                labels[String(name)] || String(name),
               ];
             }}
           />
@@ -133,7 +133,7 @@ export function TrainingFormChart({ data }: { data: TrainingStressDailyPoint[] }
                 ? formatChartTooltipDate(String(payload[0].payload.date))
                 : ""
             }
-            formatter={(value: number) => {
+            formatter={(value: any) => {
               const numeric = Number(value);
               let status = " (tretthet)";
               if (numeric >= 10) status = " (god form)";

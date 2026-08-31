@@ -61,7 +61,6 @@ function normalizeMetricValue(metric: ActivityChartProps['metric'], raw: number)
 
 function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: ActivityChartProps) {
   const def = getMetricDefinition(METRIC_KEYS[metric]);
-  const groupingSuffix = activities.length === 0 ? '' : '';
 
   if (activities.length === 0) {
     return (
@@ -170,7 +169,7 @@ function ActivityChart({ activities, metric, title, useDynamicYAxis = false }: A
   };
 
   return (
-    <ChartShell title={`${title} ${groupingTitle}${groupingSuffix}`} heightClassName="h-[280px]">
+    <ChartShell title={`${title} ${groupingTitle}`} heightClassName="h-[280px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={CHART_MARGIN.labeled}>
           <ThemedCartesianGrid />

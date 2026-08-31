@@ -51,6 +51,7 @@ const ActivityDetailsCharts = ({ detailsState, detailsData }: ActivityDetailsCha
             xAxisTitle="Tid (sek)"
             yAxisTitle="Fart (km/t)"
           />
+        </div>
       </Card>
 
       <Card className="mt-6">

@@ -162,13 +162,13 @@ export function DevelopmentTimeline({
               <ThemedYAxis width={44} label={axisLabelProps("Verdi")} />
               <ThemedTooltip
                 labelFormatter={(label) => formatChartTooltipDate(String(label))}
-                formatter={(value: number, name: string) => {
-                  const meta = seriesMeta[name];
+                formatter={(value: any, name: any) => {
+                  const meta = seriesMeta[String(name)];
                   const unit = meta?.unit || "";
                   const formatted = unit
                     ? formatWithUnit(Number(value), unit, 1)
                     : String(value);
-                  return [formatted, meta?.label || name];
+                  return [formatted, meta?.label || String(name)];
                 }}
               />
               <ThemedLegend

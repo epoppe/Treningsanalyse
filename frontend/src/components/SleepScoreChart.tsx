@@ -24,6 +24,7 @@ import {
 import { axisLabelProps, formatChartTooltipDate, formatWithUnit } from '@/lib/chartFormatters';
 import { useState } from 'react';
 import { format, parseISO } from 'date-fns';
+import { nb } from 'date-fns/locale';
 import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
 
 interface SleepScoreData {
