@@ -159,7 +159,7 @@ export function DevelopmentTimeline({
                 minTickGap={32}
                 tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
               />
-              <ThemedYAxis width={44} label={axisLabelProps("Verdi")} />
+              <ThemedYAxis width={44} />
               <ThemedTooltip
                 labelFormatter={(label) => formatChartTooltipDate(String(label))}
                 formatter={(value: any, name: any) => {

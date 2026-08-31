@@ -43,14 +43,14 @@ export function formatWithUnit(value: number, unit: string, decimals = 1): strin
   return `${formatted} ${unit}`;
 }
 
-/** Recharts Y-axis label props helper. */
+/** Recharts Y-axis label props helper — needs ~52px left margin to stay visible. */
 export function axisLabelProps(label: string) {
   return {
     value: label,
     angle: -90 as const,
     position: "insideLeft" as const,
-    fill: "#64748b",
-    fontSize: 12,
+    offset: 10,
+    style: { textAnchor: "middle" as const, fill: "#64748b", fontSize: 11 },
   };
 }
 

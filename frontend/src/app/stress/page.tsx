@@ -19,7 +19,7 @@ import {
   ThemedYAxis,
 } from '@/components/charts/ThemedRecharts';
 import { LegacyChartFrame, LegacyChartToggle } from '@/components/charts/ChartShell';
-import { axisLabelProps, formatMinutesValue } from '@/lib/chartFormatters';
+import { axisLabelProps } from '@/lib/chartFormatters';
 import { getMetricDefinition, SERIES_LABELS } from '@/lib/metrics';
 import { api } from '../../utils/api';
 import { format, subDays, subMonths, startOfDay } from 'date-fns';
@@ -511,9 +511,9 @@ export default function StressPage() {
                 <ThemedTooltip
                   formatter={(value: any, name: any) => {
                     const key = String(name);
-                    if (key === 'stress_time') return [formatMinutesValue(value), 'Stresstid'];
-                    if (key === 'rest_time') return [formatMinutesValue(value), 'Hviletid'];
-                    if (key === 'movingAverage7dTime') return [formatMinutesValue(value), SERIES_LABELS.rollingAvg7d];
+                    if (key === 'stress_time') return [formatTime(value), 'Stresstid'];
+                    if (key === 'rest_time') return [formatTime(value), 'Hviletid'];
+                    if (key === 'movingAverage7dTime') return [formatTime(value), SERIES_LABELS.rollingAvg7d];
                     return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}
@@ -553,9 +553,9 @@ export default function StressPage() {
                 <ThemedTooltip
                   formatter={(value: any, name: any) => {
                     const key = String(name);
-                    if (key === 'low_stress_time') return [formatMinutesValue(value), 'Lav stress'];
-                    if (key === 'medium_stress_time') return [formatMinutesValue(value), 'Middels stress'];
-                    if (key === 'high_stress_time') return [formatMinutesValue(value), 'Høy stress'];
+                    if (key === 'low_stress_time') return [formatTime(value), 'Lav stress'];
+                    if (key === 'medium_stress_time') return [formatTime(value), 'Middels stress'];
+                    if (key === 'high_stress_time') return [formatTime(value), 'Høy stress'];
                     return [value, key];
                   }}
                   labelFormatter={(label) => `Dato: ${label}`}

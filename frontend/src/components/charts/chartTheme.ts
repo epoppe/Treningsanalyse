@@ -45,10 +45,10 @@ export const CHART_PRIMARY = CHART_COLORS[0];
 export const ANALYSIS_CHART_PRIMARY = CHART_PRIMARY;
 
 export const CHART_MARGIN = {
-  compact: { top: 8, right: 8, left: 0, bottom: 0 },
-  default: { top: 8, right: 16, left: 8, bottom: 0 },
-  labeled: { top: 12, right: 24, left: 12, bottom: 8 },
-  legacy: { top: 5, right: 30, left: 20, bottom: 5 },
+  compact: { top: 8, right: 8, left: 8, bottom: 0 },
+  default: { top: 8, right: 16, left: 16, bottom: 0 },
+  labeled: { top: 12, right: 24, left: 52, bottom: 8 },
+  legacy: { top: 8, right: 30, left: 52, bottom: 8 },
 } as const;
 
 export const CHART_LINE = {
