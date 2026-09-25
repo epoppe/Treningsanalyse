@@ -18,7 +18,7 @@ from ..database.models import HRV, Sleep, BodyBattery, Stress
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..database.models.sync_state import SyncState
 from ..database.models.health_data_missing import HealthDataMissing
-from ..services.health_data_missing_helpers import clear_health_data_missing
+from ..services.health_data_missing_helpers import clear_health_data_missing, missing_dates_to_fetch
 from ..services.sleep_data_mapping import apply_sleep_data_to_row
 
 logger = logging.getLogger(__name__)
@@ -96,12 +96,12 @@ async def get_stress_range_endpoint(
                 HealthDataMissing.missing_date >= start_date,
                 HealthDataMissing.missing_date <= end_date
             ).all()}
-            current = start_date
-            missing_dates = []
-            while current <= end_date:
-                if current not in existing_dates:
-                    missing_dates.append(current)
-                current += timedelta(days=1)
+            missing_dates = missing_dates_to_fetch(
+                start_date,
+                end_date,
+                existing_dates,
+                stress_missing_recorded,
+            )
             
             if missing_dates:
                 logger.info(f"📥 Stress: Henter {len(missing_dates)} manglende dager fra Garmin...")
@@ -203,12 +203,12 @@ async def get_hrv_range_endpoint(
             HealthDataMissing.missing_date >= start_date,
             HealthDataMissing.missing_date <= end_date
         ).all()}
-        current = start_date
-        missing_dates = []
-        while current <= end_date:
-            if current not in existing_dates and (fill_gaps or current not in hrv_missing_recorded):
-                missing_dates.append(current)
-            current += timedelta(days=1)
+        missing_dates = missing_dates_to_fetch(
+            start_date,
+            end_date,
+            existing_dates,
+            hrv_missing_recorded,
+        )
         
         if fill_gaps:
             logger.info("HRV: %s manglende dager, henter fra Garmin", len(missing_dates))
@@ -347,14 +347,17 @@ async def get_sleep_range_endpoint(
             HealthDataMissing.missing_date >= start_date,
             HealthDataMissing.missing_date <= end_date
         ).all()}
+        missing_dates = missing_dates_to_fetch(
+            start_date,
+            end_date,
+            existing_dates,
+            sleep_missing_recorded,
+        )
         current = start_date
-        missing_dates = []
         dates_without_overall_score = []
-        
+
         while current <= end_date:
-            if current not in existing_dates:
-                missing_dates.append(current)
-            else:
+            if current in existing_dates:
                 # Sjekk om eksisterende record mangler overall_score
                 existing_record = next((s for s in existing_sleep if s.sleep_date == current), None)
                 if existing_record and existing_record.overall_score is None:

@@ -151,6 +151,7 @@ test_*.py
 !backend/tests/test_prospective_evidence_correctness.py
 !backend/tests/test_coaching_evidence_feedback_api.py
 !backend/tests/test_canonical_observation_scale.py
+!backend/tests/test_health_missing_dates.py
 !docs/COACHING_EVIDENCE_DASHBOARD.md
 !backend/tests/test_runtime_hardening.py
 !backend/tests/test_sqlite_desktop.py

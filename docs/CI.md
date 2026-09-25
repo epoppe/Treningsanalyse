@@ -11,7 +11,7 @@ Backend-jobben kaller `backend/scripts/ci_backend.sh`. Samme script er `npm run 
 | Steg | Verktøy | Merknad |
 |------|---------|---------|
 | Lint | Ruff | `E9`, `F63`, `F7`, `F82`, `F811` — se `backend/ruff.toml` |
-| Types | MyPy | `app/database`, `app/config.py`, `outcome_maturity`, `sample_sufficiency_policy` — se `backend/mypy.ini` |
+| Types | MyPy | `app/database`, `app/config.py`, `outcome_maturity`, `sample_sufficiency_policy`, `canonical_observation_contract`, `health_data_missing_helpers` — se `backend/mypy.ini` |
 | Migrasjon | Alembic | Single-head assert + `alembic upgrade head` mot `/tmp/ci-migrate.db` |
 | Tester | pytest | Hele `backend/tests` |
 | Smoke | `scripts/ci_smoke_api.sh` | `/`, `/openapi.json`, `/health` med schema-versjon |
