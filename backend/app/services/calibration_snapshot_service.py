@@ -13,6 +13,8 @@ from .coaching_tx import finalize_write
 
 MAX_RELATIVE_STEP = 0.15
 HYSTERESIS_RELATIVE = 0.08
+# Hysteresis gate for applying a personalized parameter. Not a prospective-evidence
+# denominator — SampleSufficiencyPolicy owns those floors.
 MIN_SAMPLES = 12
 
 

@@ -18,118 +18,194 @@ from ..database.models.coaching_v5 import (
 )
 from ..database.models.sleep import HRV, RestingHeartRate, Sleep
 from ..database.models.sync_state import SyncState
+from .canonical_prospective_observation import CanonicalProspectiveObservationService
 from .coaching_config import (
-    CONFIDENCE_BIN_MIN_N,
     PLAN_CHURN_OVERREACTIVE_14D,
     RECOMMENDATION_CHURN_SAME_DAY,
     SHADOW_READINESS_MIN_N,
 )
+from .outcome_maturity import is_usable_status
 from .plan_stability import PlanStabilityService
 from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
-from .sample_sufficiency_policy import SampleSufficiencyPolicy
+from .sample_sufficiency_policy import DOMAIN_FLOORS, SampleSufficiencyPolicy
 from .shadow_outcome_evaluation_service import ShadowOutcomeEvaluationService
+
+# decision_confidence is the estimated probability of this binary target.
+# The target is the observed short-term utility, not the confidence input itself.
+FAVORABLE_SHORT_TERM_THRESHOLD = 0.55
+CALIBRATION_ECE_TOLERANCE = 0.08
+
+
+def favorable_from_utility(short_term_utility: Optional[float], maturity: Optional[str]) -> Optional[bool]:
+    """True when a mature short-term utility clears the documented threshold."""
+    if not is_usable_status(maturity) or short_term_utility is None:
+        return None
+    return float(short_term_utility) >= FAVORABLE_SHORT_TERM_THRESHOLD
+
+
+def summarize_calibration(
+    pairs: List[Tuple[float, bool]],
+    *,
+    considered: int,
+    abstentions: int,
+) -> Dict[str, Any]:
+    """Brier, bins and ECE. Small n is INSUFFICIENT_DATA — never auto-recalibrated."""
+    floors = DOMAIN_FLOORS["confidence_calibration"]
+    sample_count = len(pairs)
+    sufficiency = SampleSufficiencyPolicy().assess(
+        domain="confidence_calibration",
+        sample_count=sample_count,
+    )
+    bins: Dict[str, List[Tuple[float, float]]] = defaultdict(list)
+    for confidence, favorable in pairs:
+        clipped = min(0.999, max(0.0, float(confidence)))
+        lower = int(clipped * 10) / 10
+        key = f"{lower:.1f}-{lower + 0.1:.1f}"
+        bins[key].append((clipped, 1.0 if favorable else 0.0))
+
+    out_bins = []
+    ece_mass = 0.0
+    brier_total = 0.0
+    for key, vals in sorted(bins.items()):
+        n = len(vals)
+        mean_p = mean(item[0] for item in vals)
+        empirical = mean(item[1] for item in vals)
+        ece_mass += (n / sample_count) * abs(mean_p - empirical) if sample_count else 0.0
+        brier_total += sum((item[0] - item[1]) ** 2 for item in vals)
+        out_bins.append(
+            {
+                "bin": key,
+                "n": n,
+                "predicted_mean": round(mean_p, 3),
+                "empirical_frequency": round(empirical, 3),
+                "gap": round(mean_p - empirical, 3),
+            }
+        )
+
+    mean_confidence = mean(item[0] for item in pairs) if pairs else None
+    favorable_rate = mean(1.0 if item[1] else 0.0 for item in pairs) if pairs else None
+    brier = (brier_total / sample_count) if sample_count else None
+    coverage = (sample_count / considered) if considered else None
+    abstention_rate = (abstentions / considered) if considered else None
+
+    if sample_count < floors["emerging"] or sufficiency["level"] == "INSUFFICIENT":
+        status = "INSUFFICIENT_DATA"
+    elif mean_confidence is None or favorable_rate is None:
+        status = "INSUFFICIENT_DATA"
+    elif mean_confidence - favorable_rate > CALIBRATION_ECE_TOLERANCE:
+        status = "overconfident"
+    elif favorable_rate - mean_confidence > CALIBRATION_ECE_TOLERANCE:
+        status = "underconfident"
+    elif ece_mass <= CALIBRATION_ECE_TOLERANCE:
+        status = "well_calibrated"
+    else:
+        status = "overconfident" if mean_confidence > favorable_rate else "underconfident"
+
+    return {
+        "sample_count": sample_count,
+        "effective_sample_count": sufficiency["effective_sample_count"],
+        "spread_days": sufficiency["spread_days"],
+        "level": sufficiency["level"],
+        "bins": out_bins,
+        "brier_score": round(brier, 4) if brier is not None else None,
+        "expected_calibration_error": round(ece_mass, 4) if sample_count else None,
+        "mean_confidence": round(mean_confidence, 3) if mean_confidence is not None else None,
+        "favorable_rate": round(favorable_rate, 3) if favorable_rate is not None else None,
+        "coverage": round(coverage, 3) if coverage is not None else None,
+        "abstention_rate": round(abstention_rate, 3) if abstention_rate is not None else None,
+        "favorable_outcome_definition": (
+            f"favorable_outcome is true iff short_term_maturity is evaluated "
+            f"and short_term_utility >= {FAVORABLE_SHORT_TERM_THRESHOLD}. "
+            "decision_confidence is the estimated probability of that event. "
+            "The target is not built from decision_confidence."
+        ),
+        "status": status,
+        "note": "No automatic recalibration from small samples.",
+        "sufficiency": sufficiency,
+    }
+
+
+_OUTCOME_MIN_N = DOMAIN_FLOORS["workout_effectiveness"]["emerging"]
+_IMPROVEMENT_DELTA = 0.10
+
+
+def impact_verdict(
+    *,
+    before_n: int,
+    after_n: int,
+    unexpected_shift: bool,
+    abstention_status: str,
+    before_favorable_rate: Optional[float],
+    after_favorable_rate: Optional[float],
+    before_outcome_n: int,
+    after_outcome_n: int,
+) -> str:
+    """Improvement requires outcome evidence, not a change in recommendation mix."""
+    if before_n < 10 or after_n < 10:
+        return "insufficient_evidence"
+    if unexpected_shift or abstention_status == "TOO_FREQUENT":
+        return "possible_regression"
+    has_outcome = (
+        before_outcome_n >= _OUTCOME_MIN_N
+        and after_outcome_n >= _OUTCOME_MIN_N
+        and before_favorable_rate is not None
+        and after_favorable_rate is not None
+    )
+    if not has_outcome:
+        return "no_material_change"
+    if after_favorable_rate >= before_favorable_rate + _IMPROVEMENT_DELTA:
+        return "consistent_with_improvement"
+    if before_favorable_rate >= after_favorable_rate + _IMPROVEMENT_DELTA:
+        return "possible_regression"
+    return "no_material_change"
 
 
 class DecisionConfidenceMonitor:
+    """Calibration of decision_confidence against a binary favorable outcome.
+
+    decision_confidence means: estimated probability that the recommendation
+    achieves the defined favorable outcome. It is not a utility forecast.
+    """
+
     def __init__(self, db: Session):
         self.db = db
         self._utility = RecommendationUtilityEvaluator(db)
+        self._canonical = CanonicalProspectiveObservationService(db)
 
     def assess(self, *, start: date, end: date) -> Dict[str, Any]:
-        recs = (
-            self.db.query(RecommendationRecord)
-            .filter(
-                RecommendationRecord.as_of_date >= start,
-                RecommendationRecord.as_of_date <= end,
-                RecommendationRecord.decision_confidence.isnot(None),
-            )
-            .all()
-        )
-        exec_map = {
-            e.recommendation_id: e
-            for e in self.db.query(RecommendationExecution).all()
-            if e.recommendation_id
-        }
-        bins: Dict[str, List[float]] = defaultdict(list)
-        for r in recs:
-            ex = exec_map.get(r.id)
-            if not ex:
+        observations = self._canonical.resolve(start=start, end=end, today=end)
+        pairs: List[Tuple[float, bool]] = []
+        abstentions = 0
+        for observation in observations:
+            if (observation.get("decision_status") or "") in {"abstain", "insufficient_data"}:
+                abstentions += 1
+            confidence = observation.get("decision_confidence")
+            if confidence is None:
                 continue
-            util = self._utility.evaluate(
-                recommended_type=r.recommended_workout_type,
-                actual_type=ex.actual_type,
-                as_of=r.as_of_date,
-                decision_confidence=r.decision_confidence,
+            utility = self._utility.evaluate_for_observation(observation, today=end)
+            favorable = favorable_from_utility(
+                utility.get("short_term_utility"),
+                utility.get("short_term_maturity"),
             )
-            success = util.get("short_term_utility")
-            if success is None:
+            if favorable is None:
                 continue
-            conf = float(r.decision_confidence)
-            key = f"{int(conf * 10) / 10:.1f}-{int(conf * 10) / 10 + 0.1:.1f}"
-            bins[key].append(float(success))
-
-        out_bins = []
-        statuses = []
-        for key, vals in sorted(bins.items()):
-            n = len(vals)
-            emp = mean(vals)
-            mid = float(key.split("-")[0]) + 0.05
-            if n < CONFIDENCE_BIN_MIN_N:
-                status = "insufficient_data"
-            elif abs(emp - mid) <= 0.1:
-                status = "well_calibrated"
-            elif emp < mid - 0.1:
-                status = "overconfident"
-            else:
-                status = "underconfident"
-            statuses.append(status)
-            out_bins.append(
-                {
-                    "bin": key,
-                    "n": n,
-                    "predicted_mid": round(mid, 2),
-                    "empirical_success": round(emp, 3),
-                    "status": status,
-                }
-            )
-
-        overall = "insufficient_data"
-        if out_bins and all(b["status"] != "insufficient_data" for b in out_bins):
-            if any(b["status"] == "overconfident" for b in out_bins):
-                overall = "overconfident"
-            elif any(b["status"] == "underconfident" for b in out_bins):
-                overall = "underconfident"
-            else:
-                overall = "well_calibrated"
-        elif any(b["status"] != "insufficient_data" for b in out_bins):
-            material = [b["status"] for b in out_bins if b["status"] != "insufficient_data"]
-            overall = Counter(material).most_common(1)[0][0]
-
-        return {
-            "sample_count": sum(b["n"] for b in out_bins),
-            "bins": out_bins,
-            "status": overall,
-            "note": "No automatic recalibration from small samples.",
-        }
+            pairs.append((float(confidence), favorable))
+        return summarize_calibration(pairs, considered=len(observations), abstentions=abstentions)
 
 
 class AbstentionQualityService:
     def assess(self, db: Session, *, start: date, end: date) -> Dict[str, Any]:
-        recs = (
-            db.query(RecommendationRecord)
-            .filter(RecommendationRecord.as_of_date >= start, RecommendationRecord.as_of_date <= end)
-            .all()
-        )
+        recs = CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=end)
         n = len(recs)
         abstain = [
             r
             for r in recs
-            if (r.decision_status or "") in {"abstain", "insufficient_data"}
+            if (r.get("decision_status") or "") in {"abstain", "insufficient_data"}
         ]
         rate = (len(abstain) / n) if n else None
         contexts = Counter()
         for r in abstain:
-            dq = r.data_quality_score
+            dq = r.get("data_quality_score")
             if dq is not None and dq < 0.45:
                 contexts["low_data_quality"] += 1
             else:
@@ -168,7 +244,15 @@ class RecommendationDistributionMonitor:
             if p == 0 and c == 0:
                 continue
             ratio = None if p == 0 else round(c / p, 2)
-            shifts[t] = {"current": c, "prior": p, "ratio": ratio, "flag": ratio is not None and ratio >= 2.0}
+            # from_zero is visible. It is not `flag`: a new type must not
+            # turn an outcome improvement into possible_regression.
+            shifts[t] = {
+                "current": c,
+                "prior": p,
+                "ratio": ratio,
+                "from_zero": p == 0 and c > 0,
+                "flag": ratio is not None and ratio >= 2.0,
+            }
 
         return {
             "sample_count": sum(current.values()),
@@ -176,17 +260,18 @@ class RecommendationDistributionMonitor:
             "prior": prior,
             "shifts": shifts,
             "unexpected_shift": any(v.get("flag") for v in shifts.values()),
-            "note": "Monitoring only — not automatic rollback.",
+            "types_from_zero": [name for name, row in shifts.items() if row.get("from_zero")],
+            "note": (
+                "Monitoring only — not automatic rollback. "
+                "from_zero means the type was absent in the prior window. "
+                "That is not an unexpected shift and does not block an outcome-based improvement."
+            ),
         }
 
     @staticmethod
     def _counts(db: Session, start: date, end: date) -> Dict[str, int]:
-        rows = (
-            db.query(RecommendationRecord)
-            .filter(RecommendationRecord.as_of_date >= start, RecommendationRecord.as_of_date <= end)
-            .all()
-        )
-        return dict(Counter(r.recommended_workout_type or "unknown" for r in rows))
+        rows = CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=end)
+        return dict(Counter(r.get("recommended_workout_type") or "unknown" for r in rows))
 
 
 class ModelChangeImpactService:
@@ -204,24 +289,66 @@ class ModelChangeImpactService:
         after = dist.assess(db, start=after_start, end=after_end)
         abs_svc = AbstentionQualityService().assess(db, start=after_start, end=after_end)
         n = before["sample_count"] + after["sample_count"]
-        if before["sample_count"] < 10 or after["sample_count"] < 10:
-            verdict = "insufficient_evidence"
-        elif after.get("unexpected_shift"):
-            verdict = "possible_regression"
-        elif abs_svc["status"] == "TOO_FREQUENT":
-            verdict = "possible_regression"
-        elif not after.get("unexpected_shift"):
-            verdict = "no_material_change"
-        else:
-            verdict = "consistent_with_improvement"
+        before_outcome = self.outcome_evidence(db, start=before_start, end=before_end, today=after_end)
+        after_outcome = self.outcome_evidence(db, start=after_start, end=after_end, today=after_end)
+        verdict = impact_verdict(
+            before_n=before["sample_count"],
+            after_n=after["sample_count"],
+            unexpected_shift=bool(after.get("unexpected_shift")),
+            abstention_status=abs_svc["status"],
+            before_favorable_rate=before_outcome["favorable_rate"],
+            after_favorable_rate=after_outcome["favorable_rate"],
+            before_outcome_n=before_outcome["sample_count"],
+            after_outcome_n=after_outcome["sample_count"],
+        )
 
         return {
             "sample_count": n,
             "before": before,
             "after": after,
             "abstention_after": abs_svc,
+            "outcome_before": before_outcome,
+            "outcome_after": after_outcome,
             "verdict": verdict,
-            "note": "Not a causal claim of improvement.",
+            "note": (
+                "Improvement requires a higher favorable-outcome rate with enough mature "
+                "outcomes in both windows. A distribution shift alone is not improvement."
+            ),
+        }
+
+    def outcome_evidence(
+        self,
+        db: Session,
+        *,
+        start: date,
+        end: date,
+        today: date,
+    ) -> Dict[str, Any]:
+        utility = RecommendationUtilityEvaluator(db)
+        observations = CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=today)
+        labels: List[bool] = []
+        for observation in observations:
+            assessed = utility.evaluate_for_observation(observation, today=today)
+            favorable = favorable_from_utility(
+                assessed.get("short_term_utility"),
+                assessed.get("short_term_maturity"),
+            )
+            if favorable is None:
+                continue
+            labels.append(favorable)
+        sufficiency = SampleSufficiencyPolicy().assess(
+            domain="workout_effectiveness",
+            sample_count=len(labels),
+            observation_dates=None,
+            as_of=today,
+        )
+        rate = (sum(1 for item in labels if item) / len(labels)) if labels else None
+        return {
+            "sample_count": len(labels),
+            "favorable_rate": round(rate, 3) if rate is not None else None,
+            "effective_sample_count": sufficiency["effective_sample_count"],
+            "level": sufficiency["level"],
+            "spread_days": sufficiency["spread_days"],
         }
 
 

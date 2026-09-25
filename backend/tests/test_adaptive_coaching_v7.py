@@ -260,10 +260,10 @@ class AdaptiveCoachingV7Tests(unittest.TestCase):
 
         self.assertEqual(self.db.query(TrainingPlan).count(), 0)
         eval_svc = ShadowOutcomeEvaluationService(self.db)
-        with patch.object(eval_svc._outcomes, "simulate_as_of", return_value={"actual": "easy_aerobic"}):
-            report = eval_svc.evaluate_range(start=date(2026, 5, 1), end=date(2026, 5, 30))
+        report = eval_svc.evaluate_range(start=date(2026, 5, 1), end=date(2026, 5, 30))
         self.assertEqual(report["shadow_active_plan_violations"], 0)
         self.assertGreaterEqual(report["n"], 1)
+        self.assertTrue(all(row.get("status") != "promoted" for row in report["comparisons"]))
 
     def test_reproducibility_same_config_same_fingerprint(self):
         svc = ValidationRunService(self.db)

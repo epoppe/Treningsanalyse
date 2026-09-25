@@ -32,7 +32,9 @@ Findings include `code`, `severity`, `count`, `repairable`. Never auto-repairs d
 bash backend/scripts/coaching_ops.sh prospective
 ```
 
-Recorded recommendations only. Every section has `sample_count`. Do not overclaim.
+Recorded recommendations only, one canonical observation per decision chain.
+Every section has its own `sample_count`. Pending windows are not failures.
+See `docs/PROSPECTIVE_EVIDENCE_CONTRACT.md`. Do not overclaim.
 
 ## Monthly coaching review
 

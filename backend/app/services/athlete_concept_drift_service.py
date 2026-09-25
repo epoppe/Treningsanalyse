@@ -13,12 +13,16 @@ from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback
 from ..utils.activity_filters import is_running_activity
 from .ppap_metrics_service import PpapMetricsService
+from .sample_sufficiency_policy import DOMAIN_FLOORS
 from .session_classifier_service import SessionClassifierService
 from .statistical_uncertainty import evidence_band
 from .status_semantics import DriftStatus
 
 
-MIN_SAMPLES_PER_WINDOW = 4
+# Per-window floor matches SampleSufficiencyPolicy concept_drift emerging.
+# The comparison itself still needs both windows populated; that is an estimator
+# constraint, not a second evidence policy.
+MIN_SAMPLES_PER_WINDOW = DOMAIN_FLOORS["concept_drift"]["emerging"]
 EXCLUDE_SESSION_TYPES = {"race", "vo2_intervals", "anaerobic", "threshold", "tempo"}
 HILLY_M_PER_KM = 15.0
 

@@ -57,6 +57,10 @@ export interface RecommendationHistoryItem {
   actual_type?: string | null;
   activity_id?: string | null;
   execution_quality?: number | null;
+  observation_status?: string | null;
+  match_source?: string | null;
+  match_confidence?: number | null;
+  canonical?: boolean;
 }
 
 export interface RecommendationHistoryPayload {

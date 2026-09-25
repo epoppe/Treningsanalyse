@@ -49,4 +49,28 @@ describe("RecommendationHistoryPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Justert" }));
     expect(mockUseRecommendationHistory).toHaveBeenCalledWith(40, "modified");
   });
+
+  it("labels a pending recommendation as waiting, not skipped", () => {
+    mockUseRecommendationHistory.mockReturnValue({
+      data: {
+        items: [
+          {
+            id: 2,
+            as_of_date: "2026-09-25",
+            recommended: "easy_run",
+            execution_status: "pending",
+            observation_status: "pending",
+          },
+        ],
+        count: 1,
+        disclaimer: "pending means the window is still open",
+      },
+      isLoading: false,
+    });
+    render(<RecommendationHistoryPanel />);
+    expect(screen.getByRole("button", { name: "Venter" })).toBeInTheDocument();
+    const row = screen.getByText("2026-09-25").closest("tr");
+    expect(row).toHaveTextContent("Venter");
+    expect(row).not.toHaveTextContent("Hoppet over");
+  });
 });
