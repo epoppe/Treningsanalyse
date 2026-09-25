@@ -45,6 +45,7 @@ export interface CoachingTypeEvidence {
   evidence_level: string | null;
   evidence_label: string;
   conclusion_strength: string;
+  conclusion_strength_label?: string;
   observations: CoachingObservationLink[];
 }
 
@@ -111,9 +112,11 @@ export interface CoachingEvidencePayload {
     shadow: { status: string; note?: string };
     distribution: { unexpected_shift: boolean; types_from_zero: string[] };
   };
+  operations_lines?: Array<{ code: string; label: string; text: string }>;
   what_we_know: CoachingInsight[];
   what_we_do_not_know: CoachingInsight[];
   do_not_change: string[];
+  do_not_change_nb?: string[];
 }
 
 export interface QuickFeelOption {

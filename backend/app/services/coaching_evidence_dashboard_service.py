@@ -47,34 +47,63 @@ _STRENGTH = {
     "STRONG": "strong",
 }
 _TYPE_LABEL = {
-    "easy_run": "Easy aerobic",
+    "easy_run": "Rolig løping",
     "long_run": "Langtur",
-    "threshold": "Threshold",
+    "threshold": "Terskel",
     "vo2_intervals": "VO₂-intervaller",
     "rest": "Hvile",
     "race_pace": "Konkurransefart",
     "race": "Konkurranse",
 }
+_STRENGTH_LABEL = {
+    "none": "Ingen",
+    "limited": "Begrenset",
+    "supported": "Støttet",
+    "strong": "Sterk",
+}
+_DO_NOT_CHANGE_NB = {
+    "Do not add a new predictive coaching model without ProspectiveEvidenceReport deficiency.": (
+        "Ikke legg til en ny prediktiv coachingmodell uten påvist mangel i den prospektive evidensrapporten."
+    ),
+    "Do not treat sparse samples as proof of stability or improvement.": (
+        "Små utvalg er ikke bevis på stabilitet eller forbedring."
+    ),
+    "Sample too sparse for model changes — collect more prospective data.": (
+        "Utvalget er for tynt for modellendring. Samle flere prospektive utfall."
+    ),
+    "Short-term effectiveness is below SUPPORTED — collect mature prospective outcomes before any model change.": (
+        "Korttidseffekt er under støttet nivå. Samle modne prospektive utfall før modellen endres."
+    ),
+    "Shadow ELIGIBLE is not a promotion. Promotion still requires a validation run.": (
+        "Skygge som er eligible er ikke en promotering. Promotering krever fortsatt en valideringskjøring."
+    ),
+    "Shadow model is not ELIGIBLE — do not promote.": (
+        "Skyggemodellen er ikke eligible, og skal ikke promoteres."
+    ),
+    "Confidence calibration not proven — do not tune confidence blindly.": (
+        "Confidence-kalibrering er ikke vist, og skal ikke justeres i blinde."
+    ),
+}
 
 MATURITY_LEGEND = (
     {
         "status": "pending",
-        "label": "Pending",
+        "label": "Venter",
         "text": "Outcome-vinduet er ikke ferdig ennå.",
     },
     {
         "status": "incomplete_data",
-        "label": "Incomplete",
+        "label": "Ufullstendig",
         "text": "Vinduet er ferdig, men nødvendige datapunkter manglet.",
     },
     {
         "status": "evaluated",
-        "label": "Evaluated",
+        "label": "Vurdert",
         "text": "Vinduet er lukket og utfallet har en verdi.",
     },
     {
         "status": "insufficient",
-        "label": "Insufficient evidence",
+        "label": "Utilstrekkelig evidens",
         "text": "Enkelte outcomes finnes, men samlet N eller spredning er for lav.",
     },
 )
@@ -176,9 +205,11 @@ class CoachingEvidenceDashboardService:
             "evidence_quality": evidence_quality,
             "signals": _signals(observations, utilities),
             "operations": operations,
+            "operations_lines": _operations_lines(operations),
             "what_we_know": known,
             "what_we_do_not_know": unknown,
             "do_not_change": do_not_change,
+            "do_not_change_nb": [_DO_NOT_CHANGE_NB.get(line, line) for line in do_not_change],
         }
 
     def _overview(
@@ -322,6 +353,9 @@ class CoachingEvidenceDashboardService:
                     "evidence_level": level,
                     "evidence_label": _level_label(level),
                     "conclusion_strength": _STRENGTH.get(level or "", "none"),
+                    "conclusion_strength_label": _STRENGTH_LABEL.get(
+                        _STRENGTH.get(level or "", "none"), "Ingen"
+                    ),
                     "sufficiency": sufficiency,
                     "observations": bucket["observations"],
                 }
@@ -358,7 +392,7 @@ class CoachingEvidenceDashboardService:
             "evidence_level": sufficiency.get("level"),
             "evidence_label": _level_label(sufficiency.get("level")),
             "sufficiency": sufficiency,
-            "note": "Feasibility and adherence are not physiological effectiveness.",
+            "note": "Gjennomføring og etterlevelse er ikke fysiologisk effekt.",
         }
 
     def _evidence_quality(
@@ -447,14 +481,14 @@ class CoachingEvidenceDashboardService:
                         ),
                     }
                 )
-            if row["medium_term_sample_count"] == 0 and row["recommendation_count"] > 0:
+            if row["medium_term_sample_count"] == 0 and row["short_term_sample_count"] > 0:
                 unknown.append(
                     {
                         "code": "medium_term_not_mature",
                         "workout_type": row["workout_type"],
                         "sample_count": 0,
                         "evidence_level": "INSUFFICIENT",
-                        "text": f"Medium-term response etter {label} er ikke moden i dette vinduet.",
+                        "text": f"Mellomlangs respons etter {label} er ikke moden i dette vinduet.",
                     }
                 )
         if confidence.get("status") == "INSUFFICIENT_DATA":
@@ -476,18 +510,25 @@ class CoachingEvidenceDashboardService:
                     "text": f"Subjektiv feedback finnes for {pct} % av de kanoniske anbefalingene.",
                 }
             )
-        race_n = sum(
-            row["mature_outcome_count"]
-            for row in by_type
-            if row["workout_type"] in {"race", "race_pace"}
-        )
-        if race_n < 6:
+        race_rows = [row for row in by_type if row["workout_type"] in {"race", "race_pace"}]
+        race_recs = sum(row["recommendation_count"] for row in race_rows)
+        race_n = sum(row["mature_outcome_count"] for row in race_rows)
+        if race_recs == 0:
+            unknown.append(
+                {
+                    "code": "taper_not_personalized",
+                    "sample_count": 0,
+                    "evidence_level": "INSUFFICIENT",
+                    "text": "Ingen konkurranseanbefalinger i vinduet, så taper er ikke personliggjort.",
+                }
+            )
+        elif race_n < 6:
             unknown.append(
                 {
                     "code": "too_few_races",
                     "sample_count": race_n,
                     "evidence_level": "INSUFFICIENT",
-                    "text": "For få konkurranser til å personliggjøre taper.",
+                    "text": f"For få modne konkurranseutfall ({race_n}) til å personliggjøre taper.",
                 }
             )
         return known, unknown
@@ -540,6 +581,80 @@ class CoachingEvidenceDashboardService:
                 "note": shadow.get("note"),
             },
         }
+
+
+def _pct(value: Any) -> str:
+    if value is None:
+        return "–"
+    return f"{round(float(value) * 100)} %"
+
+
+def _operations_lines(operations: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Short decision lines. Status codes stay on the raw operations object."""
+    abstention = operations.get("abstention") or {}
+    distribution = operations.get("distribution") or {}
+    churn = operations.get("recommendation_churn") or {}
+    plan = operations.get("plan_churn") or {}
+    latency = operations.get("data_latency") or {}
+    quality = operations.get("data_quality_trend") or {}
+    shadow = operations.get("shadow") or {}
+    if abstention.get("status") == "INSUFFICIENT_DATA":
+        abstention_text = (
+            f"For få observasjoner til å vurdere avståelse (N {abstention.get('sample_count')}). "
+            "Avståelsesraten er ikke et mål i seg selv."
+        )
+    else:
+        abstention_text = (
+            f"Status {abstention.get('status')} "
+            f"(N {abstention.get('sample_count')}, rate {_pct(abstention.get('abstention_rate'))}). "
+            "Avståelsesraten er ikke et mål i seg selv."
+        )
+    if distribution.get("unexpected_shift"):
+        distribution_text = "Fordelingen av anbefalingstyper har skiftet uventet."
+    else:
+        distribution_text = "Ingen uventet skift i anbefalingstypene."
+    if latency.get("stale_local_despite_source"):
+        latency_text = "Lokal data er eldre enn kilden."
+    else:
+        latency_text = "Ingen kjent forsinkelse mellom kilde og lokal data."
+    shadow_status = shadow.get("status")
+    shadow_label = {
+        "NOT_READY": "ikke klar",
+        "INSUFFICIENT_DATA": "uten nok data",
+        "BLOCKED": "blokkert",
+    }.get(shadow_status, shadow_status)
+    if shadow_status == "ELIGIBLE":
+        shadow_text = "Skyggemodellen er eligible. Det er ikke en promotering."
+    else:
+        shadow_text = f"Skyggemodellen er {shadow_label}. Eligible er ikke en promotering."
+    return [
+        {"code": "abstention", "label": "Avståelse", "text": abstention_text},
+        {"code": "distribution", "label": "Anbefalingsfordeling", "text": distribution_text},
+        {
+            "code": "recommendation_churn",
+            "label": "Anbefalingsbytte",
+            "text": (
+                f"Status {churn.get('status')} "
+                f"(N {churn.get('sample_count')}, {churn.get('type_changes')} typeendringer)."
+            ),
+        },
+        {
+            "code": "plan_churn",
+            "label": "Planendring",
+            "text": f"Status {plan.get('status')} (N {plan.get('sample_count')}).",
+        },
+        {"code": "data_latency", "label": "Dataforsinkelse", "text": latency_text},
+        {
+            "code": "data_quality_trend",
+            "label": "Datakvalitet",
+            "text": (
+                f"HRV {_pct(quality.get('hrv_coverage'))}, "
+                f"hvilepuls {_pct(quality.get('rhr_coverage'))}, "
+                f"søvn {_pct(quality.get('sleep_coverage'))}."
+            ),
+        },
+        {"code": "shadow", "label": "Skygge", "text": shadow_text},
+    ]
 
 
 def _public_confidence(report: Dict[str, Any]) -> Dict[str, Any]:

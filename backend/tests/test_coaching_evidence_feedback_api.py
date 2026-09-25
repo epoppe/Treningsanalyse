@@ -162,13 +162,41 @@ class CoachingEvidenceApiTests(unittest.TestCase):
         self.assertEqual(threshold["execution_count"], 1)
         self.assertEqual(threshold["evidence_level"], "INSUFFICIENT")
         self.assertEqual(threshold["conclusion_strength"], "none")
+        self.assertEqual(threshold["conclusion_strength_label"], "Ingen")
+        self.assertEqual(threshold["label"], "Terskel")
         self.assertEqual(body["feasibility"]["followed"], 1)
-        self.assertNotEqual(body["feasibility"]["note"], "")
-        self.assertTrue(body["what_we_do_not_know"])
+        self.assertIn("ikke fysiologisk effekt", body["feasibility"]["note"])
+        codes = [row["code"] for row in body["what_we_do_not_know"]]
+        self.assertIn("taper_not_personalized", codes)
+        self.assertNotIn("too_few_races", codes)
+        self.assertNotIn("medium_term_not_mature", codes)
         self.assertEqual(body["what_we_know"], [])
         self.assertEqual(body["confidence"]["status"], "INSUFFICIENT_DATA")
-        legend = {row["status"] for row in body["maturity_legend"]}
-        self.assertEqual(legend, {"pending", "incomplete_data", "evaluated", "insufficient"})
+        legend = {row["status"]: row["label"] for row in body["maturity_legend"]}
+        self.assertEqual(
+            legend,
+            {
+                "pending": "Venter",
+                "incomplete_data": "Ufullstendig",
+                "evaluated": "Vurdert",
+                "insufficient": "Utilstrekkelig evidens",
+            },
+        )
+        self.assertEqual(
+            [row["code"] for row in body["operations_lines"]],
+            [
+                "abstention",
+                "distribution",
+                "recommendation_churn",
+                "plan_churn",
+                "data_latency",
+                "data_quality_trend",
+                "shadow",
+            ],
+        )
+        self.assertTrue(body["do_not_change_nb"])
+        self.assertIn("skal ikke promoteres", " ".join(body["do_not_change_nb"]))
+        self.assertIn("do not promote", " ".join(body["do_not_change"]))
 
     def test_get_does_not_resolve_observations_repeatedly(self):
         calls = {"n": 0}

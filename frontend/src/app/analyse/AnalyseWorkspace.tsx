@@ -399,8 +399,8 @@ export default function AnalyseWorkspace() {
         </p>
       </header>
 
-      <AnalysisFiltersBar />
-      <SavedAnalysisViews />
+      {state.tab === "coaching" ? null : <AnalysisFiltersBar />}
+      {state.tab === "coaching" ? null : <SavedAnalysisViews />}
       <AnalysisTabs />
 
       {state.tab === "utvikling" ? <UtviklingPanel /> : null}

@@ -13,6 +13,29 @@ function percent(value: number | null | undefined): string {
   return `${Math.round(value * 100)} %`;
 }
 
+function metric(value: number | null, sampleCount: number): string {
+  if (value == null || sampleCount === 0) return "–";
+  return `${value.toFixed(2)} (N ${sampleCount})`;
+}
+
+function matchLabel(source: string | null | undefined): string {
+  if (source === "explicit_execution") return "eksplisitt";
+  if (source === "legacy_heuristic") return "heuristisk";
+  return source || "";
+}
+
+function executionLabel(status: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    followed: "fulgt",
+    modified: "justert",
+    replaced: "erstattet",
+    skipped: "hoppet over",
+    pending: "venter",
+  };
+  if (!status) return "ukjent";
+  return labels[status] || status;
+}
+
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
@@ -41,10 +64,16 @@ function TypeCard({
         <div>Anbefalinger {row.recommendation_count}</div>
         <div>Utførelse {row.execution_count}</div>
         <div>Modne utfall {row.mature_outcome_count}</div>
-        <div>Pending {row.pending_count}</div>
-        <div>Incomplete {row.incomplete_count}</div>
+        <div>Venter {row.pending_count}</div>
+        <div>Ufullstendig {row.incomplete_count}</div>
         <div>Feedback {row.feedback_count}</div>
+        <div>Korttid {metric(row.short_term_outcome, row.short_term_sample_count)}</div>
+        <div>Restitusjon {metric(row.observed_recovery_response, row.observed_recovery_sample_count)}</div>
+        <div>Sesjonskvalitet {metric(row.session_quality, row.session_quality_sample_count)}</div>
       </dl>
+      <p className="mt-2 text-xs text-slate-700">
+        Konklusjonsstyrke {row.conclusion_strength_label || row.conclusion_strength}
+      </p>
       <button type="button" className="mt-2 text-xs font-medium text-slate-900 underline" onClick={onToggle}>
         {open ? "Skjul observasjoner" : "Vis observasjoner"}
       </button>
@@ -53,8 +82,8 @@ function TypeCard({
           {row.observations.length === 0 ? <li>Ingen observasjoner i vinduet.</li> : null}
           {row.observations.map((item) => (
             <li key={`${item.recommendation_id}-${item.as_of_date}`}>
-              {item.as_of_date} · {item.execution_status || "ukjent"} · {item.short_term_maturity || "–"}
-              {item.match_source ? ` · ${item.match_source}` : ""}
+              {item.as_of_date} · {executionLabel(item.execution_status)} · {item.short_term_maturity || "–"}
+              {item.match_source ? ` · ${matchLabel(item.match_source)}` : ""}
               {item.activity_id ? (
                 <>
                   {" "}
@@ -120,11 +149,11 @@ export function CoachingEvidenceView({
       {empty ? (
         <AnalysisEmpty
           title="Ingen kanoniske anbefalinger i vinduet"
-          description="Pending og manglende data er ikke et negativt utfall."
+          description="Venter og manglende data er ikke et negativt utfall."
         />
       ) : null}
 
-      <section className="grid gap-2 md:grid-cols-3">
+      <section className="grid gap-2 sm:grid-cols-2">
         {data.maturity_legend.map((item) => (
           <div key={item.status} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
             <p className="text-xs font-semibold text-slate-900">{item.label}</p>
@@ -191,7 +220,7 @@ export function CoachingEvidenceView({
             Eksplisitt {data.evidence_quality.explicit_execution_matches} · heuristisk {data.evidence_quality.legacy_heuristic_matches}
           </p>
           <p>
-            Pending {data.evidence_quality.pending_windows} · incomplete {data.evidence_quality.incomplete_windows}
+            Venter {data.evidence_quality.pending_windows} · ufullstendig {data.evidence_quality.incomplete_windows}
           </p>
         </div>
       </section>
@@ -211,16 +240,27 @@ export function CoachingEvidenceView({
         </div>
       </section>
 
+      {data.operations_lines && data.operations_lines.length > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-900">Drift</h3>
+          <div className="grid gap-2 md:grid-cols-2">
+            {data.operations_lines.map((line) => (
+              <p key={line.code} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span className="font-medium text-slate-900">{line.label}. </span>
+                {line.text}
+              </p>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <section className="rounded-xl border border-slate-200 bg-white px-3 py-3">
         <h3 className="text-sm font-semibold text-slate-900">Dette bør ikke endres ennå</h3>
         <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
-          {data.do_not_change.map((line) => (
+          {(data.do_not_change_nb || data.do_not_change).map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
-        <p className="mt-2 text-xs text-slate-500">
-          Skygge: {data.operations.shadow.status}. {data.operations.shadow.note}
-        </p>
       </section>
     </div>
   );

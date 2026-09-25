@@ -53,6 +53,7 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
         evidence_level: "EMERGING",
         evidence_label: "Fremvoksende",
         conclusion_strength: "limited",
+        conclusion_strength_label: "Begrenset",
         observations: [
           {
             recommendation_id: 7,
@@ -110,6 +111,9 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
       shadow: { status: "NOT_READY", note: "Eligibility ≠ promotion." },
       distribution: { unexpected_shift: false, types_from_zero: [] },
     },
+    operations_lines: [
+      { code: "shadow", label: "Skygge", text: "Skyggemodellen er ikke klar. Eligible er ikke en promotering." },
+    ],
     what_we_know: [
       {
         workout_type: "easy_run",
@@ -121,6 +125,7 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
       { code: "insufficient_type", workout_type: "vo2_intervals", text: "VO₂-intervaller har foreløpig 6 modne observasjoner." },
     ],
     do_not_change: ["Short-term effectiveness is below SUPPORTED"],
+    do_not_change_nb: ["Korttidseffekt er under støttet nivå."],
     ...patch,
   };
 }
@@ -137,6 +142,11 @@ describe("CoachingEvidenceView", () => {
     expect(screen.getByText("100 %")).toBeInTheDocument();
     expect(screen.getByText(/Eksplisitt 1/)).toBeInTheDocument();
     expect(screen.getByText(/INSUFFICIENT_DATA/)).toBeInTheDocument();
+    expect(screen.getByText(/Restitusjon 0.40/)).toBeInTheDocument();
+    expect(screen.getByText(/Konklusjonsstyrke Begrenset/)).toBeInTheDocument();
+    expect(screen.getByText(/Eligible er ikke en promotering/)).toBeInTheDocument();
+    expect(screen.getByText(/Korttidseffekt er under støttet nivå/)).toBeInTheDocument();
+    expect(screen.queryByText(/Short-term effectiveness is below SUPPORTED/)).not.toBeInTheDocument();
   });
 
   it("shows an empty state without a learned conclusion", () => {
@@ -153,7 +163,7 @@ describe("CoachingEvidenceView", () => {
     render(<CoachingEvidenceView data={payload()} windowDays={90} onWindow={() => undefined} />);
     fireEvent.click(screen.getByRole("button", { name: "Vis observasjoner" }));
     expect(screen.getByRole("link", { name: "Åpne økt" })).toHaveAttribute("href", "/activities/99");
-    expect(screen.getByText(/explicit_execution/)).toBeInTheDocument();
+    expect(screen.getByText(/eksplisitt/)).toBeInTheDocument();
   });
 
   it("renders loading and error from the query", () => {

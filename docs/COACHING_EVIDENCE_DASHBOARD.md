@@ -44,6 +44,12 @@ defaults. The dashboard does not override defaults unless short-term
 effectiveness is `SUPPORTED` or `STRONG`. Until then `do_not_change`
 repeats the monthly-review gate. `Shadow ELIGIBLE` is not a promotion.
 
+The dashboard keeps the English governance sentences in `do_not_change` so they
+stay identical to the monthly review. `do_not_change_nb` and `operations_lines`
+are the Norwegian presentation of those same gates. A missing race
+recommendation says taper is not personalized. A medium-term line appears only
+when a short-term outcome already exists.
+
 ## Feedback
 
 `GET` and `PUT /api/activities/{activity_id}/feedback` read and replace the
