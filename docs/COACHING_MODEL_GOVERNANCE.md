@@ -73,6 +73,14 @@ Shadow status `ELIGIBLE` ≠ promoted — still requires registry gates.
 
 ---
 
+## Prospective observation contract
+
+Production evidence uses one definition, implemented by `CanonicalProspectiveObservationService` and described in `docs/PROSPECTIVE_EVIDENCE_CONTRACT.md`.
+
+Recommendation → canonical chain tip → `RecommendationExecution` → activity → maturity → observed outcome → `SampleSufficiencyPolicy`.
+
+Do not count shadow rows, superseded snapshots, pending windows, or adherence as physiological effectiveness. Do not treat missing markers as negative physiology.
+
 ## Evidence hierarchy
 
 1. Prospective personal evidence (if `SampleSufficiencyPolicy` allows)
