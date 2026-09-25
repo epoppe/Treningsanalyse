@@ -61,7 +61,15 @@ insert another one, and it does not rewrite recommendation records.
 
 Scales live on the service: RPE 1–10, pain 0–10, motivation 1–5, and the
 existing feel and legs sets. Invalid values return 422. Unknown activities
-return 404.
+return 404. An edit keeps the original `recorded_at`. Evidence attachment uses
+the short-term cutoff in `docs/PROSPECTIVE_EVIDENCE_CONTRACT.md`.
+
+`data_quality_snapshot` on this response is the same object as the MCP tool
+`data_quality_snapshot`. It composes `DataLatencyMonitor` and
+`DataQualityTrendService` with the canonical observations already resolved for
+the dashboard. `coaching_change.status` stays `INSUFFICIENT_EVIDENCE` until a
+before/after comparison exists. One sufficient window is not proof that
+coaching improved.
 
 `GET /api/activities/{activity_id}/feedback-prompt` asks `FeedbackValueService`
 whether a prompt has information value. It does not prompt every workout,

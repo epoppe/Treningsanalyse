@@ -1066,6 +1066,17 @@ def coaching_evaluation_report(
         return _eval(db, storage, target_date=target_date, lookback_days=lookback_days)
 
 
+def data_quality_snapshot(
+    end_date: Optional[str] = None,
+    window_days: int = 90,
+) -> Dict[str, Any]:
+    """Canonical freshness and coaching-observation coverage."""
+    with training_context() as (db, storage):
+        from .coaching import data_quality_snapshot as _snapshot
+
+        return _snapshot(db, storage, end_date=end_date, window_days=window_days)
+
+
 def metric_catalog() -> Dict[str, Any]:
     with training_context() as (db, _storage):
         table_counts = _model_table_counts(db)

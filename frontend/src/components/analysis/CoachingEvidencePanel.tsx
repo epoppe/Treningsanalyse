@@ -36,6 +36,46 @@ function executionLabel(status: string | null | undefined): string {
   return labels[status] || status;
 }
 
+const GROUP_LABELS: Record<string, string> = {
+  easy: "rolig",
+  long: "langtur",
+  threshold: "terskel",
+  intervals: "intervaller",
+  race: "konkurranse",
+};
+
+function DataQualitySection({
+  snapshot,
+}: {
+  snapshot: NonNullable<CoachingEvidencePayload["data_quality_snapshot"]>;
+}) {
+  const counts = snapshot.observations;
+  const missing = snapshot.missing_sources.map((item) => item.source).join(", ");
+  const groups = Object.entries(snapshot.feedback_by_group)
+    .filter(([, bucket]) => bucket.recommendations > 0)
+    .map(([name, bucket]) => `${GROUP_LABELS[name] || name} ${percent(bucket.coverage)}`)
+    .join(" · ");
+  const shift =
+    snapshot.coverage_shifts.length > 0
+      ? snapshot.coverage_shifts
+          .map((item) => `${item.source} ${item.delta > 0 ? "+" : ""}${Math.round(item.delta * 100)} pp`)
+          .join(", ")
+      : "Ingen brå endring i HRV-, søvn- eller hvilepulsdekning.";
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+      <h3 className="font-semibold text-slate-900">Datakvalitet</h3>
+      <p className="mt-1">Siste sync {snapshot.freshness.last_sync_at ?? "ukjent"}</p>
+      <p>
+        Venter {counts.pending} · vurdert {counts.evaluated} · ufullstendig {counts.incomplete} · utelatt{" "}
+        {counts.excluded}
+      </p>
+      <p>Manglende kilder: {missing || "ingen"}</p>
+      <p>{shift}</p>
+      {groups ? <p>Feedback {groups}</p> : null}
+    </section>
+  );
+}
+
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
@@ -121,6 +161,9 @@ export function CoachingEvidenceView({
         <p className="text-sm text-slate-600">
           Prospektiv observasjon i valgt vindu. Vinduet endrer ikke modeller eller kalibrering.
         </p>
+        {data.coaching_change?.text ? (
+          <p className="text-sm text-slate-700">{data.coaching_change.text}</p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
           {(data.period.allowed_windows || WINDOWS).map((days) => (
             <button
@@ -138,6 +181,10 @@ export function CoachingEvidenceView({
           ))}
         </div>
       </header>
+
+      {data.data_quality_snapshot ? (
+        <DataQualitySection snapshot={data.data_quality_snapshot} />
+      ) : null}
 
       <section className="grid grid-cols-2 gap-2 md:grid-cols-5">
         <SummaryCard label="Prospektive anbefalinger" value={String(overview.canonical_recommendation_count)} />

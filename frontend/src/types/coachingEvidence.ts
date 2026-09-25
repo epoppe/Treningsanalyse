@@ -135,6 +135,27 @@ export interface CoachingEvidencePayload {
   what_we_do_not_know: CoachingInsight[];
   do_not_change: string[];
   do_not_change_nb?: string[];
+  data_quality_snapshot?: DataQualitySnapshot;
+  coaching_change?: { status: string; text: string; reason?: string };
+}
+
+export interface DataQualitySnapshot {
+  schema: string;
+  freshness: {
+    last_sync_at: string | null;
+    last_activity_at: string | null;
+    stale_local_despite_source: boolean;
+  };
+  missing_sources: Array<{ source: string; reason: string }>;
+  coverage_shifts: Array<{ source: string; recent: number; prior: number; delta: number }>;
+  observations: {
+    pending: number;
+    evaluated: number;
+    incomplete: number;
+    excluded: number;
+  };
+  feedback_coverage: number | null;
+  feedback_by_group: Record<string, { recommendations: number; with_feedback: number; coverage: number | null }>;
 }
 
 export interface QuickFeelOption {

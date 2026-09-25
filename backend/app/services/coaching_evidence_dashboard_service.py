@@ -18,14 +18,13 @@ from .canonical_prospective_observation import CanonicalProspectiveObservationSe
 from .coaching_model_registry import CoachingModelRegistry
 from .coaching_operational_monitors import (
     AbstentionQualityService,
-    DataLatencyMonitor,
-    DataQualityTrendService,
     DecisionConfidenceMonitor,
     PlanChurnMonitor,
     RecommendationChurnMonitor,
     RecommendationDistributionMonitor,
     ShadowPromotionReadinessService,
 )
+from .data_quality_snapshot import DataQualitySnapshotService
 from .feedback_prompt_service import QUALITY_SESSION_TYPES
 from .monthly_coaching_review_service import coaching_do_not_change
 from .outcome_maturity import EVALUATED, INCOMPLETE_DATA, PENDING, is_usable_status
@@ -168,11 +167,19 @@ class CoachingEvidenceDashboardService:
         feasibility = self._feasibility(observations, as_of=end)
         active = CoachingModelRegistry(self.db).get_active("ranker")
         known, unknown = self._insights(by_type, confidence, overview)
+        snapshot = DataQualitySnapshotService(self.db).from_observations(
+            observations=observations,
+            utilities=utilities,
+            start=start,
+            end=end,
+            window_days=window_days,
+        )
         operations = self._operations(
             start=start,
             end=end,
             abstention=abstention,
             distribution=distribution,
+            snapshot=snapshot,
         )
         do_not_change = coaching_do_not_change(
             recommendation_count=overview["canonical_recommendation_count"],
@@ -207,6 +214,15 @@ class CoachingEvidenceDashboardService:
             "signals": _signals(observations, utilities),
             "operations": operations,
             "operations_lines": _operations_lines(operations),
+            "data_quality_snapshot": snapshot,
+            "coaching_change": {
+                "status": "INSUFFICIENT_EVIDENCE",
+                "text": "For lite prospektiv evidens til å konkludere om coachen har blitt bedre.",
+                "reason": (
+                    "No before/after comparison is defined. "
+                    "A sufficient window is not evidence that coaching improved."
+                ),
+            },
             "what_we_know": known,
             "what_we_do_not_know": unknown,
             "do_not_change": do_not_change,
@@ -561,11 +577,12 @@ class CoachingEvidenceDashboardService:
         end: date,
         abstention: Dict[str, Any],
         distribution: Dict[str, Any],
+        snapshot: Dict[str, Any],
     ) -> Dict[str, Any]:
         churn = RecommendationChurnMonitor().assess(self.db, day=end)
         plan = PlanChurnMonitor().assess(self.db, as_of=end, window_days=(end - start).days or 1)
-        latency = DataLatencyMonitor().assess(self.db)
-        quality = DataQualityTrendService().assess(self.db, end=end, window_days=min(28, (end - start).days or 1))
+        freshness = snapshot.get("freshness") or {}
+        coverage = snapshot.get("source_coverage") or {}
         shadow = ShadowPromotionReadinessService().assess(self.db, start=start, end=end)
         return {
             "abstention": {
@@ -587,14 +604,14 @@ class CoachingEvidenceDashboardService:
             },
             "plan_churn": {"status": plan.get("status"), "sample_count": plan.get("sample_count")},
             "data_latency": {
-                "stale_local_despite_source": latency.get("stale_local_despite_source"),
-                "last_sync_at": latency.get("last_sync_at"),
+                "stale_local_despite_source": freshness.get("stale_local_despite_source"),
+                "last_sync_at": freshness.get("last_sync_at"),
             },
             "data_quality_trend": {
-                "hrv_coverage": quality.get("hrv_coverage"),
-                "rhr_coverage": quality.get("rhr_coverage"),
-                "sleep_coverage": quality.get("sleep_coverage"),
-                "activity_count": quality.get("activity_count"),
+                "hrv_coverage": coverage.get("hrv"),
+                "rhr_coverage": coverage.get("rhr"),
+                "sleep_coverage": coverage.get("sleep"),
+                "activity_count": coverage.get("activity_count"),
             },
             "shadow": {
                 "status": shadow.get("status"),

@@ -125,6 +125,19 @@ class CoachingEvidenceApiTests(unittest.TestCase):
         self.assertTrue(body["read_only"])
         self.assertEqual(body["overview"]["canonical_recommendation_count"], 2)
         self.assertEqual(body["overview"]["pending_count"], 1)
+        snapshot = body["data_quality_snapshot"]
+        self.assertEqual(snapshot["schema"], "data-quality-snapshot-1")
+        self.assertEqual(snapshot["observations"]["pending"], body["overview"]["pending_count"])
+        self.assertEqual(
+            snapshot["observations"]["pending"] + snapshot["observations"]["evaluated"],
+            body["overview"]["canonical_recommendation_count"],
+        )
+        self.assertEqual(snapshot["observations"]["excluded_detail"]["shadow"], 1)
+        self.assertEqual(snapshot["observations"]["excluded_detail"]["superseded"], 1)
+        self.assertEqual(snapshot["feedback_coverage"], body["overview"]["feedback_coverage"])
+        self.assertEqual(snapshot["execution_matching"]["explicit_share"], body["overview"]["explicit_matching_share"])
+        self.assertEqual(body["coaching_change"]["status"], "INSUFFICIENT_EVIDENCE")
+        self.assertIn("prospektiv evidens", body["coaching_change"]["text"])
         self.assertEqual(body["overview"]["short_term_outcome_count"], 0)
         types = {row["workout_type"] for row in body["effectiveness"]}
         self.assertIn("easy_run", types)
@@ -352,6 +365,19 @@ class ActivityFeedbackApiTests(unittest.TestCase):
         self.db.refresh(self.recommendation)
         self.assertEqual(self.recommendation.recommended_workout_type, "easy_run")
         self.assertEqual(self.db.query(RecommendationRecord).count(), 1)
+
+    def test_edit_keeps_the_original_recorded_at(self):
+        from app.services.athlete_feedback_service import AthleteFeedbackService
+
+        service = AthleteFeedbackService(self.db)
+        original = datetime(2026, 1, 12, 8, tzinfo=timezone.utc)
+        first = service.record("act-1", session_feel="easy", recorded_at=original)
+        updated = service.upsert("act-1", session_feel="hard", rpe=6)
+        self.assertEqual(updated["id"], first["id"])
+        self.assertEqual(updated["recorded_at"], first["recorded_at"])
+        self.assertTrue(updated["recorded_at"].startswith("2026-01-12"))
+        self.assertEqual(updated["session_feel"], "hard")
+        self.assertEqual(self.db.query(AthleteFeedback).count(), 1)
 
     def test_prompt_is_selective_and_read_only(self):
         before = self.db.query(AthleteFeedback).count()

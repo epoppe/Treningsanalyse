@@ -130,6 +130,25 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
     ],
     do_not_change: ["Short-term effectiveness is below SUPPORTED"],
     do_not_change_nb: ["Korttidseffekt er under støttet nivå."],
+    coaching_change: {
+      status: "INSUFFICIENT_EVIDENCE",
+      text: "For lite prospektiv evidens til å konkludere om coachen har blitt bedre.",
+    },
+    data_quality_snapshot: {
+      schema: "data-quality-snapshot-1",
+      freshness: { last_sync_at: null, last_activity_at: null, stale_local_despite_source: false },
+      missing_sources: [{ source: "hrv", reason: "no rows" }],
+      coverage_shifts: [],
+      observations: { pending: 1, evaluated: 1, incomplete: 0, excluded: 2 },
+      feedback_coverage: 0.5,
+      feedback_by_group: {
+        easy: { recommendations: 2, with_feedback: 1, coverage: 0.5 },
+        long: { recommendations: 0, with_feedback: 0, coverage: null },
+        threshold: { recommendations: 0, with_feedback: 0, coverage: null },
+        intervals: { recommendations: 0, with_feedback: 0, coverage: null },
+        race: { recommendations: 0, with_feedback: 0, coverage: null },
+      },
+    },
     ...patch,
   };
 }
@@ -138,6 +157,11 @@ describe("CoachingEvidenceView", () => {
   it("shows learned and unknown statements, pending, and explicit matching", () => {
     render(<CoachingEvidenceView data={payload()} windowDays={90} onWindow={() => undefined} />);
     expect(screen.getByText(/Lærer coachen faktisk/)).toBeInTheDocument();
+    expect(screen.getByText(/For lite prospektiv evidens til å konkludere/)).toBeInTheDocument();
+    expect(screen.getByText(/Siste sync ukjent/)).toBeInTheDocument();
+    expect(screen.getByText(/utelatt 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Manglende kilder: hrv/)).toBeInTheDocument();
+    expect(screen.getByText(/Feedback rolig 50 %/)).toBeInTheDocument();
     expect(screen.getByText(/Easy aerobic har 34/)).toBeInTheDocument();
     expect(screen.getByText(/VO₂-intervaller har foreløpig 6/)).toBeInTheDocument();
     expect(screen.getByText("Outcome-vinduet er ikke ferdig ennå.")).toBeInTheDocument();

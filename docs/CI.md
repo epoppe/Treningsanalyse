@@ -2,7 +2,7 @@
 
 GitHub Actions-pipeline: `.github/workflows/ci.yml`
 
-Kjører på push/PR mot `main`. Feiler ved lint-, test-, type- eller build-feil.
+Kjører på push mot `main` og på pull requests mot alle brancher, inkludert stablede PR-er. Feiler ved lint-, test-, type- eller build-feil.
 
 ## Backend-jobb
 
