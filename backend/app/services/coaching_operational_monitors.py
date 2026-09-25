@@ -182,14 +182,7 @@ class DecisionConfidenceMonitor:
             confidence = observation.get("decision_confidence")
             if confidence is None:
                 continue
-            utility = self._utility.evaluate(
-                recommended_type=observation.get("recommended_workout_type"),
-                actual_type=observation.get("actual_type"),
-                as_of=date.fromisoformat(observation["as_of_date"]),
-                decision_confidence=confidence,
-                actual_load=observation.get("actual_load"),
-                today=end,
-            )
+            utility = self._utility.evaluate_for_observation(observation, today=end)
             favorable = favorable_from_utility(
                 utility.get("short_term_utility"),
                 utility.get("short_term_maturity"),
@@ -322,13 +315,7 @@ class ModelChangeImpactService:
         observations = CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=today)
         labels: List[bool] = []
         for observation in observations:
-            assessed = utility.evaluate(
-                recommended_type=observation.get("recommended_workout_type"),
-                actual_type=observation.get("actual_type"),
-                as_of=date.fromisoformat(observation["as_of_date"]),
-                actual_load=observation.get("actual_load"),
-                today=today,
-            )
+            assessed = utility.evaluate_for_observation(observation, today=today)
             favorable = favorable_from_utility(
                 assessed.get("short_term_utility"),
                 assessed.get("short_term_maturity"),

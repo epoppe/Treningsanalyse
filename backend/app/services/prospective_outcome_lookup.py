@@ -69,14 +69,7 @@ class ProspectiveOutcomeLookup:
                 bucket["feasibility_dates"].append(obs_date)
                 bucket["feasibility_weights"].append(weight if weight > 0 else 1.0)
 
-            utility = self._utility.evaluate(
-                recommended_type=wtype,
-                actual_type=observation.get("actual_type"),
-                as_of=obs_date,
-                actual_load=observation.get("actual_load"),
-                today=today,
-                decision_confidence=observation.get("decision_confidence"),
-            )
+            utility = self._utility.evaluate_for_observation(observation, today=today)
             if is_usable_status(utility.get("short_term_maturity")) and utility.get("short_term_utility") is not None:
                 # Physiological response only — adherence is not added here.
                 bucket["effectiveness"].append(float(utility["short_term_utility"]) * 100.0)

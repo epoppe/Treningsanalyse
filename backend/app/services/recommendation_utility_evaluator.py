@@ -31,6 +31,25 @@ _EXPECTED_COST_ALIASES = {
     "race": "race",
 }
 
+# SessionQualityService scores these types. Coaching names map onto them.
+# Anything else (including a Garmin type key) is not scored here, so the
+# evidence path does not call the session classifier.
+_QUALITY_SESSION_TYPES = {
+    "recovery_run": "recovery_run",
+    "easy_aerobic": "easy_aerobic",
+    "long_aerobic": "long_aerobic",
+    "steady": "steady",
+    "mixed": "mixed",
+    "tempo": "tempo",
+    "threshold": "threshold",
+    "vo2_intervals": "vo2_intervals",
+    "anaerobic": "anaerobic",
+    "race": "race",
+    "easy_run": "easy_aerobic",
+    "long_run": "long_aerobic",
+    "race_pace": "threshold",
+}
+
 
 def hrv_component_score(hrv_delta_pct: Optional[float]) -> Optional[float]:
     """Map HRV percent-vs-baseline onto 0–1 utility.
@@ -41,6 +60,23 @@ def hrv_component_score(hrv_delta_pct: Optional[float]) -> Optional[float]:
     if hrv_delta_pct is None:
         return None
     return round(max(0.0, min(1.0, 0.5 + float(hrv_delta_pct) / _HRV_UTILITY_SPAN_PCT)), 3)
+
+
+def session_quality_component(quality_score: Optional[float]) -> Optional[float]:
+    """Map SessionQualityService quality_score (0–100) onto 0–1.
+
+    None stays None. Missing quality is left out of the average.
+    """
+    if quality_score is None:
+        return None
+    return round(max(0.0, min(1.0, float(quality_score) / 100.0)), 3)
+
+
+def quality_session_type(session_type: Optional[str]) -> Optional[str]:
+    """Type SessionQualityService can score, or None when scoring would classify."""
+    if not session_type:
+        return None
+    return _QUALITY_SESSION_TYPES.get(session_type)
 
 
 def expected_recovery_cost_value(recommended_type: Optional[str]) -> float:
@@ -82,6 +118,7 @@ class RecommendationUtilityEvaluator:
         self.db = db
         self.storage = storage
         self._ppap = ppap or PpapMetricsService(db, storage)
+        self._quality = None
 
     def evaluate(
         self,
@@ -92,10 +129,17 @@ class RecommendationUtilityEvaluator:
         decision_confidence: Optional[float] = None,
         actual_load: Optional[float] = None,
         today: Optional[date] = None,
+        session_quality: Optional[float] = None,
     ) -> Dict[str, Any]:
+        """session_quality is SessionQualityService quality_score on the 0–100 scale."""
         today = today or date.today()
         imitation = self.imitation_score(recommended_type, actual_type)
-        short_term, short_status = self._short_term_utility(as_of, today=today)
+        quality_component = session_quality_component(session_quality)
+        short_term, short_status = self._short_term_utility(
+            as_of,
+            today=today,
+            session_quality=quality_component,
+        )
         medium_term, medium_status = self._medium_term_utility(as_of, today=today)
         expected = self._expected_recovery_cost(recommended_type)
         observed = self._observed_recovery_response(
@@ -122,6 +166,8 @@ class RecommendationUtilityEvaluator:
             "imitation": imitation,
             "short_term_utility": short_term,
             "short_term_maturity": short_status,
+            "session_quality_component": quality_component if short_status == EVALUATED else None,
+            "session_quality_included": bool(short_status == EVALUATED and quality_component is not None),
             "medium_term_utility": medium_term,
             "medium_term_maturity": medium_status,
             "expected_recovery_cost": expected,
@@ -133,7 +179,8 @@ class RecommendationUtilityEvaluator:
             "note": (
                 "Utility uses observed post-session markers; not a causal counterfactual claim. "
                 "expected_recovery_cost is the default envelope for the recommended type. "
-                "observed_recovery_response is not a causal effect of that recommendation."
+                "observed_recovery_response is not a causal effect of that recommendation. "
+                "Session quality enters short-term utility only after that window is evaluated."
             ),
             "evaluation_kind": "observational_outcome",
             "maturity": {
@@ -153,15 +200,83 @@ class RecommendationUtilityEvaluator:
         family = self.SESSION_FAMILIES.get(recommended, {recommended})
         return actual in family or actual == recommended
 
-    def _short_term_utility(self, as_of: date, *, today: date) -> tuple[Optional[float], str]:
-        """0–1 from session quality + next-day HRV/RHR when the window has closed."""
+    def evaluate_for_observation(
+        self,
+        observation: Dict[str, Any],
+        *,
+        today: date,
+        recommended_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Score one canonical observation, including linked session quality once."""
+        as_of = observation["as_of_date"]
+        if isinstance(as_of, str):
+            as_of = date.fromisoformat(as_of)
+        actual_type = observation.get("actual_type")
+        chosen = observation.get("recommended_workout_type") if recommended_type is None else recommended_type
+        return self.evaluate(
+            recommended_type=chosen,
+            actual_type=actual_type,
+            as_of=as_of,
+            decision_confidence=observation.get("decision_confidence"),
+            actual_load=observation.get("actual_load"),
+            today=today,
+            session_quality=self.session_quality_score(
+                observation.get("activity_id"),
+                session_type=actual_type,
+            ),
+        )
+
+    def session_quality_score(
+        self,
+        activity_id: Optional[str],
+        session_type: Optional[str] = None,
+    ) -> Optional[float]:
+        """Existing 0–100 quality score for a linked activity, or None.
+
+        A score with no measured components is treated as missing. The default
+        prior inside SessionQualityService is not an observation.
+        """
+        scored_type = quality_session_type(session_type)
+        if not activity_id or self.db is None or scored_type is None:
+            return None
+        from ..database.models.activity import Activity
+
+        activity = (
+            self.db.query(Activity)
+            .filter(Activity.activity_id == str(activity_id))
+            .one_or_none()
+        )
+        if activity is None:
+            return None
+        if self._quality is None:
+            from .session_quality_service import SessionQualityService
+
+            self._quality = SessionQualityService(self.db, self.storage, self._ppap)
+        result = self._quality.evaluate(activity, session_type=scored_type)
+        if not result.get("components"):
+            return None
+        score = result.get("quality_score")
+        return None if score is None else float(score)
+
+    def _short_term_utility(
+        self,
+        as_of: date,
+        *,
+        today: date,
+        session_quality: Optional[float] = None,
+    ) -> tuple[Optional[float], str]:
+        """0–1 from one session-quality component plus next-day HRV/RHR.
+
+        session_quality is already on the 0–1 scale. It is included once.
+        The value stays None until the 24–48h window has closed.
+        """
+        if not window_closed(as_of, today, SHORT_TERM_LAG_DAYS):
+            return None, short_term_maturity(as_of, today, has_value=False)
+        scores = []
+        if session_quality is not None:
+            scores.append(float(session_quality))
         hrv = self._ppap.get_hrv_delta_pct(as_of + timedelta(days=1))
         rhr = self._ppap.get_rhr_delta_bpm(as_of + timedelta(days=1))
-        scores = []
-        for offset in (0, 1):
-            q = self._safe_quality(as_of + timedelta(days=offset))
-            if q is not None:
-                scores.append(q)
         hrv_score = hrv_component_score(hrv)
         if hrv_score is not None:
             scores.append(hrv_score)
@@ -169,10 +284,6 @@ class RecommendationUtilityEvaluator:
             # Positive RHR delta (higher than baseline) lowers utility.
             scores.append(max(0.0, min(1.0, 0.5 - float(rhr) / _RHR_UTILITY_SPAN_BPM)))
         value = round(sum(scores) / len(scores), 3) if scores else None
-        # Do not emit a score until the 24–48h window has closed, even if a
-        # partial marker already exists. Pending is not a low utility.
-        if not window_closed(as_of, today, SHORT_TERM_LAG_DAYS):
-            return None, short_term_maturity(as_of, today, has_value=False)
         status = short_term_maturity(as_of, today, has_value=value is not None)
         return (value if status == EVALUATED else None), status
 
@@ -255,7 +366,3 @@ class RecommendationUtilityEvaluator:
                 "Not a causal effect of the recommendation, and not an adherence score."
             ),
         }
-
-    def _safe_quality(self, day: date) -> Optional[float]:
-        # SessionQualityService scores activities, not calendar days — omit if unavailable.
-        return None

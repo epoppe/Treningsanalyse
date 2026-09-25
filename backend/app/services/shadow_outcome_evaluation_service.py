@@ -48,19 +48,11 @@ class ShadowOutcomeEvaluationService:
                 )
                 continue
             actual = obs.get("actual_type")
-            prod_util = self._utility.evaluate(
-                recommended_type=obs.get("recommended_workout_type"),
-                actual_type=actual,
-                as_of=shadow.as_of_date,
-                actual_load=obs.get("actual_load"),
+            prod_util = self._utility.evaluate_for_observation(obs, today=end)
+            shadow_util = self._utility.evaluate_for_observation(
+                obs,
                 today=end,
-            )
-            shadow_util = self._utility.evaluate(
                 recommended_type=shadow.shadow_workout_type,
-                actual_type=actual,
-                as_of=shadow.as_of_date,
-                actual_load=obs.get("actual_load"),
-                today=end,
             )
             comparisons.append(
                 {

@@ -28,6 +28,8 @@ from app.services.recommendation_utility_evaluator import (
     RecommendationUtilityEvaluator,
     expected_recovery_cost_value,
     hrv_component_score,
+    quality_session_type,
+    session_quality_component,
 )
 from app.services.sample_sufficiency_policy import DOMAIN_FLOORS, SampleSufficiencyPolicy
 
@@ -399,6 +401,147 @@ class CanonicalObservationTests(unittest.TestCase):
         self.assertEqual(report["recommendations"]["pending"], 1)
         self.assertEqual(report["recommendations"]["skipped"], 0)
         self.assertIsNone(report["outcomes"]["short_term_utility"])
+        self.assertEqual(report["sample_counts"]["session_quality_outcomes"], 0)
+
+
+class SessionQualityUtilityTests(unittest.TestCase):
+    def test_component_maps_score_and_keeps_missing_empty(self):
+        self.assertEqual(session_quality_component(80), 0.8)
+        self.assertEqual(session_quality_component(0), 0.0)
+        self.assertEqual(session_quality_component(140), 1.0)
+        self.assertIsNone(session_quality_component(None))
+        self.assertEqual(quality_session_type("easy_run"), "easy_aerobic")
+        self.assertIsNone(quality_session_type("running"))
+        self.assertIsNone(quality_session_type(None))
+
+    def test_mature_quality_alone_is_the_short_term_score(self):
+        result = _evaluator().evaluate(
+            recommended_type="easy_run",
+            actual_type="easy_aerobic",
+            as_of=date(2026, 1, 1),
+            today=date(2026, 1, 10),
+            session_quality=80,
+        )
+        self.assertEqual(result["short_term_utility"], 0.8)
+        self.assertEqual(result["short_term_maturity"], "evaluated")
+        self.assertTrue(result["session_quality_included"])
+        self.assertEqual(result["session_quality_component"], 0.8)
+
+    def test_mature_quality_is_averaged_with_neutral_hrv(self):
+        result = _evaluator(hrv=0.0).evaluate(
+            recommended_type="easy_run",
+            actual_type="easy_aerobic",
+            as_of=date(2026, 1, 1),
+            today=date(2026, 1, 10),
+            session_quality=40,
+        )
+        self.assertEqual(result["short_term_utility"], 0.45)
+
+    def test_pending_window_ignores_a_low_quality_score(self):
+        as_of = date(2026, 5, 1)
+        result = _evaluator().evaluate(
+            recommended_type="easy_run",
+            actual_type="easy_aerobic",
+            as_of=as_of,
+            today=as_of + timedelta(days=1),
+            session_quality=10,
+        )
+        self.assertIsNone(result["short_term_utility"])
+        self.assertEqual(result["short_term_maturity"], "pending")
+        self.assertFalse(result["session_quality_included"])
+        self.assertIsNone(result["session_quality_component"])
+
+    def test_missing_quality_does_not_lower_neutral_hrv(self):
+        result = _evaluator(hrv=0.0).evaluate(
+            recommended_type="easy_run",
+            actual_type="easy_aerobic",
+            as_of=date(2026, 1, 1),
+            today=date(2026, 1, 10),
+            session_quality=None,
+        )
+        self.assertEqual(result["short_term_utility"], 0.5)
+        self.assertFalse(result["session_quality_included"])
+
+    def test_quality_does_not_change_expected_recovery_cost(self):
+        kwargs = dict(
+            recommended_type="threshold",
+            actual_type="easy_aerobic",
+            as_of=date(2026, 1, 1),
+            today=date(2026, 1, 10),
+        )
+        without = _evaluator(hrv=0.0).evaluate(**kwargs)
+        with_quality = _evaluator(hrv=0.0).evaluate(**kwargs, session_quality=20)
+        self.assertEqual(
+            without["expected_recovery_cost"]["value"],
+            with_quality["expected_recovery_cost"]["value"],
+        )
+        self.assertEqual(without["expected_recovery_cost"]["value"], expected_recovery_cost_value("threshold"))
+        self.assertNotEqual(without["short_term_utility"], with_quality["short_term_utility"])
+
+    def test_score_lookup_skips_classifier_and_empty_components(self):
+        evaluator = _evaluator()
+        evaluator.db = MagicMock()
+        self.assertIsNone(evaluator.session_quality_score(None, "easy_run"))
+        self.assertIsNone(evaluator.session_quality_score("act-1", None))
+        self.assertIsNone(evaluator.session_quality_score("act-1", "running"))
+        evaluator.db.query.assert_not_called()
+
+        activity = MagicMock()
+        evaluator.db.query.return_value.filter.return_value.one_or_none.return_value = activity
+        fake_quality = MagicMock()
+        fake_quality.evaluate.return_value = {"quality_score": 80.0, "components": {"hr_drift": 90.0}}
+        evaluator._quality = fake_quality
+        self.assertEqual(evaluator.session_quality_score("act-1", "easy_run"), 80.0)
+        fake_quality.evaluate.assert_called_once_with(activity, session_type="easy_aerobic")
+
+        fake_quality.evaluate.return_value = {"quality_score": 70.0, "components": {}}
+        self.assertIsNone(evaluator.session_quality_score("act-1", "long_run"))
+
+    def test_report_counts_mature_quality_and_not_pending(self):
+        tmpdir = tempfile.TemporaryDirectory()
+        engine = create_engine(f"sqlite:///{Path(tmpdir.name) / 'quality.db'}")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            mature = date(2026, 1, 5)
+            pending = date(2026, 4, 1)
+            db.add(_rec(as_of_date=mature, config_hash="mature", recommended_workout_type="easy_run"))
+            db.add(_rec(as_of_date=pending, config_hash="pending", recommended_workout_type="easy_run"))
+            db.commit()
+            report_service = ProspectiveEvidenceReportService(db)
+
+            def _score(activity_id, session_type=None):
+                return 80.0 if activity_id else None
+
+            with patch.object(report_service._utility, "session_quality_score", side_effect=_score):
+                with patch.object(report_service._utility._ppap, "get_hrv_delta_pct", return_value=None):
+                    with patch.object(report_service._utility._ppap, "get_rhr_delta_bpm", return_value=None):
+                        with patch.object(report_service._utility._ppap, "get_tsb", return_value=None):
+                            with patch.object(report_service._utility._ppap, "get_ctl", return_value=None):
+                                report = report_service.report(start=mature, end=pending)
+            # No linked activity, so the patched score stays unused and pending
+            # quality cannot enter the denominator.
+            self.assertEqual(report["sample_counts"]["session_quality_outcomes"], 0)
+            self.assertEqual(report["sample_counts"]["pending_short_term"], 1)
+            self.assertIsNone(report["outcomes"]["short_term_utility"])
+
+            def _linked(activity_id, session_type=None):
+                return 80.0
+
+            with patch.object(report_service._utility, "session_quality_score", side_effect=_linked):
+                with patch.object(report_service._utility._ppap, "get_hrv_delta_pct", return_value=None):
+                    with patch.object(report_service._utility._ppap, "get_rhr_delta_bpm", return_value=None):
+                        with patch.object(report_service._utility._ppap, "get_tsb", return_value=None):
+                            with patch.object(report_service._utility._ppap, "get_ctl", return_value=None):
+                                linked = report_service.report(start=mature, end=pending)
+            self.assertEqual(linked["sample_counts"]["session_quality_outcomes"], 1)
+            self.assertEqual(linked["outcomes"]["session_quality_sample_count"], 1)
+            self.assertEqual(linked["sample_counts"]["short_term_recovery_outcomes"], 1)
+            self.assertEqual(linked["outcomes"]["short_term_utility"], 0.8)
+            self.assertEqual(linked["sample_counts"]["pending_short_term"], 1)
+        finally:
+            db.close()
+            tmpdir.cleanup()
 
 
 class SampleSufficiencyAndLookupTests(unittest.TestCase):
@@ -570,7 +713,7 @@ class CalibrationAndImpactTests(unittest.TestCase):
             self.assertNotEqual(plain["verdict"], "consistent_with_improvement")
             self.assertIn(plain["verdict"], {"no_material_change", "possible_regression", "insufficient_evidence"})
 
-            def _utility(self, as_of, *, today):
+            def _utility(self, as_of, *, today, session_quality=None):
                 if as_of < date(2026, 2, 1):
                     return 0.2, "evaluated"
                 return 0.9, "evaluated"

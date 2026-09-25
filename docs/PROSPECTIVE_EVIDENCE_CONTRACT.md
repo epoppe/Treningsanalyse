@@ -52,7 +52,7 @@ Legacy rows carry `match_confidence` and `match_reason`.
 
 Only `evaluated` rows enter that metric's denominator. `pending_count` is reported
 beside the mean. `sample_count` is per metric: recommendations, execution,
-adherence, short-term recovery, medium-term, subjective feedback.
+adherence, short-term recovery, session quality included in that short-term score, medium-term, subjective feedback.
 
 ## Words that are not interchangeable
 
@@ -72,6 +72,16 @@ adherence, short-term recovery, medium-term, subjective feedback.
 
 `get_hrv_delta_pct` is percent vs baseline: `100 * (today - baseline) / baseline`.
 Positive means HRV is above baseline. Missing HRV is missing, not a drop.
+
+Once the short-term window is evaluated, short-term utility may also include the
+existing `SessionQualityService` score for the linked activity. That score is
+mapped from 0–100 to 0–1 and enters the average once, beside HRV and RHR. It is
+left out while the window is pending, when there is no linked activity or no
+scorable session type, and when the quality service returns no measured
+components — its default prior is not an observation. Missing quality does not
+lower the average. Session quality is not adherence and is not mixed into
+`expected_recovery_cost`. `session_quality_outcomes` counts how many short-term
+outcomes included that score. It is not a separate composite.
 
 Favorable outcome for calibration (not built from confidence):
 

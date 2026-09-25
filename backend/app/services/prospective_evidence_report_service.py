@@ -77,6 +77,7 @@ class ProspectiveEvidenceReportService:
         recovery_weights: List[float] = []
         expected_vals: List[float] = []
         feedback_n = 0
+        session_quality_n = 0
         pending_short = pending_medium = 0
         personalization = Counter()
         explicit_matches = legacy_matches = 0
@@ -107,14 +108,7 @@ class ProspectiveEvidenceReportService:
                 adherence_vals.append(float(observation["overall_adherence"]))
                 adherence_dates.append(obs_date)
 
-            utility = self._utility.evaluate(
-                recommended_type=observation.get("recommended_workout_type"),
-                actual_type=observation.get("actual_type"),
-                as_of=obs_date,
-                decision_confidence=observation.get("decision_confidence"),
-                actual_load=observation.get("actual_load"),
-                today=end,
-            )
+            utility = self._utility.evaluate_for_observation(observation, today=end)
             weight = float(observation.get("evidence_weight") or 0.0)
             if utility.get("short_term_maturity") == "pending":
                 pending_short += 1
@@ -135,6 +129,8 @@ class ProspectiveEvidenceReportService:
             expected = utility.get("expected_recovery_cost") or {}
             if expected.get("value") is not None:
                 expected_vals.append(float(expected["value"]))
+            if utility.get("session_quality_included"):
+                session_quality_n += 1
             if observation.get("subjective_feedback"):
                 feedback_n += 1
 
@@ -196,6 +192,7 @@ class ProspectiveEvidenceReportService:
                 "pending_execution": pending_execution,
                 "adherence_scores": len(adherence_vals),
                 "short_term_recovery_outcomes": len(short_vals),
+                "session_quality_outcomes": session_quality_n,
                 "pending_short_term": pending_short,
                 "medium_term_outcomes": len(medium_vals),
                 "pending_medium_term": pending_medium,
@@ -237,6 +234,7 @@ class ProspectiveEvidenceReportService:
                 pending_count=pending_short,
                 short_term_utility=round(mean(short_vals), 3) if short_vals else None,
                 short_term_sample_count=len(short_vals),
+                session_quality_sample_count=session_quality_n,
                 short_term_sufficiency=short_sufficiency,
                 medium_term_utility=round(mean(medium_vals), 3) if medium_vals else None,
                 medium_term_sample_count=len(medium_vals),
