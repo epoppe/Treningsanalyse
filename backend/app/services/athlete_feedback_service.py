@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func
 
 from sqlalchemy.orm import Session
 
@@ -31,6 +33,14 @@ def feedback_scales() -> Dict[str, Any]:
         "legs": sorted(VALID_LEGS),
         "quick_feel": list(QUICK_FEEL),
     }
+
+
+def feedback_on_or_before(recorded_at: Optional[datetime], cutoff: date) -> bool:
+    """True when the row was recorded on cutoff or earlier. Missing time stays out."""
+    if recorded_at is None:
+        return False
+    recorded_day = recorded_at.date() if isinstance(recorded_at, datetime) else recorded_at
+    return recorded_day <= cutoff
 
 
 def _in_range(name: str, value: Optional[int], low: int, high: int) -> None:
@@ -101,7 +111,11 @@ class AthleteFeedbackService:
         notes: Optional[str] = None,
         commit: bool = True,
     ) -> Dict[str, Any]:
-        """Replace the latest feedback for an activity. Ordinary edits do not insert another row."""
+        """Replace the latest feedback for an activity.
+
+        Ordinary edits do not insert another row and do not move recorded_at.
+        The original timestamp is the moment the feedback became available.
+        """
         self._validate(
             rpe=rpe,
             session_feel=session_feel,
@@ -132,7 +146,6 @@ class AthleteFeedbackService:
         row.pain = pain
         row.motivation = motivation
         row.notes = notes
-        row.recorded_at = datetime.now(timezone.utc)
         finalize_write(self.db, commit=commit)
         if commit:
             self.db.refresh(row)
@@ -146,6 +159,17 @@ class AthleteFeedbackService:
             .all()
         )
         return [self._to_dict(r) for r in rows]
+
+    def on_or_before(self, day: date, *, limit: int = 5) -> List[Dict[str, Any]]:
+        """Latest feedback whose recorded day is on or before `day`."""
+        rows = (
+            self.db.query(AthleteFeedback)
+            .filter(func.date(AthleteFeedback.recorded_at) <= day.isoformat())
+            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+            .limit(limit)
+            .all()
+        )
+        return [self._to_dict(row) for row in rows]
 
     @staticmethod
     def _to_dict(row: AthleteFeedback) -> Dict[str, Any]:

@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
+from .athlete_feedback_service import feedback_on_or_before
+from .outcome_maturity import SHORT_TERM_LAG_DAYS
 from .personalization_evidence_policy import PersonalizationEvidencePolicy
 from .ppap_metrics_service import PpapMetricsService
 from .evidence_hierarchy import EvidenceHierarchy
@@ -191,12 +193,14 @@ class RecoveryCostService:
         """Observed lag until HRV/RHR markers improve, with feedback/dose context."""
         feedback = None
         if activity is not None:
-            feedback = (
+            cutoff = act_day + timedelta(days=SHORT_TERM_LAG_DAYS)
+            rows = (
                 self.db.query(AthleteFeedback)
                 .filter(AthleteFeedback.activity_id == activity.activity_id)
-                .order_by(AthleteFeedback.recorded_at.desc())
-                .first()
+                .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+                .all()
             )
+            feedback = next((item for item in rows if feedback_on_or_before(item.recorded_at, cutoff)), None)
 
         # Session dose from prescription when available
         dose = None

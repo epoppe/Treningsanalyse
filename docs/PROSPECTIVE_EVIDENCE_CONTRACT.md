@@ -120,6 +120,13 @@ truth, and it does not by itself define effectiveness. Asking for it stays on th
 existing low-friction rule in `FeedbackValueService` (do not require feedback after
 every workout).
 
+A prospective observation includes feedback only when `recorded_at` is on or
+before `min(today, as_of + SHORT_TERM_LAG_DAYS)`. A later row does not replace
+an in-window row, and feedback that exists only after the cutoff stays missing.
+Edits update the latest row and keep the original `recorded_at`. The same cutoff
+applies when feedback raises an observed recovery estimate. Deload on a date
+uses feedback recorded on or before that date.
+
 ## Sufficiency
 
 Prospective denominators use `SampleSufficiencyPolicy` (`assess` / `assess_weighted`).

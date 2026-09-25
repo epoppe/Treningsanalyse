@@ -317,7 +317,7 @@ class CoachingOrchestrator:
             .order_by(RecommendationExecution.linked_at.desc())
             .first()
         )
-        recent_feedback = AthleteFeedbackService(self.db).recent(limit=1)
+        recent_feedback = AthleteFeedbackService(self.db).on_or_before(day, limit=1)
 
         brief = {
             "status": "ok",

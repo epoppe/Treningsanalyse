@@ -16,9 +16,11 @@ from sqlalchemy.orm import Session, joinedload
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
 from ..utils.activity_filters import is_running_activity
+from .athlete_feedback_service import feedback_on_or_before
 from .outcome_maturity import (
     EVALUATED,
     PENDING,
+    SHORT_TERM_LAG_DAYS,
     execution_maturity,
 )
 from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
@@ -246,7 +248,7 @@ class CanonicalProspectiveObservationService:
             observation_status = execution_maturity(as_of, today, has_outcome=has_execution_outcome)
             exec_maturity = observation_status
 
-        feedback = self._feedback_for_activity(activity_id)
+        feedback = self._feedback_for_activity(activity_id, as_of=as_of, today=today)
         return {
             "recommendation_id": tip.id,
             "as_of_date": as_of.isoformat(),
@@ -330,20 +332,34 @@ class CanonicalProspectiveObservationService:
             )
         return None
 
-    def _feedback_for_activity(self, activity_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _feedback_for_activity(
+        self,
+        activity_id: Optional[str],
+        *,
+        as_of: date,
+        today: date,
+    ) -> Optional[Dict[str, Any]]:
+        """Latest feedback that existed by the short-term cutoff.
+
+        Feedback recorded after min(today, as_of + SHORT_TERM_LAG_DAYS) is not
+        part of this observation. A missing row stays missing.
+        """
         if not activity_id:
             return None
-        row = (
+        cutoff = min(today, as_of + timedelta(days=SHORT_TERM_LAG_DAYS))
+        rows = (
             self.db.query(AthleteFeedback)
             .filter(AthleteFeedback.activity_id == str(activity_id))
-            .order_by(AthleteFeedback.recorded_at.desc())
-            .first()
+            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+            .all()
         )
+        row = next((item for item in rows if feedback_on_or_before(item.recorded_at, cutoff)), None)
         if row is None:
             return None
         return {
             "id": row.id,
             "activity_id": row.activity_id,
+            "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
             "rpe": row.rpe,
             "pain": row.pain,
             "session_feel": row.session_feel,

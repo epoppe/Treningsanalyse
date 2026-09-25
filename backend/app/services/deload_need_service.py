@@ -37,7 +37,7 @@ class DeloadNeedService:
         rhr = self._ppap.get_rhr_delta_bpm(day)
         tsb = self._ppap.get_tsb(day)
         flags = load.get("flags") or []
-        recent_fb = self._feedback.recent(limit=5)
+        recent_fb = self._feedback.on_or_before(day, limit=5)
         high_rpe = sum(1 for f in recent_fb if (f.get("rpe") or 0) >= 8)
         evidence = []
         score = 0
