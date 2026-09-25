@@ -244,7 +244,15 @@ class RecommendationDistributionMonitor:
             if p == 0 and c == 0:
                 continue
             ratio = None if p == 0 else round(c / p, 2)
-            shifts[t] = {"current": c, "prior": p, "ratio": ratio, "flag": ratio is not None and ratio >= 2.0}
+            # from_zero is visible. It is not `flag`: a new type must not
+            # turn an outcome improvement into possible_regression.
+            shifts[t] = {
+                "current": c,
+                "prior": p,
+                "ratio": ratio,
+                "from_zero": p == 0 and c > 0,
+                "flag": ratio is not None and ratio >= 2.0,
+            }
 
         return {
             "sample_count": sum(current.values()),
@@ -252,7 +260,12 @@ class RecommendationDistributionMonitor:
             "prior": prior,
             "shifts": shifts,
             "unexpected_shift": any(v.get("flag") for v in shifts.values()),
-            "note": "Monitoring only — not automatic rollback.",
+            "types_from_zero": [name for name, row in shifts.items() if row.get("from_zero")],
+            "note": (
+                "Monitoring only — not automatic rollback. "
+                "from_zero means the type was absent in the prior window. "
+                "That is not an unexpected shift and does not block an outcome-based improvement."
+            ),
         }
 
     @staticmethod

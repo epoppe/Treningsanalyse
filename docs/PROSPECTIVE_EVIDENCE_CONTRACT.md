@@ -96,7 +96,21 @@ expected calibration error, coverage, abstention rate, and status.
 `ModelChangeImpactService` may say `consistent_with_improvement` only when both
 windows have enough mature favorable-outcome evidence and the later rate is
 materially higher. A change in workout mix alone is `no_material_change` or
-`possible_regression`, never improvement.
+`possible_regression`, never improvement. A type that is new in the later
+window is reported as `from_zero`. That marker is not an unexpected shift, so
+it does not relabel a real outcome improvement as a regression.
+
+The monthly review pairs each mean with its own sample count, including
+short-term utility, session quality included in that utility, medium-term
+change, observed recovery, and subjective feedback. `sparse_data` stays true
+until short-term effectiveness reaches `SUPPORTED`. Recommendation count alone
+does not clear that gate. `Shadow ELIGIBLE` in the review is not a promotion.
+
+A recorded recommendation whose execution can already be judged stays
+`outcome=pending` until the short-term window closes. The per-recommendation
+label uses the same session-quality rule: a score with no measured components
+is missing, so the quality service's default prior cannot become
+`favorable_response`.
 
 ## Subjective feedback
 

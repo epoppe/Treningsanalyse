@@ -18,9 +18,11 @@ from app.services.canonical_prospective_observation import CanonicalProspectiveO
 from app.services.coaching_operational_monitors import (
     DecisionConfidenceMonitor,
     ModelChangeImpactService,
+    RecommendationDistributionMonitor,
     impact_verdict,
     summarize_calibration,
 )
+from app.services.monthly_coaching_review_service import generate_monthly_coaching_review
 from app.services.prospective_evidence_report_service import ProspectiveEvidenceReportService
 from app.services.prospective_outcome_lookup import ProspectiveOutcomeLookup
 from app.services.recommendation_outcome_service import RecommendationOutcomeService
@@ -402,6 +404,107 @@ class CanonicalObservationTests(unittest.TestCase):
         self.assertEqual(report["recommendations"]["skipped"], 0)
         self.assertIsNone(report["outcomes"]["short_term_utility"])
         self.assertEqual(report["sample_counts"]["session_quality_outcomes"], 0)
+
+    def test_day_after_execution_keeps_outcome_pending(self):
+        day = date(2026, 6, 10)
+        record = _rec(as_of_date=day, config_hash="next-day")
+        self.db.add(record)
+        self.db.flush()
+        self.db.add(
+            RecommendationExecution(
+                recommendation_id=record.id,
+                activity_id=None,
+                execution_status="followed",
+                planned_type="easy_run",
+                actual_type="easy_run",
+                overall_adherence=1.0,
+                linked_at=datetime(2026, 6, 10, 18, tzinfo=timezone.utc),
+            )
+        )
+        self.db.commit()
+        outcome = RecommendationOutcomeService(self.db, None).evaluate_recorded_recommendation(
+            record.id,
+            today=day + timedelta(days=1),
+        )
+        self.assertEqual(outcome["execution_status"], "followed")
+        self.assertEqual(outcome["short_term_response"]["maturity_status"], "pending")
+        self.assertEqual(outcome["outcome"], "pending")
+        self.assertIsNone(outcome["short_term_response"]["session_quality"])
+
+    def test_empty_quality_prior_is_not_favorable(self):
+        day = date(2026, 1, 8)
+        record = _rec(as_of_date=day, config_hash="prior")
+        self.db.add(record)
+        self.db.flush()
+        self.db.add(
+            Activity(
+                activity_id="quality-prior",
+                activity_name="Easy",
+                start_time=datetime(2026, 1, 8, 8, tzinfo=timezone.utc),
+                duration=3000,
+                distance=8000,
+                activity_type_id=self.running.id,
+            )
+        )
+        self.db.add(
+            RecommendationExecution(
+                recommendation_id=record.id,
+                activity_id="quality-prior",
+                execution_status="followed",
+                planned_type="easy_run",
+                actual_type="easy_run",
+                overall_adherence=1.0,
+                linked_at=datetime(2026, 1, 8, 9, tzinfo=timezone.utc),
+            )
+        )
+        self.db.commit()
+        service = RecommendationOutcomeService(self.db, None)
+        with patch.object(
+            service._utility,
+            "session_quality_score",
+            return_value=None,
+        ):
+            empty = service.evaluate_recorded_recommendation(record.id, today=date(2026, 3, 1))
+        self.assertIsNone(empty["short_term_response"]["session_quality"])
+        self.assertNotEqual(empty["outcome"], "favorable_response")
+
+        quiet_medium = {
+            "fitness_change": None,
+            "threshold_change": None,
+            "maturity_status": "incomplete_data",
+        }
+        with patch.object(service._utility, "session_quality_score", return_value=80.0):
+            with patch.object(service, "_medium_term_response", return_value=quiet_medium):
+                measured = service.evaluate_recorded_recommendation(record.id, today=date(2026, 3, 1))
+        self.assertEqual(measured["short_term_response"]["session_quality"], 80.0)
+        self.assertEqual(measured["outcome"], "favorable_response")
+
+    def test_monthly_review_names_each_sample_and_stays_sparse(self):
+        review = generate_monthly_coaching_review(self.db, end=date(2026, 4, 1))
+        recovery = review["answers"]["4_recovery_behaviour"]
+        self.assertIn("short_term_sample_count", recovery)
+        self.assertIn("session_quality_sample_count", recovery)
+        self.assertIn("pending_short_term", recovery)
+        self.assertIn("medium_term_sample_count", recovery)
+        self.assertIn("subjective_feedback_sample_count", recovery)
+        self.assertTrue(review["sparse_data"])
+        joined = " ".join(review["answers"]["10_what_should_not_change"])
+        self.assertIn("SUPPORTED", joined)
+        self.assertIn("do not promote", joined)
+
+    def test_new_type_is_visible_without_forcing_a_shift(self):
+        start = date(2026, 2, 1)
+        end = date(2026, 2, 10)
+        self.db.add(_rec(as_of_date=date(2026, 2, 1), config_hash="t1", recommended_workout_type="threshold"))
+        self.db.add(_rec(as_of_date=date(2026, 2, 2), config_hash="t2", recommended_workout_type="threshold"))
+        self.db.add(_rec(as_of_date=date(2026, 2, 3), config_hash="v1", recommended_workout_type="vo2_intervals"))
+        self.db.commit()
+        report = RecommendationDistributionMonitor().assess(self.db, start=start, end=end)
+        self.assertTrue(report["shifts"]["threshold"]["from_zero"])
+        self.assertFalse(report["shifts"]["threshold"]["flag"])
+        self.assertIn("threshold", report["types_from_zero"])
+        self.assertIn("vo2_intervals", report["types_from_zero"])
+        self.assertFalse(report["unexpected_shift"])
 
 
 class SessionQualityUtilityTests(unittest.TestCase):

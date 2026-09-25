@@ -17,8 +17,8 @@ from .next_best_workout_service import NextBestWorkoutService
 from .outcome_maturity import PENDING
 from .ppap_metrics_service import PpapMetricsService
 from .recommendation_ledger_service import RecommendationLedgerService
+from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
 from .session_classifier_service import SessionClassifierService
-from .session_quality_service import SessionQualityService
 
 WORKOUT_TO_SESSION = {
     "rest": set(),
@@ -44,7 +44,7 @@ class RecommendationOutcomeService:
         self._ppap = PpapMetricsService(db, storage)
         self._next = NextBestWorkoutService(db, storage, self._ppap)
         self._classifier = SessionClassifierService(db, storage)
-        self._quality = SessionQualityService(db, storage, self._ppap)
+        self._utility = RecommendationUtilityEvaluator(db, storage, self._ppap)
         self._ledger = RecommendationLedgerService(db)
         self._canonical = CanonicalProspectiveObservationService(db)
 
@@ -74,7 +74,10 @@ class RecommendationOutcomeService:
             )
             actual_type = classification.get("session_type")
             actual_load = next_activity.training_stress_score or next_activity.epoc
-            session_quality = self._quality.evaluate(next_activity).get("quality_score")
+            session_quality = self._utility.session_quality_score(
+                next_activity.activity_id,
+                session_type=actual_type,
+            )
 
         adherence = self._adherence(recommended, actual_type)
         short_term = self._short_term_response(recommendation_date, session_quality)
@@ -146,12 +149,14 @@ class RecommendationOutcomeService:
             if actual_load is None:
                 load = activity.training_stress_score or activity.epoc
                 actual_load = float(load) if load is not None else None
-            session_quality = self._quality.evaluate(activity, session_type=actual_type).get("quality_score")
-        elif activity is not None and observation.get("match_source") == "explicit_execution":
-            if actual_load is None:
-                load = activity.training_stress_score or activity.epoc
-                actual_load = float(load) if load is not None else None
-            session_quality = self._quality.evaluate(activity, session_type=actual_type).get("quality_score")
+        elif activity is not None and observation.get("match_source") == "explicit_execution" and actual_load is None:
+            load = activity.training_stress_score or activity.epoc
+            actual_load = float(load) if load is not None else None
+        if activity is not None and observation.get("match_source") in {"legacy_heuristic", "explicit_execution"}:
+            session_quality = self._utility.session_quality_score(
+                observation.get("activity_id"),
+                session_type=actual_type,
+            )
 
         execution_pending = observation.get("execution_status") == "pending"
         adherence = None if execution_pending else self._adherence(recommended, actual_type)
@@ -167,7 +172,12 @@ class RecommendationOutcomeService:
         else:
             short_term = self._short_term_response(as_of, session_quality, today=today)
             medium_term = self._medium_term_response(as_of, today=today)
-            outcome = self._outcome_label(adherence, short_term, medium_term)
+            # Execution can close a day before HRV/RHR. That day is still pending
+            # physiology, not an inconclusive response.
+            if short_term.get("maturity_status") == PENDING:
+                outcome = "pending"
+            else:
+                outcome = self._outcome_label(adherence, short_term, medium_term)
         return {
             "evaluation_kind": "prospective",
             "record_id": observation["recommendation_id"],

@@ -35,8 +35,13 @@ def generate_monthly_coaching_review(
     start = end - timedelta(days=days)
     ppap = PpapMetricsService(db, None)
     prospective = ProspectiveEvidenceReportService(db).report(start=start, end=end)
+    outcomes = prospective["outcomes"]
     n = prospective["recommendations"]["sample_count"]
-    sparse = n < MONTHLY_REVIEW_SPARSE_N
+    short_sufficiency = outcomes.get("short_term_sufficiency") or {}
+    # Recommendation count is not physiological evidence. Model changes wait
+    # until short-term effectiveness may override defaults (SUPPORTED/STRONG).
+    effectiveness_supported = bool(short_sufficiency.get("may_override_defaults"))
+    sparse = n < MONTHLY_REVIEW_SPARSE_N or not effectiveness_supported
 
     health = CoachingHealthService(db, ppap).report(end)
     integrity = CoachingIntegrityService(db).check()
@@ -56,9 +61,17 @@ def generate_monthly_coaching_review(
         "Do not add a new predictive coaching model without ProspectiveEvidenceReport deficiency.",
         "Do not treat sparse samples as proof of stability or improvement.",
     ]
-    if sparse:
+    if n < MONTHLY_REVIEW_SPARSE_N:
         do_not_change.append("Sample too sparse for model changes — collect more prospective data.")
-    if shadow["status"] != "ELIGIBLE":
+    if not effectiveness_supported:
+        do_not_change.append(
+            "Short-term effectiveness is below SUPPORTED — collect mature prospective outcomes before any model change."
+        )
+    if shadow["status"] == "ELIGIBLE":
+        do_not_change.append(
+            "Shadow ELIGIBLE is not a promotion. Promotion still requires a validation run."
+        )
+    else:
         do_not_change.append("Shadow model is not ELIGIBLE — do not promote.")
     if conf["status"] in {"overconfident", "insufficient_data", "INSUFFICIENT_DATA"}:
         do_not_change.append("Confidence calibration not proven — do not tune confidence blindly.")
@@ -67,7 +80,12 @@ def generate_monthly_coaching_review(
         "1_training_completed": {
             "executed": prospective["recommendations"].get("executed"),
             "modified": prospective["recommendations"].get("modified"),
+            "replaced": prospective["recommendations"].get("replaced"),
+            "skipped": prospective["recommendations"].get("skipped"),
+            "pending": prospective["recommendations"].get("pending"),
             "sample_count": n,
+            "execution_sample_count": prospective["sample_counts"]["execution_outcomes"],
+            "note": "sample_count is canonical recommendations. execution_sample_count excludes pending.",
         },
         "2_what_was_recommended": {
             "by_type": prospective["recommendations"].get("by_type"),
@@ -86,14 +104,22 @@ def generate_monthly_coaching_review(
             "note": "Feasibility/adherence is separate from physiological effectiveness.",
         },
         "4_recovery_behaviour": {
-            "recovery_cost": prospective["outcomes"].get("observed_recovery_response"),
-            "expected_recovery_cost": prospective["outcomes"].get("expected_recovery_cost"),
-            "sample_count": prospective["outcomes"].get("observed_recovery_sample_count"),
-            "pending_count": prospective["outcomes"].get("pending_count"),
-            "medium_term_sample_count": prospective["outcomes"].get("medium_term_sample_count"),
-            "subjective_feedback_sample_count": prospective["outcomes"].get(
-                "subjective_feedback_sample_count"
-            ),
+            "short_term_utility": outcomes.get("short_term_utility"),
+            "short_term_sample_count": outcomes.get("short_term_sample_count"),
+            "short_term_sufficiency": short_sufficiency,
+            "session_quality_sample_count": outcomes.get("session_quality_sample_count"),
+            "pending_short_term": outcomes.get("pending_count"),
+            "medium_term_utility": outcomes.get("medium_term_utility"),
+            "medium_term_sample_count": outcomes.get("medium_term_sample_count"),
+            "pending_medium_term": outcomes.get("pending_medium_term"),
+            "recovery_cost": outcomes.get("observed_recovery_response"),
+            "expected_recovery_cost": outcomes.get("expected_recovery_cost"),
+            "sample_count": outcomes.get("observed_recovery_sample_count"),
+            "observed_recovery_sample_count": outcomes.get("observed_recovery_sample_count"),
+            "expected_recovery_sample_count": outcomes.get("expected_recovery_sample_count"),
+            "pending_count": outcomes.get("pending_count"),
+            "subjective_feedback_sample_count": outcomes.get("subjective_feedback_sample_count"),
+            "note": "Each mean is paired with the sample count that supports it. Pending rows stay outside those counts.",
         },
         "5_fitness_moving": {
             "ctl": ctl,
@@ -110,6 +136,7 @@ def generate_monthly_coaching_review(
             "health_status": health.get("status"),
             "confidence_status": conf.get("status"),
             "unexpected_distribution_shift": dist.get("unexpected_shift"),
+            "types_from_zero": dist.get("types_from_zero"),
             "sample_count": conf["sample_count"],
         },
         "9_shadow_promising": {
