@@ -7,8 +7,9 @@ fork that semantics and does not add a predictive model.
 
 ## Purpose
 
-`GET /api/dashboard/coaching-evidence` shows prospective observational
-evidence for a chosen analysis window (30, 90, 180, or 365 days).
+`GET /api/dashboard/coaching-evidence` returns `schema: coaching-evidence-1`
+and shows prospective observational evidence for a chosen analysis window
+(30, 90, 180, or 365 days).
 
 It is not causal proof. The window does not change physiological models,
 calibration parameters, the plan, or the ledger. The handler is read-only:
@@ -34,8 +35,15 @@ prompt.
 
 Pending, incomplete, evaluated, and insufficient evidence are separate
 statuses. Pending is an open window. Incomplete is a closed window without
-the required points. Insufficient evidence means some outcomes exist, but
-N or spread is too low.
+the required points and can overlap an evaluated execution. The snapshot
+sets `counts_overlap` and does not present those counters as one exclusive
+sum. Insufficient evidence means some outcomes exist, but N or spread is too low.
+
+`explicit_execution_coverage` reports the explicit-link share for the last
+30 days, the last 90 days, and the selected window. The window figure is not
+all-time history. `EXPLICIT_EXECUTION_COVERAGE_LOW` is an observability
+warning. It does not change evidence weights. Legacy matching remains for
+older rows that have no `RecommendationExecution`.
 
 ## Evidence hierarchy
 

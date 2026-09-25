@@ -140,6 +140,9 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
       missing_sources: [{ source: "hrv", reason: "no rows" }],
       coverage_shifts: [],
       observations: { pending: 1, evaluated: 1, incomplete: 0, excluded: 2 },
+      counts_overlap: true,
+      observation_note_nb:
+        "Ufullstendig er et lukket korttidsvindu uten markører og kan overlappe en vurdert utførelse.",
       feedback_coverage: 0.5,
       feedback_by_group: {
         easy: { recommendations: 2, with_feedback: 1, coverage: 0.5 },
@@ -160,6 +163,7 @@ describe("CoachingEvidenceView", () => {
     expect(screen.getByText(/For lite prospektiv evidens til å konkludere/)).toBeInTheDocument();
     expect(screen.getByText(/Siste sync ukjent/)).toBeInTheDocument();
     expect(screen.getByText(/utelatt 2/)).toBeInTheDocument();
+    expect(screen.getByText(/kan overlappe en vurdert utførelse/)).toBeInTheDocument();
     expect(screen.getByText(/Manglende kilder: hrv/)).toBeInTheDocument();
     expect(screen.getByText(/Feedback rolig 50 %/)).toBeInTheDocument();
     expect(screen.getByText(/Easy aerobic har 34/)).toBeInTheDocument();

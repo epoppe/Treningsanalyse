@@ -27,6 +27,10 @@ that result. They do not re-implement supersede-chain selection.
 - A broken pointer or a cycle does not loop and does not disappear. `ledger_quality`
   is `incomplete_supersede_graph`.
 
+Each observation dict carries `schema: canonical-prospective-observation-1`.
+`GET /api/dashboard/recommendation-history` uses the same schema string.
+A breaking change to this shape or to chain semantics bumps that value.
+
 Returned metadata includes `recommendation_id`, `as_of_date`, `canonical`,
 `supersede_chain_length`, `execution_id`, `activity_id`, `observation_status`,
 and `maturity_status`.

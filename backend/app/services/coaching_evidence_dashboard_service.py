@@ -33,6 +33,7 @@ from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
 from .sample_sufficiency_policy import SampleSufficiencyPolicy
 
 ALLOWED_WINDOWS = (30, 90, 180, 365)
+SCHEMA = "coaching-evidence-1"
 _OBSERVATION_CAP = 12
 
 _LEVEL_LABEL = {
@@ -243,7 +244,7 @@ class CoachingEvidenceDashboardService:
         overview = self._overview(observations, utilities, short_sufficiency)
         evidence_quality = self._evidence_quality(observations, utilities, short_sufficiency)
         feasibility = self._feasibility(observations, as_of=end)
-        active = CoachingModelRegistry(self.db).get_active("ranker")
+        active = CoachingModelRegistry(self.db).get_active("ranker") or {}
         known, unknown = self._insights(by_type, confidence, overview)
         snapshot = DataQualitySnapshotService(self.db).from_observations(
             observations=observations,
@@ -266,6 +267,7 @@ class CoachingEvidenceDashboardService:
             confidence_status=confidence.get("status"),
         )
         return {
+            "schema": SCHEMA,
             "status": "ok",
             "read_only": True,
             "evaluation_kind": "observational_outcome",

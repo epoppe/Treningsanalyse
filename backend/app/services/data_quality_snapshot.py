@@ -8,8 +8,9 @@ not score outcomes again and does not invent a third coverage formula.
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, TypedDict
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,9 @@ from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
 
 SCHEMA = "data-quality-snapshot-1"
 COVERAGE_SHIFT_THRESHOLD = 0.25
+EXPLICIT_COVERAGE_MIN_CLOSED = 5
+EXPLICIT_COVERAGE_LOW_SHARE = 0.5
+EXPLICIT_EXECUTION_COVERAGE_LOW = "EXPLICIT_EXECUTION_COVERAGE_LOW"
 _FEEDBACK_GROUPS = {
     "easy_run": "easy",
     "recovery_run": "easy",
@@ -32,6 +36,12 @@ _FEEDBACK_GROUPS = {
     "race": "race",
 }
 _GROUP_ORDER = ("easy", "long", "threshold", "intervals", "race")
+
+
+class _FeedbackGroup(TypedDict):
+    recommendations: int
+    with_feedback: int
+    coverage: Optional[float]
 
 
 class DataQualitySnapshotService:
@@ -111,13 +121,26 @@ class DataQualitySnapshotService:
             "coverage_shifts": _coverage_shifts(recent, prior),
             "observations": {**counts, "excluded": excluded["total"], "excluded_detail": excluded},
             "execution_matching": matching,
+            "explicit_execution_coverage": explicit_execution_coverage(
+                observations,
+                end=end,
+                window_days=window_days,
+            ),
             "feedback_coverage": feedback["coverage"],
             "feedback_by_group": feedback["by_group"],
+            "counts_overlap": True,
             "observation_note": (
-                "pending and evaluated describe execution maturity on canonical observations. "
-                "incomplete is a closed short-term window without markers and can overlap an "
-                "evaluated execution. excluded rows are shadow, superseded, or same-day duplicates "
-                "and are not part of the canonical count."
+                "pending and evaluated describe execution maturity on canonical observations "
+                "and do not overlap each other. incomplete is a closed short-term window without "
+                "markers and can overlap an evaluated execution. excluded rows are shadow, "
+                "superseded, or same-day duplicates and are not part of the canonical count. "
+                "These counts are not a mutually exclusive sum."
+            ),
+            "observation_note_nb": (
+                "Venter og vurdert deler utførelsesmodenhet og overlapper ikke hverandre. "
+                "Ufullstendig er et lukket korttidsvindu uten markører og kan overlappe en vurdert utførelse. "
+                "Utelatt er skygge, erstattet eller samme-dag-duplikat og inngår ikke i det kanoniske antallet. "
+                "Tallene er ikke en gjensidig eksklusiv sum."
             ),
             "sources": [
                 "DataLatencyMonitor",
@@ -185,8 +208,95 @@ def _matching(observations: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def explicit_execution_coverage(
+    observations: List[Dict[str, Any]],
+    *,
+    end: date,
+    window_days: int,
+) -> Dict[str, Any]:
+    """Share of explicit RecommendationExecution links inside the selected window.
+
+    Historical coverage is the selected window, not the whole ledger. Evidence
+    weights stay unchanged. A low share on closed recent observations is an
+    observability warning.
+    """
+
+    def slice_days(days: int) -> List[Dict[str, Any]]:
+        lower = (end - timedelta(days=days)).isoformat()
+        upper = end.isoformat()
+        return [
+            row
+            for row in observations
+            if lower <= str(row.get("as_of_date") or "") <= upper
+        ]
+
+    def summarize(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+        explicit = 0
+        heuristic = 0
+        closed_without = 0
+        reasons: Dict[str, int] = defaultdict(int)
+        for row in rows:
+            source = row.get("match_source")
+            status = str(row.get("execution_status") or "").lower()
+            if source == "explicit_execution":
+                explicit += 1
+            elif source == "legacy_heuristic":
+                heuristic += 1
+            if status != "pending" and source != "explicit_execution":
+                closed_without += 1
+                reasons[str(row.get("match_reason") or "unknown")] += 1
+        matched = explicit + heuristic
+        return {
+            "observations": len(rows),
+            "explicit": explicit,
+            "heuristic": heuristic,
+            "explicit_share": round(explicit / matched, 3) if matched else None,
+            "closed_without_explicit": closed_without,
+            "missing_reasons": [
+                {"reason": reason, "count": count}
+                for reason, count in sorted(reasons.items(), key=lambda item: (-item[1], item[0]))[:5]
+            ],
+        }
+
+    recent_days = min(30, window_days)
+    quarter_days = min(90, window_days)
+    recent = summarize(slice_days(recent_days))
+    closed_n = recent["explicit"] + recent["closed_without_explicit"]
+    share = recent["explicit_share"]
+    if closed_n < EXPLICIT_COVERAGE_MIN_CLOSED:
+        status = "INSUFFICIENT_DATA"
+    elif share is None or share < EXPLICIT_COVERAGE_LOW_SHARE:
+        status = EXPLICIT_EXECUTION_COVERAGE_LOW
+    else:
+        status = "OK"
+    return {
+        "status": status,
+        "threshold": {
+            "min_closed_observations": EXPLICIT_COVERAGE_MIN_CLOSED,
+            "low_explicit_share": EXPLICIT_COVERAGE_LOW_SHARE,
+        },
+        "last_30_days": {**recent, "complete": window_days >= 30, "days": recent_days},
+        "last_90_days": {
+            **summarize(slice_days(quarter_days)),
+            "complete": window_days >= 90,
+            "days": quarter_days,
+        },
+        "historical": {
+            **summarize(observations),
+            "scope": "selected_window",
+            "note": "Dekningen gjelder det valgte vinduet, ikke hele historikken.",
+        },
+        "note": (
+            "A closed observation without RecommendationExecution is an observability gap. "
+            "Legacy matching still applies to older history. Evidence weights are unchanged."
+        ),
+    }
+
+
 def _feedback(observations: List[Dict[str, Any]]) -> Dict[str, Any]:
-    groups = {name: {"recommendations": 0, "with_feedback": 0, "coverage": None} for name in _GROUP_ORDER}
+    groups: Dict[str, _FeedbackGroup] = {
+        name: {"recommendations": 0, "with_feedback": 0, "coverage": None} for name in _GROUP_ORDER
+    }
     with_feedback = 0
     for row in observations:
         if row.get("subjective_feedback"):

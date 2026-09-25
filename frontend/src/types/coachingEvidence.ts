@@ -63,6 +63,7 @@ export interface CoachingInsight {
 }
 
 export interface CoachingEvidencePayload {
+  schema?: string;
   status: string;
   read_only: boolean;
   period: { start: string; end: string; window_days: number; allowed_windows: number[] };
@@ -141,6 +142,14 @@ export interface CoachingEvidencePayload {
 
 export interface DataQualitySnapshot {
   schema: string;
+  counts_overlap?: boolean;
+  observation_note?: string;
+  observation_note_nb?: string;
+  explicit_execution_coverage?: {
+    status: string;
+    last_30_days?: { explicit_share: number | null; complete?: boolean };
+    historical?: { scope?: string; note?: string };
+  };
   freshness: {
     last_sync_at: string | null;
     last_activity_at: string | null;
