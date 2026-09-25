@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database.models import Base, HRV
 from app.database.models.activity import Activity, ActivityType
-from app.mcp import training_tools
+from app.mcp.tools import shared as mcp_shared
 from app.services.mcp_derived_metrics_service import McpDerivedMetricsService
 from app.services.ppap_metrics_service import PpapMetricsService
 from app.storage import DataStorage
@@ -83,8 +83,8 @@ class PpapMetricsTests(unittest.TestCase):
         self.assertIn("running.economy_hr", keys)
 
     def test_mcp_timeseries_fitness_ctl(self):
-        with patch.object(training_tools, "training_context", self._context):
-            series = training_tools.query_metric_timeseries(
+        with patch.object(mcp_shared, "training_context", self._context):
+            series = mcp_shared.query_metric_timeseries(
                 "fitness.ctl",
                 start_date="2026-05-20",
                 end_date="2026-05-26",
@@ -100,8 +100,8 @@ class PpapMetricsTests(unittest.TestCase):
         self.assertIn("readiness_score", payload)
 
     def test_metric_catalog_schema_version(self):
-        with patch.object(training_tools, "training_context", self._context):
-            catalog = training_tools.metric_catalog()
+        with patch.object(mcp_shared, "training_context", self._context):
+            catalog = mcp_shared.metric_catalog()
         self.assertEqual(catalog["schema_version"], "ppap-3")
         keys = {metric["key"] for metric in catalog["metrics"]}
         self.assertIn("fitness.ctl", keys)
