@@ -11,12 +11,14 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
 from ..utils.activity_filters import is_running_activity
 from .athlete_feedback_service import feedback_on_or_before
+from .canonical_observation_contract import OBSERVATION_SCHEMA as SCHEMA
 from .outcome_maturity import (
     EVALUATED,
     PENDING,
@@ -32,6 +34,8 @@ EXPLICIT_EVIDENCE_WEIGHT = 1.0
 LEGACY_EVIDENCE_WEIGHT = 0.35
 
 _EXECUTION_KNOWN = {"followed", "modified", "replaced", "skipped", "unplanned", "missed", "completed", "partial"}
+_IN_CHUNK = 400
+_CLOSURE_ROUNDS = 32
 
 
 def _aware(value: Optional[datetime]) -> datetime:
@@ -61,14 +65,12 @@ class CanonicalProspectiveObservationService:
         include_shadow: bool = False,
     ) -> List[Dict[str, Any]]:
         today = today or date.today()
-        query = self.db.query(RecommendationRecord)
-        if not include_shadow:
-            query = query.filter(RecommendationRecord.is_shadow.is_(False))
-        # Keep the full non-shadow table here. An as_of_date filter in SQL drops
-        # supersede partners outside the window and can publish a predecessor as
-        # its own observation. The window is applied after the chain is built.
-        records = query.all()
-        observations = self._canonicalize(records, today=today)
+        # An as_of_date filter that drops supersede partners can publish a
+        # predecessor as its own observation. Windowed loads therefore seed on
+        # the window and walk superseded_by_id until every touched chain is
+        # closed. The window is applied after the chain tip is chosen.
+        records = self._load_records(start=start, end=end, include_shadow=include_shadow)
+        observations = self._canonicalize(records, today=today, start=start, end=end)
         if start is not None:
             observations = [row for row in observations if row["as_of_date"] >= start.isoformat()]
         if end is not None:
@@ -97,6 +99,7 @@ class CanonicalProspectiveObservationService:
             return None
         if requested.is_shadow:
             return {
+                "schema": SCHEMA,
                 "recommendation_id": requested.id,
                 "requested_record_id": record_id,
                 "as_of_date": requested.as_of_date.isoformat(),
@@ -106,7 +109,8 @@ class CanonicalProspectiveObservationService:
                 "observation_status": "excluded",
                 "ledger_quality": "shadow_excluded_from_production",
             }
-        observations = self.resolve(today=today, include_shadow=False)
+        records, tip_day = self._load_chain_for_resolve_one(requested)
+        observations = self._canonicalize(records, today=today, start=tip_day, end=tip_day)
         for row in observations:
             if record_id in row["chain_member_ids"] or row["recommendation_id"] == record_id:
                 payload = dict(row)
@@ -115,16 +119,86 @@ class CanonicalProspectiveObservationService:
                 return payload
         return None
 
+    def _load_records(
+        self,
+        *,
+        start: Optional[date],
+        end: Optional[date],
+        include_shadow: bool,
+    ) -> List[RecommendationRecord]:
+        base = self.db.query(RecommendationRecord)
+        if not include_shadow:
+            base = base.filter(RecommendationRecord.is_shadow.is_(False))
+        if start is None and end is None:
+            return base.all()
+
+        seed = base
+        if start is not None:
+            seed = seed.filter(RecommendationRecord.as_of_date >= start)
+        if end is not None:
+            seed = seed.filter(RecommendationRecord.as_of_date <= end)
+        loaded: Dict[int, RecommendationRecord] = {row.id: row for row in seed.all()}
+        self._close_records(loaded, base)
+        return list(loaded.values())
+
+    def _close_records(self, loaded: Dict[int, RecommendationRecord], base) -> None:
+        """Walk superseded_by_id in both directions until the loaded set is closed."""
+        for _ in range(_CLOSURE_ROUNDS):
+            changed = False
+            missing_targets = {
+                row.superseded_by_id
+                for row in loaded.values()
+                if row.superseded_by_id and row.superseded_by_id not in loaded
+            }
+            for chunk in _chunks(missing_targets):
+                for row in base.filter(RecommendationRecord.id.in_(chunk)).all():
+                    if row.id not in loaded:
+                        loaded[row.id] = row
+                        changed = True
+            for chunk in _chunks(list(loaded)):
+                rows = base.filter(RecommendationRecord.superseded_by_id.in_(chunk)).all()
+                for row in rows:
+                    if row.id not in loaded:
+                        loaded[row.id] = row
+                        changed = True
+            if not changed:
+                break
+
+    def _load_chain_for_resolve_one(
+        self,
+        requested: RecommendationRecord,
+    ) -> tuple:
+        """Chain that contains requested, plus other tips on the canonical day.
+
+        Same-day collapse compares every tip on that as_of_date. Loading only
+        the requested chain would publish a predecessor that lost that contest.
+        Unrelated history stays unloaded.
+        """
+        base = self.db.query(RecommendationRecord).filter(RecommendationRecord.is_shadow.is_(False))
+        loaded: Dict[int, RecommendationRecord] = {requested.id: requested}
+        self._close_records(loaded, base)
+        tip, _, _ = _select_tip(list(loaded.values()))
+        tip_day = tip.as_of_date
+        for row in base.filter(RecommendationRecord.as_of_date == tip_day).all():
+            loaded.setdefault(row.id, row)
+        self._close_records(loaded, base)
+        return list(loaded.values()), tip_day
+
     def _canonicalize(
         self,
         records: Sequence[RecommendationRecord],
         *,
         today: date,
+        start: Optional[date] = None,
+        end: Optional[date] = None,
     ) -> List[Dict[str, Any]]:
         components = _components(records)
-        executions = self._executions_by_recommendation()
-        activities = self._activities_by_id()
-        feedback_index = self._feedback_index()
+        record_ids = [row.id for row in records if row.id is not None]
+        executions = self._executions_for_ids(record_ids)
+        extra_activity_ids = {row.activity_id for row in executions.values() if row.activity_id}
+        span_start, span_end = _activity_span(records, start=start, end=end)
+        activities = self._activities_for_span(span_start, span_end, extra_activity_ids)
+        feedback_index = self._feedback_for_activity_ids(activities.keys())
         tips: List[Dict[str, Any]] = []
         for members in components:
             tip, quality, chain_ids = _select_tip(members)
@@ -261,6 +335,7 @@ class CanonicalProspectiveObservationService:
             feedback_index=feedback_index,
         )
         return {
+            "schema": SCHEMA,
             "recommendation_id": tip.id,
             "as_of_date": as_of.isoformat(),
             "generated_at": tip.generated_at.isoformat() if tip.generated_at else None,
@@ -294,21 +369,44 @@ class CanonicalProspectiveObservationService:
             "subjective_feedback": feedback,
         }
 
-    def _executions_by_recommendation(self) -> Dict[int, RecommendationExecution]:
-        rows = (
-            self.db.query(RecommendationExecution)
-            .filter(RecommendationExecution.recommendation_id.isnot(None))
-            .all()
-        )
+    def _executions_for_ids(self, recommendation_ids: Sequence[int]) -> Dict[int, RecommendationExecution]:
         chosen: Dict[int, RecommendationExecution] = {}
-        for row in rows:
-            current = chosen.get(row.recommendation_id)
-            if current is None or (_aware(row.linked_at), row.id or 0) >= (_aware(current.linked_at), current.id or 0):
-                chosen[row.recommendation_id] = row
+        if not recommendation_ids:
+            return chosen
+        for chunk in _chunks(recommendation_ids):
+            rows = (
+                self.db.query(RecommendationExecution)
+                .filter(RecommendationExecution.recommendation_id.in_(chunk))
+                .all()
+            )
+            for row in rows:
+                current = chosen.get(row.recommendation_id)
+                if current is None or (_aware(row.linked_at), row.id or 0) >= (
+                    _aware(current.linked_at),
+                    current.id or 0,
+                ):
+                    chosen[row.recommendation_id] = row
         return chosen
 
-    def _activities_by_id(self) -> Dict[str, Activity]:
-        rows = self.db.query(Activity).options(joinedload(Activity.activity_type)).all()
+    def _activities_for_span(
+        self,
+        start: Optional[date],
+        end: Optional[date],
+        extra_ids: Iterable[str],
+    ) -> Dict[str, Activity]:
+        rows: List[Activity] = []
+        query = self.db.query(Activity).options(joinedload(Activity.activity_type))
+        filters = []
+        if start is not None:
+            filters.append(func.date(Activity.start_time) >= start)
+        if end is not None:
+            filters.append(func.date(Activity.start_time) <= end)
+        if filters:
+            rows.extend(query.filter(*filters).all())
+        have = {row.activity_id for row in rows}
+        missing = [activity_id for activity_id in extra_ids if activity_id and activity_id not in have]
+        for chunk in _chunks(missing):
+            rows.extend(query.filter(Activity.activity_id.in_(chunk)).all())
         return {row.activity_id: row for row in rows}
 
     def _legacy_activity(
@@ -343,15 +441,20 @@ class CanonicalProspectiveObservationService:
             )
         return None
 
-    def _feedback_index(self) -> Dict[str, List[AthleteFeedback]]:
+    def _feedback_for_activity_ids(self, activity_ids: Iterable[str]) -> Dict[str, List[AthleteFeedback]]:
         grouped: Dict[str, List[AthleteFeedback]] = defaultdict(list)
-        rows = (
-            self.db.query(AthleteFeedback)
-            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
-            .all()
-        )
-        for row in rows:
-            grouped[str(row.activity_id)].append(row)
+        ids = [str(activity_id) for activity_id in activity_ids if activity_id]
+        if not ids:
+            return grouped
+        for chunk in _chunks(ids):
+            rows = (
+                self.db.query(AthleteFeedback)
+                .filter(AthleteFeedback.activity_id.in_(chunk))
+                .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+                .all()
+            )
+            for row in rows:
+                grouped[str(row.activity_id)].append(row)
         return grouped
 
     def _feedback_for_activity(
@@ -395,6 +498,45 @@ class CanonicalProspectiveObservationService:
             "replaces_objective_data": False,
             "note": "Subjective signal only. Does not replace Garmin markers or define the outcome.",
         }
+
+
+def _chunks(values: Iterable, size: int = _IN_CHUNK) -> Iterable[list]:
+    chunk: list = []
+    for value in values:
+        chunk.append(value)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def _activity_span(
+    records: Sequence[RecommendationRecord],
+    *,
+    start: Optional[date],
+    end: Optional[date],
+) -> tuple:
+    """Date span for legacy activity matching.
+
+    A requested window stays the window: tips outside it are discarded after
+    chain selection, so their activities are not required. Unbounded resolve
+    uses the loaded recommendations' own as_of span plus the 3-day legacy look.
+    """
+    if start is not None or end is not None:
+        upper = end + timedelta(days=3) if end is not None else None
+        lower = start
+        if lower is None or upper is None:
+            dates = [row.as_of_date for row in records if row.as_of_date is not None]
+            if dates and lower is None:
+                lower = min(dates)
+            if dates and upper is None:
+                upper = max(dates) + timedelta(days=3)
+        return lower, upper
+    dates = [row.as_of_date for row in records if row.as_of_date is not None]
+    if not dates:
+        return None, None
+    return min(dates), max(dates) + timedelta(days=3)
 
 
 def _components(records: Sequence[RecommendationRecord]) -> List[List[RecommendationRecord]]:

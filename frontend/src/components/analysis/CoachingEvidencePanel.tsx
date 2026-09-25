@@ -69,6 +69,10 @@ function DataQualitySection({
         Venter {counts.pending} · vurdert {counts.evaluated} · ufullstendig {counts.incomplete} · utelatt{" "}
         {counts.excluded}
       </p>
+      {snapshot.observation_note_nb ? <p>{snapshot.observation_note_nb}</p> : null}
+      {snapshot.explicit_execution_coverage?.status === "EXPLICIT_EXECUTION_COVERAGE_LOW" ? (
+        <p>Eksplisitt kobling mangler på mange lukkede anbefalinger i vinduet. Evidensvektene er uendret.</p>
+      ) : null}
       <p>Manglende kilder: {missing || "ingen"}</p>
       <p>{shift}</p>
       {groups ? <p>Feedback {groups}</p> : null}

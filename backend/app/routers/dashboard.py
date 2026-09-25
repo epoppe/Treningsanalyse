@@ -343,7 +343,10 @@ def get_recommendation_history(
 
     Observational only — filters describe execution match, not coaching quality.
     """
-    from ..services.canonical_prospective_observation import CanonicalProspectiveObservationService
+    from ..services.canonical_prospective_observation import (
+        SCHEMA as OBSERVATION_SCHEMA,
+        CanonicalProspectiveObservationService,
+    )
 
     wanted = (execution or "all").strip().lower()
     allowed = {"followed", "modified", "replaced", "skipped", "pending", "unplanned", "unknown", "all"}
@@ -383,6 +386,7 @@ def get_recommendation_history(
             break
 
     return {
+        "schema": OBSERVATION_SCHEMA,
         "status": "ok",
         "items": items,
         "count": len(items),

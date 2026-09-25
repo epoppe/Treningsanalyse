@@ -96,6 +96,7 @@ class RecommendationHistoryApiTests(unittest.TestCase):
         res = self.client.get("/api/dashboard/recommendation-history", params={"limit": 10})
         self.assertEqual(res.status_code, 200)
         body = res.json()
+        self.assertEqual(body["schema"], "canonical-prospective-observation-1")
         self.assertEqual(body["filter"], "all")
         self.assertGreaterEqual(body["count"], 3)
         statuses = {item["execution_status"] for item in body["items"]}

@@ -50,8 +50,11 @@ class RuntimeHardeningTests(unittest.TestCase):
         self.assertEqual(res.status_code, 404)
 
     def test_debug_db_info_available_when_debug(self):
-        """Isolated temp DB — does not depend on backend/data/treningsanalyse.db."""
-        from app import config as config_mod
+        """Isolated temp DB — does not depend on backend/data/treningsanalyse.db.
+
+        Patch the settings instance main already bound. app.config.settings is a
+        lazy singleton and can point at a newer object after reset_settings_cache().
+        """
         import app.main as main_mod
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -71,7 +74,7 @@ class RuntimeHardeningTests(unittest.TestCase):
 
                 self.app.dependency_overrides[get_db] = override_get_db
                 try:
-                    with patch.object(config_mod.settings, "DEBUG", True), patch.object(
+                    with patch.object(main_mod.settings, "DEBUG", True), patch.object(
                         main_mod, "db_engine", engine
                     ):
                         res = self.client.get("/api/debug/db-info")

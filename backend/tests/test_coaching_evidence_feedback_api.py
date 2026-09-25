@@ -123,11 +123,15 @@ class CoachingEvidenceApiTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("no-store", res.headers.get("cache-control", ""))
         body = res.json()
+        self.assertEqual(body["schema"], "coaching-evidence-1")
         self.assertTrue(body["read_only"])
         self.assertEqual(body["overview"]["canonical_recommendation_count"], 2)
         self.assertEqual(body["overview"]["pending_count"], 1)
         snapshot = body["data_quality_snapshot"]
         self.assertEqual(snapshot["schema"], "data-quality-snapshot-1")
+        self.assertTrue(snapshot["counts_overlap"])
+        self.assertIn("not a mutually exclusive sum", snapshot["observation_note"])
+        self.assertIn("explicit_execution_coverage", snapshot)
         self.assertEqual(snapshot["observations"]["pending"], body["overview"]["pending_count"])
         self.assertEqual(
             snapshot["observations"]["pending"] + snapshot["observations"]["evaluated"],

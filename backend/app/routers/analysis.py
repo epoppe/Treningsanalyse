@@ -4,7 +4,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Optional
 from datetime import datetime, date, timedelta, timezone
-from ..database.session import get_db
 from ..database.models.summaries import DailySummary, WeeklySummary, MonthlySummary
 from ..database.models.sync_state import SyncState
 from ..services.analysis_service import AnalysisService
