@@ -63,7 +63,12 @@ return 404.
 `GET /api/activities/{activity_id}/feedback-prompt` asks `FeedbackValueService`
 whether a prompt has information value. It does not prompt every workout,
 does not prompt an activity that already has feedback, and does not prompt
-activities older than 14 days. The call does not write.
+activities older than 14 days. The call does not write. `reason_labels` says
+why the existing scorer asked: race, a modified quality session, unexpected
+execution, a replaced prescription, shadow disagreement, or a day-after HRV
+drop / resting-heart-rate rise past `DEFAULT_HRV_DROP_WARNING_PCT` and
+`DEFAULT_RHR_RISE_WARNING_BPM`. Missing recovery markers do not count as
+unusual.
 
 ## Flow
 

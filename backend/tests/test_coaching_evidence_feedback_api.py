@@ -13,6 +13,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.database.models.activity import Activity, ActivityType
+from app.database.models.sleep import HRV
 from app.database.models.base import Base
 from app.database.models.coaching_v5 import (
     AthleteFeedback,
@@ -330,6 +331,7 @@ class ActivityFeedbackApiTests(unittest.TestCase):
         self.assertFalse(easy.json()["should_prompt"])
         self.assertTrue(race.json()["should_prompt"])
         self.assertIn("race", race.json()["reasons"])
+        self.assertTrue(any("Konkurranse" in line for line in race.json()["reason_labels"]))
         self.assertFalse(old.json()["should_prompt"])
         self.assertIn("activity_outside_prompt_window", old.json()["reasons"])
         self.client.put("/api/activities/race-1/feedback", json={"session_feel": "hard"})
@@ -339,3 +341,30 @@ class ActivityFeedbackApiTests(unittest.TestCase):
         self.assertIn("no-store", again.headers.get("cache-control", ""))
         self.client.get("/api/activities/race-1/feedback-prompt")
         self.assertEqual(self.db.query(AthleteFeedback).count(), before + 1)
+
+    def test_day_after_hrv_drop_prompts_without_a_new_model(self):
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        marker = yesterday.date() + timedelta(days=1)
+        self.db.add(
+            Activity(
+                activity_id="easy-hrv",
+                activity_name="Easy jog",
+                start_time=yesterday,
+                duration=2400,
+                distance=6000,
+                activity_type_id=self.db.query(ActivityType).first().id,
+            )
+        )
+        for offset in range(1, 29):
+            self.db.add(HRV(measurement_date=marker - timedelta(days=offset), rmssd=50.0))
+        self.db.add(HRV(measurement_date=marker, rmssd=40.0))
+        self.db.commit()
+        prompted = self.client.get("/api/activities/easy-hrv/feedback-prompt")
+        self.assertTrue(prompted.json()["should_prompt"])
+        self.assertIn("unusual_recovery", prompted.json()["reasons"])
+        self.assertTrue(any("HRV" in line for line in prompted.json()["reason_labels"]))
+        self.db.query(HRV).filter(HRV.measurement_date == marker).update({"rmssd": 48.0})
+        self.db.commit()
+        quiet = self.client.get("/api/activities/easy-hrv/feedback-prompt")
+        self.assertFalse(quiet.json()["should_prompt"])
+        self.assertNotIn("unusual_recovery", quiet.json()["reasons"])

@@ -152,5 +152,6 @@ export interface FeedbackPromptPayload {
   should_prompt: boolean;
   priority: string;
   reasons: string[];
+  reason_labels?: string[];
   already_has_feedback: boolean;
 }

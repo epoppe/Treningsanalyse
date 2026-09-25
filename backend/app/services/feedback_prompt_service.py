@@ -10,10 +10,20 @@ from sqlalchemy.orm import Session
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import RecommendationExecution, ShadowRecommendation
 from .athlete_feedback_service import AthleteFeedbackService
+from .coaching_config import DEFAULT_HRV_DROP_WARNING_PCT, DEFAULT_RHR_RISE_WARNING_BPM
 from .coaching_operational_monitors import FeedbackValueService
+from .ppap_metrics_service import PpapMetricsService
 
 PROMPT_MAX_AGE_DAYS = 14
 _QUALITY_TYPES = {"threshold", "vo2_intervals", "race_pace", "race", "tempo"}
+_REASON_LABELS = {
+    "race": "Konkurranse gir mer informasjon enn en vanlig rolig økt.",
+    "modified_quality": "Kvalitetsøkten ble justert i forhold til planen.",
+    "unexpected_execution": "Gjennomføringen avvek tydelig fra det som var planlagt.",
+    "unusual_recovery": "HRV eller hvilepuls dagen etter er utenfor det vanlige varselet.",
+    "new_prescription": "Økten erstattet den opprinnelige anbefalingen.",
+    "shadow_disagreement": "Skyggemodellen var uenig med produksjonsanbefalingen.",
+}
 
 
 class FeedbackPromptService:
@@ -54,8 +64,10 @@ class FeedbackPromptService:
 
         prioritized = self._value.prioritize(context=self._context(activity, activity_day))
         priority = prioritized["feedback_priority"]
+        reasons = list(prioritized.get("reasons") or [])
         base["priority"] = priority
-        base["reasons"] = list(prioritized.get("reasons") or [])
+        base["reasons"] = reasons
+        base["reason_labels"] = [_REASON_LABELS[code] for code in reasons if code in _REASON_LABELS]
         base["should_prompt"] = priority in {"high_value", "useful"}
         base["note"] = prioritized.get("note")
         return base
@@ -95,8 +107,23 @@ class FeedbackPromptService:
             "unexpected_execution_quality": unexpected,
             "shadow_disagreement": shadow_disagreement,
             "new_prescription": bool(execution and (execution.execution_status or "") == "replaced"),
-            "unusual_recovery": False,
+            "unusual_recovery": self._unusual_recovery(activity_day),
         }
+
+    def _unusual_recovery(self, activity_day: date) -> bool:
+        """Day-after HRV drop or RHR rise, using the existing warning constants.
+
+        Missing markers stay quiet. This does not estimate a new recovery cost.
+        """
+        marker_day = activity_day + timedelta(days=1)
+        ppap = PpapMetricsService(self.db)
+        hrv = ppap.get_hrv_delta_pct(marker_day)
+        rhr = ppap.get_rhr_delta_bpm(marker_day)
+        if hrv is not None and hrv <= DEFAULT_HRV_DROP_WARNING_PCT:
+            return True
+        if rhr is not None and rhr >= DEFAULT_RHR_RISE_WARNING_BPM:
+            return True
+        return False
 
 
 def _activity_day(activity: Activity) -> Optional[date]:

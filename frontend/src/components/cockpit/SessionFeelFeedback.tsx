@@ -74,7 +74,12 @@ export function SessionFeelFeedback({ activityId }: { activityId: string }) {
       <p>Hvordan føltes økten?</p>
       {prompt?.should_prompt && !dismissed && !prompt.already_has_feedback ? (
         <div className="flex items-start justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-700">
-          <p>Denne økten har høy informasjonsverdi. Feedback er valgfritt.</p>
+          <p>
+            Denne økten har høy informasjonsverdi. Feedback er valgfritt.
+            {prompt.reason_labels && prompt.reason_labels.length > 0
+              ? ` ${prompt.reason_labels.join(" ")}`
+              : ""}
+          </p>
           <button type="button" className="underline" onClick={() => setDismissed(true)}>
             Ignorer
           </button>

@@ -46,6 +46,7 @@ describe("SessionFeelFeedback", () => {
       should_prompt: true,
       priority: "useful",
       reasons: ["race"],
+      reason_labels: ["Konkurranse gir mer informasjon enn en vanlig rolig økt."],
       already_has_feedback: false,
     });
     api.saveFeedback.mockResolvedValue({
@@ -64,6 +65,7 @@ describe("SessionFeelFeedback", () => {
 
     render(<SessionFeelFeedback activityId="42" />);
     expect(await screen.findByText(/høy informasjonsverdi/)).toBeInTheDocument();
+    expect(screen.getByText(/Konkurranse gir mer informasjon/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Lettere enn forventet" }));
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Lettere enn forventet" })).toHaveAttribute(
