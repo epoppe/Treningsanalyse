@@ -235,6 +235,11 @@ class PpapMetricsService:
         return round(median(values), 1)
 
     def get_hrv_delta_pct(self, day: date) -> Optional[float]:
+        """Percent vs baseline: 100 * (HRV_today - HRV_baseline) / HRV_baseline.
+
+        Positive means today's HRV is above the baseline. None when today's
+        reading or the baseline is missing — missing is not a drop.
+        """
         today_row = (
             self.db.query(HRV.rmssd)
             .filter(and_(HRV.measurement_date == day, HRV.rmssd.isnot(None)))

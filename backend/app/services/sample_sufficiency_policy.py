@@ -29,6 +29,16 @@ DOMAIN_FLOORS: Dict[str, Dict[str, int]] = {
 }
 
 
+def _level_for_effective(effective_n: int, floors: Dict[str, int]) -> SufficiencyLevel:
+    if effective_n < floors["emerging"]:
+        return SufficiencyLevel.INSUFFICIENT
+    if effective_n < floors["supported"]:
+        return SufficiencyLevel.EMERGING
+    if effective_n < floors["strong"]:
+        return SufficiencyLevel.SUPPORTED
+    return SufficiencyLevel.STRONG
+
+
 class SampleSufficiencyPolicy:
     """
     10 observations in one week ≠ 10 observations across 4 months.
@@ -72,14 +82,7 @@ class SampleSufficiencyPolicy:
             effective *= 0.75
 
         effective_n = int(round(effective))
-        if effective_n < floors["emerging"]:
-            level = SufficiencyLevel.INSUFFICIENT
-        elif effective_n < floors["supported"]:
-            level = SufficiencyLevel.EMERGING
-        elif effective_n < floors["strong"]:
-            level = SufficiencyLevel.SUPPORTED
-        else:
-            level = SufficiencyLevel.STRONG
+        level = _level_for_effective(effective_n, floors)
 
         return {
             "domain": domain,
@@ -92,6 +95,44 @@ class SampleSufficiencyPolicy:
             "may_override_defaults": level in {SufficiencyLevel.SUPPORTED, SufficiencyLevel.STRONG},
             "note": "Temporally concentrated samples are down-weighted — absence of spread ≠ strong evidence.",
         }
+
+    def assess_weighted(
+        self,
+        *,
+        domain: str,
+        observation_dates: Optional[Sequence[date]] = None,
+        evidence_weights: Optional[Sequence[float]] = None,
+        as_of: Optional[date] = None,
+        data_quality: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Same floors and temporal math, then scale effective n by evidence weight.
+
+        Legacy low-confidence matches must not count as a full observation.
+        Pending rows are omitted by the caller — they are not zeros here.
+        """
+        dates = list(observation_dates or [])
+        weights = list(evidence_weights) if evidence_weights is not None else [1.0] * len(dates)
+        if len(weights) != len(dates):
+            raise ValueError("evidence_weights must align with observation_dates")
+        raw = len(dates)
+        assessed = self.assess(
+            domain=domain,
+            sample_count=raw,
+            observation_dates=dates,
+            as_of=as_of,
+            data_quality=data_quality,
+        )
+        weight_sum = float(sum(weights)) if weights else 0.0
+        if raw == 0:
+            assessed["evidence_weight_sum"] = 0.0
+            return assessed
+        scaled = int(round(assessed["effective_sample_count"] * (weight_sum / raw)))
+        level = _level_for_effective(scaled, assessed["floors"])
+        assessed["effective_sample_count"] = scaled
+        assessed["level"] = level.value
+        assessed["may_override_defaults"] = level in {SufficiencyLevel.SUPPORTED, SufficiencyLevel.STRONG}
+        assessed["evidence_weight_sum"] = round(weight_sum, 3)
+        return assessed
 
     @staticmethod
     def _temporal_stats(

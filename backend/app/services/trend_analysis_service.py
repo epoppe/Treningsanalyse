@@ -19,6 +19,7 @@ TrendDirection = str  # improving|stable|declining|uncertain
 
 TREND_WINDOWS_DAYS = (7, 28, 90, 365)
 
+# Estimator constraints for Theil-Sen / direction, not evidence-policy floors.
 MIN_SAMPLES_FOR_SLOPE = 5
 MIN_SAMPLES_FOR_DIRECTION = 3
 CHANGE_POINT_Z_THRESHOLD = 2.0
