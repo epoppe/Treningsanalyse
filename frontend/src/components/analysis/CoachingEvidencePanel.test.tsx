@@ -84,6 +84,7 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
       expected_calibration_error: null,
       status: "INSUFFICIENT_DATA",
       coverage: null,
+      bins: [{ bin: "0.5-0.6", n: 4, predicted_mean: 0.55, empirical_frequency: 0.5 }],
     },
     evidence_quality: {
       raw_sample_count: 1,
@@ -104,6 +105,9 @@ function payload(patch: Partial<CoachingEvidencePayload> = {}): CoachingEvidence
         coverage: 0.5,
         provenance: "athlete_feedback",
         ground_truth: false,
+        fields: { rpe: 1, session_feel: 1, legs: 0, motivation: 0, pain: 0 },
+        quality_session_count: 2,
+        quality_feedback_count: 1,
       },
     },
     operations: {
@@ -147,6 +151,20 @@ describe("CoachingEvidenceView", () => {
     expect(screen.getByText(/Eligible er ikke en promotering/)).toBeInTheDocument();
     expect(screen.getByText(/Korttidseffekt er under støttet nivå/)).toBeInTheDocument();
     expect(screen.queryByText(/Short-term effectiveness is below SUPPORTED/)).not.toBeInTheDocument();
+    expect(screen.getByText(/RPE 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Kvalitetsøkter 1 av 2/)).toBeInTheDocument();
+    expect(screen.queryByText(/0.5-0.6/)).not.toBeInTheDocument();
+  });
+
+  it("shows calibration bins only when the status is not insufficient", () => {
+    const data = payload();
+    data.confidence.status = "well_calibrated";
+    data.overview.evidence_level = "SUPPORTED";
+    data.overview.evidence_label = "Støttet";
+    render(<CoachingEvidenceView data={data} windowDays={90} onWindow={() => undefined} />);
+    expect(screen.getByText("Støttet")).toBeInTheDocument();
+    expect(screen.getByText(/0.5-0.6/)).toBeInTheDocument();
+    expect(screen.getByText(/predikert 0.55/)).toBeInTheDocument();
   });
 
   it("shows an empty state without a learned conclusion", () => {

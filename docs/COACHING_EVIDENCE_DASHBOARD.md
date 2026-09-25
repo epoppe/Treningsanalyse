@@ -47,8 +47,11 @@ repeats the monthly-review gate. `Shadow ELIGIBLE` is not a promotion.
 The dashboard keeps the English governance sentences in `do_not_change` so they
 stay identical to the monthly review. `do_not_change_nb` and `operations_lines`
 are the Norwegian presentation of those same gates. A missing race
-recommendation says taper is not personalized. A medium-term line appears only
-when a short-term outcome already exists.
+recommendation says taper is not personalized. An open medium-term window
+stays separate from evaluated samples whose spread is still insufficient.
+Subjective field counts stay separate from HRV, RHR, TSS/EPOC and session
+quality. Quality-session coverage uses the same types as the feedback prompt.
+Calibration bins are shown only when status is not `INSUFFICIENT_DATA`.
 
 ## Feedback
 

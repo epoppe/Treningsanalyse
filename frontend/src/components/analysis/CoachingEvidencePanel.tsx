@@ -70,6 +70,7 @@ function TypeCard({
         <div>Korttid {metric(row.short_term_outcome, row.short_term_sample_count)}</div>
         <div>Restitusjon {metric(row.observed_recovery_response, row.observed_recovery_sample_count)}</div>
         <div>Sesjonskvalitet {metric(row.session_quality, row.session_quality_sample_count)}</div>
+        <div>Datakvalitet {metric(row.data_quality_mean ?? null, row.data_quality_sample_count ?? 0)}</div>
       </dl>
       <p className="mt-2 text-xs text-slate-700">
         Konklusjonsstyrke {row.conclusion_strength_label || row.conclusion_strength}
@@ -209,6 +210,15 @@ export function CoachingEvidenceView({
           <p>N {data.confidence.sample_count}</p>
           <p>Brier {data.confidence.brier_score ?? "–"}</p>
           <p>Kalibreringsfeil {data.confidence.expected_calibration_error ?? "–"}</p>
+          {data.confidence.status !== "INSUFFICIENT_DATA" && data.confidence.bins && data.confidence.bins.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs text-slate-600">
+              {data.confidence.bins.map((bin) => (
+                <li key={bin.bin}>
+                  {bin.bin}: N {bin.n}, predikert {bin.predicted_mean}, observert {bin.empirical_frequency}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
           <h3 className="font-semibold text-slate-900">Evidenskvalitet</h3>
@@ -236,6 +246,19 @@ export function CoachingEvidenceView({
           <h3 className="font-semibold text-slate-900">Subjektive signaler</h3>
           <p className="mt-1">{data.signals.subjective.sources.join(", ")}</p>
           <p>N {data.signals.subjective.sample_count} · dekning {percent(data.signals.subjective.coverage)}</p>
+          {data.signals.subjective.fields ? (
+            <p>
+              RPE {data.signals.subjective.fields.rpe} · følelse {data.signals.subjective.fields.session_feel} · bein{" "}
+              {data.signals.subjective.fields.legs} · motivasjon {data.signals.subjective.fields.motivation} · smerte{" "}
+              {data.signals.subjective.fields.pain}
+            </p>
+          ) : null}
+          {data.signals.subjective.quality_session_count ? (
+            <p>
+              Kvalitetsøkter {data.signals.subjective.quality_feedback_count ?? 0} av{" "}
+              {data.signals.subjective.quality_session_count}
+            </p>
+          ) : null}
           <p>Kilde {data.signals.subjective.provenance}. Ikke fasit.</p>
         </div>
       </section>

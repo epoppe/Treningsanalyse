@@ -167,6 +167,10 @@ class CoachingEvidenceApiTests(unittest.TestCase):
         self.assertEqual(threshold["label"], "Terskel")
         self.assertEqual(body["feasibility"]["followed"], 1)
         self.assertIn("ikke fysiologisk effekt", body["feasibility"]["note"])
+        unknown_text = " ".join(row["text"] for row in body["what_we_do_not_know"])
+        self.assertIn("kvalitetsøktene", unknown_text)
+        self.assertEqual(body["signals"]["subjective"]["fields"]["rpe"], 0)
+        self.assertEqual(threshold["data_quality_sample_count"], 0)
         codes = [row["code"] for row in body["what_we_do_not_know"]]
         self.assertIn("taper_not_personalized", codes)
         self.assertNotIn("too_few_races", codes)
@@ -229,6 +233,33 @@ class CoachingEvidenceApiTests(unittest.TestCase):
     def test_invalid_window_is_422(self):
         res = self.client.get("/api/dashboard/coaching-evidence", params={"window_days": 14})
         self.assertEqual(res.status_code, 422)
+
+
+class MediumGapTests(unittest.TestCase):
+    def test_spread_is_separate_from_an_open_window(self):
+        from app.services.coaching_evidence_dashboard_service import _medium_unknown
+
+        open_window = _medium_unknown(
+            {
+                "label": "Terskel",
+                "workout_type": "threshold",
+                "medium_term_sample_count": 0,
+                "short_term_sample_count": 2,
+            }
+        )
+        concentrated = _medium_unknown(
+            {
+                "label": "Terskel",
+                "workout_type": "threshold",
+                "medium_term_sample_count": 4,
+                "short_term_sample_count": 4,
+                "medium_spread_days": 10,
+                "medium_evidence_level": "INSUFFICIENT",
+            }
+        )
+        self.assertEqual(open_window["code"], "medium_term_not_mature")
+        self.assertEqual(concentrated["code"], "medium_term_spread")
+        self.assertIn("spredning", concentrated["text"])
 
 
 class ActivityFeedbackApiTests(unittest.TestCase):

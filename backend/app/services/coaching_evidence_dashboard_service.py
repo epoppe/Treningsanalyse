@@ -26,6 +26,7 @@ from .coaching_operational_monitors import (
     RecommendationDistributionMonitor,
     ShadowPromotionReadinessService,
 )
+from .feedback_prompt_service import QUALITY_SESSION_TYPES
 from .monthly_coaching_review_service import coaching_do_not_change
 from .outcome_maturity import EVALUATED, INCOMPLETE_DATA, PENDING, is_usable_status
 from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
@@ -272,8 +273,10 @@ class CoachingEvidenceDashboardService:
                 "short_dates": [],
                 "short_weights": [],
                 "medium_vals": [],
+                "medium_dates": [],
                 "quality_vals": [],
                 "recovery_vals": [],
+                "quality_scores": [],
                 "pending": 0,
                 "execution": 0,
                 "recommendations": 0,
@@ -293,6 +296,8 @@ class CoachingEvidenceDashboardService:
                 bucket["execution"] += 1
             if row.get("subjective_feedback"):
                 bucket["feedback"] += 1
+            if row.get("data_quality_score") is not None:
+                bucket["quality_scores"].append(float(row["data_quality_score"]))
             utility = utilities[row["recommendation_id"]]
             weight = float(row.get("evidence_weight") or 0.0) or 1.0
             obs_date = date.fromisoformat(row["as_of_date"])
@@ -306,6 +311,7 @@ class CoachingEvidenceDashboardService:
                 bucket["short_weights"].append(weight)
             if is_usable_status(utility.get("medium_term_maturity")) and utility.get("medium_term_utility") is not None:
                 bucket["medium_vals"].append(float(utility["medium_term_utility"]))
+                bucket["medium_dates"].append(obs_date)
             if utility.get("session_quality_included") and utility.get("session_quality_component") is not None:
                 bucket["quality_vals"].append(float(utility["session_quality_component"]))
             observed = utility.get("observed_recovery_response") or {}
@@ -331,6 +337,12 @@ class CoachingEvidenceDashboardService:
                 evidence_weights=bucket["short_weights"],
                 as_of=as_of,
             )
+            medium_sufficiency = self._sufficiency.assess_weighted(
+                domain="workout_effectiveness",
+                observation_dates=bucket["medium_dates"],
+                evidence_weights=[1.0] * len(bucket["medium_dates"]),
+                as_of=as_of,
+            )
             level = sufficiency.get("level")
             result.append(
                 {
@@ -345,6 +357,10 @@ class CoachingEvidenceDashboardService:
                     "short_term_sample_count": len(bucket["short_vals"]),
                     "medium_term_outcome": _mean(bucket["medium_vals"]),
                     "medium_term_sample_count": len(bucket["medium_vals"]),
+                    "medium_spread_days": medium_sufficiency.get("spread_days"),
+                    "medium_evidence_level": medium_sufficiency.get("level"),
+                    "data_quality_mean": _mean(bucket["quality_scores"]),
+                    "data_quality_sample_count": len(bucket["quality_scores"]),
                     "session_quality": _mean(bucket["quality_vals"]),
                     "session_quality_sample_count": len(bucket["quality_vals"]),
                     "observed_recovery_response": _mean(bucket["recovery_vals"]),
@@ -481,16 +497,9 @@ class CoachingEvidenceDashboardService:
                         ),
                     }
                 )
-            if row["medium_term_sample_count"] == 0 and row["short_term_sample_count"] > 0:
-                unknown.append(
-                    {
-                        "code": "medium_term_not_mature",
-                        "workout_type": row["workout_type"],
-                        "sample_count": 0,
-                        "evidence_level": "INSUFFICIENT",
-                        "text": f"Mellomlangs respons etter {label} er ikke moden i dette vinduet.",
-                    }
-                )
+            medium_gap = _medium_unknown(row)
+            if medium_gap is not None:
+                unknown.append(medium_gap)
         if confidence.get("status") == "INSUFFICIENT_DATA":
             unknown.append(
                 {
@@ -500,8 +509,20 @@ class CoachingEvidenceDashboardService:
                     "text": "Confidence-kalibrering har for få modne utfall til å vurderes.",
                 }
             )
+        quality_rows = [row for row in by_type if row["workout_type"] in QUALITY_SESSION_TYPES]
+        quality_recs = sum(row["recommendation_count"] for row in quality_rows)
+        quality_feedback = sum(row["feedback_count"] for row in quality_rows)
         coverage = overview.get("feedback_coverage")
-        if overview["canonical_recommendation_count"] and (coverage is None or coverage < 0.25):
+        if quality_recs and quality_feedback / quality_recs < 0.25:
+            pct = round(100 * quality_feedback / quality_recs)
+            unknown.append(
+                {
+                    "code": "low_feedback_coverage",
+                    "sample_count": quality_feedback,
+                    "text": f"Subjektiv feedback finnes for {pct} % av kvalitetsøktene.",
+                }
+            )
+        elif overview["canonical_recommendation_count"] and (coverage is None or coverage < 0.25):
             pct = 0 if coverage is None else round(coverage * 100)
             unknown.append(
                 {
@@ -581,6 +602,37 @@ class CoachingEvidenceDashboardService:
                 "note": shadow.get("note"),
             },
         }
+
+
+def _medium_unknown(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Separate an open medium-term window from samples that lack spread."""
+    label = row["label"]
+    if row["medium_term_sample_count"] == 0 and row["short_term_sample_count"] > 0:
+        return {
+            "code": "medium_term_not_mature",
+            "workout_type": row["workout_type"],
+            "sample_count": 0,
+            "evidence_level": "INSUFFICIENT",
+            "text": f"Mellomlangs respons etter {label} er ikke moden i dette vinduet.",
+        }
+    spread = row.get("medium_spread_days")
+    if (
+        row["medium_term_sample_count"] > 0
+        and row.get("medium_evidence_level") == "INSUFFICIENT"
+        and spread is not None
+        and spread < SampleSufficiencyPolicy.MIN_SPREAD_DAYS_FOR_FULL_CREDIT
+    ):
+        return {
+            "code": "medium_term_spread",
+            "workout_type": row["workout_type"],
+            "sample_count": row["medium_term_sample_count"],
+            "evidence_level": "INSUFFICIENT",
+            "text": (
+                f"Mellomlangs respons etter {label} mangler tilstrekkelig "
+                f"tidsmessig spredning ({spread} dager)."
+            ),
+        }
+    return None
 
 
 def _pct(value: Any) -> str:
@@ -682,7 +734,22 @@ def _signals(observations: List[Dict[str, Any]], utilities: Dict[int, Dict[str, 
     quality_n = sum(
         1 for utility in utilities.values() if utility.get("session_quality_included")
     )
-    feedback_n = sum(1 for row in observations if row.get("subjective_feedback"))
+    fields = {key: 0 for key in ("rpe", "session_feel", "legs", "motivation", "pain")}
+    feedback_n = 0
+    quality_recs = 0
+    quality_feedback = 0
+    for row in observations:
+        feedback = row.get("subjective_feedback")
+        if feedback:
+            feedback_n += 1
+            if isinstance(feedback, dict):
+                for key in fields:
+                    if feedback.get(key) is not None:
+                        fields[key] += 1
+        if row.get("recommended_workout_type") in QUALITY_SESSION_TYPES:
+            quality_recs += 1
+            if feedback:
+                quality_feedback += 1
     return {
         "objective": {
             "sources": ["garmin_activity", "hrv", "rhr", "tss_epoc", "session_quality"],
@@ -691,8 +758,12 @@ def _signals(observations: List[Dict[str, Any]], utilities: Dict[int, Dict[str, 
         },
         "subjective": {
             "sources": ["rpe", "session_feel", "legs", "motivation", "pain"],
+            "fields": fields,
             "sample_count": feedback_n,
             "coverage": round(feedback_n / len(observations), 3) if observations else None,
+            "quality_session_count": quality_recs,
+            "quality_feedback_count": quality_feedback,
+            "quality_coverage": round(quality_feedback / quality_recs, 3) if quality_recs else None,
             "provenance": "athlete_feedback",
             "ground_truth": False,
             "replaces_objective_data": False,

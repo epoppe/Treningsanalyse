@@ -15,7 +15,8 @@ from .coaching_operational_monitors import FeedbackValueService
 from .ppap_metrics_service import PpapMetricsService
 
 PROMPT_MAX_AGE_DAYS = 14
-_QUALITY_TYPES = {"threshold", "vo2_intervals", "race_pace", "race", "tempo"}
+QUALITY_SESSION_TYPES = {"threshold", "vo2_intervals", "race_pace", "race", "tempo"}
+_QUALITY_TYPES = QUALITY_SESSION_TYPES
 _REASON_LABELS = {
     "race": "Konkurranse gir mer informasjon enn en vanlig rolig økt.",
     "modified_quality": "Kvalitetsøkten ble justert i forhold til planen.",

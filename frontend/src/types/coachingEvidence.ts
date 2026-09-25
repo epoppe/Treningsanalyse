@@ -37,6 +37,8 @@ export interface CoachingTypeEvidence {
   short_term_sample_count: number;
   medium_term_outcome: number | null;
   medium_term_sample_count: number;
+  data_quality_mean?: number | null;
+  data_quality_sample_count?: number;
   session_quality: number | null;
   session_quality_sample_count: number;
   observed_recovery_response: number | null;
@@ -85,6 +87,12 @@ export interface CoachingEvidencePayload {
     status: string;
     coverage: number | null;
     note?: string;
+    bins?: Array<{
+      bin: string;
+      n: number;
+      predicted_mean: number;
+      empirical_frequency: number;
+    }>;
   };
   evidence_quality: {
     raw_sample_count: number;
@@ -105,6 +113,16 @@ export interface CoachingEvidencePayload {
       coverage: number | null;
       provenance: string;
       ground_truth: boolean;
+      fields?: {
+        rpe: number;
+        session_feel: number;
+        legs: number;
+        motivation: number;
+        pain: number;
+      };
+      quality_session_count?: number;
+      quality_feedback_count?: number;
+      quality_coverage?: number | null;
     };
   };
   operations: {
