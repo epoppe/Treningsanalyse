@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database.models.activity import Activity, ActivityType
 from app.database.models.base import Base
 from app.database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
+from app.services.canonical_observation_contract import missing_contract_keys
 from app.services.canonical_prospective_observation import SCHEMA, CanonicalProspectiveObservationService
 from app.services.data_quality_snapshot import explicit_execution_coverage
 from tests.sqlite_test_utils import dispose_engine, file_sqlite_url, make_file_engine
@@ -223,6 +224,86 @@ class ChainClosureTests(unittest.TestCase):
         self.assertLess(loaded_activities["n"], 100)
         self.assertTrue(all(row["schema"] == SCHEMA for row in rows))
         self.assertNotIn("old-0", {row["activity_id"] for row in rows})
+        self.assertEqual(missing_contract_keys(rows[0]), [])
+
+    def test_resolve_one_loads_the_chain_and_same_day_tips_only(self):
+        noise = []
+        for index in range(80):
+            noise.append(
+                _rec(
+                    as_of_date=date(2023, 1, 1) + timedelta(days=index),
+                    is_active=True,
+                    config_hash=f"noise-one-{index}",
+                    generated_at=datetime(2023, 1, 1, tzinfo=timezone.utc) + timedelta(days=index),
+                )
+            )
+        predecessor = _rec(
+            as_of_date=date(2024, 2, 1),
+            is_active=False,
+            config_hash="pred-one",
+            generated_at=datetime(2024, 2, 1, 8, tzinfo=timezone.utc),
+        )
+        tip = _rec(
+            as_of_date=date(2026, 5, 1),
+            is_active=True,
+            config_hash="tip-one",
+            generated_at=datetime(2026, 5, 1, 8, tzinfo=timezone.utc),
+        )
+        loser = _rec(
+            as_of_date=date(2026, 5, 1),
+            is_active=True,
+            config_hash="loser-one",
+            recommended_workout_type="threshold",
+            generated_at=datetime(2026, 5, 1, 6, tzinfo=timezone.utc),
+        )
+        self.db.add_all([*noise, predecessor, tip, loser])
+        self.db.flush()
+        predecessor.superseded_by_id = tip.id
+        for index in range(200):
+            day = date(2019, 1, 1) + timedelta(days=index)
+            self.db.add(
+                Activity(
+                    activity_id=f"far-{index}",
+                    activity_name="Old",
+                    start_time=datetime(day.year, day.month, day.day, 8, tzinfo=timezone.utc),
+                    duration=2000,
+                    distance=5000,
+                    activity_type_id=self.running.id,
+                )
+            )
+        self.db.commit()
+        predecessor_id = predecessor.id
+        tip_id = tip.id
+        loser_id = loser.id
+        self.db.expunge_all()
+
+        loaded = Counter()
+
+        def count_record(_target, _context):
+            loaded["records"] += 1
+
+        def count_activity(_target, _context):
+            loaded["activities"] += 1
+
+        event.listen(RecommendationRecord, "load", count_record)
+        event.listen(Activity, "load", count_activity)
+        try:
+            found = CanonicalProspectiveObservationService(self.db).resolve_one(predecessor_id, today=date(2026, 6, 1))
+            lost = CanonicalProspectiveObservationService(self.db).resolve_one(loser_id, today=date(2026, 6, 1))
+        finally:
+            event.remove(RecommendationRecord, "load", count_record)
+            event.remove(Activity, "load", count_activity)
+
+        self.assertIsNotNone(found)
+        self.assertEqual(found["recommendation_id"], tip_id)
+        self.assertEqual(set(found["chain_member_ids"]), {predecessor_id, tip_id})
+        self.assertEqual(found["requested_record_id"], predecessor_id)
+        self.assertFalse(found["requested_was_canonical"])
+        self.assertIn(loser_id, found["same_day_excluded_ids"])
+        self.assertIsNone(lost)
+        self.assertLess(loaded["records"], 20)
+        self.assertLess(loaded["activities"], 10)
+        self.assertEqual(missing_contract_keys(found), [])
 
 
 class ExplicitCoverageTests(unittest.TestCase):

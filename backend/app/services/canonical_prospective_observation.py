@@ -18,6 +18,7 @@ from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
 from ..utils.activity_filters import is_running_activity
 from .athlete_feedback_service import feedback_on_or_before
+from .canonical_observation_contract import OBSERVATION_SCHEMA as SCHEMA
 from .outcome_maturity import (
     EVALUATED,
     PENDING,
@@ -31,7 +32,6 @@ LEGACY_SAME_DAY_CONFIDENCE = 0.45
 LEGACY_NEARBY_CONFIDENCE = 0.3
 EXPLICIT_EVIDENCE_WEIGHT = 1.0
 LEGACY_EVIDENCE_WEIGHT = 0.35
-SCHEMA = "canonical-prospective-observation-1"
 
 _EXECUTION_KNOWN = {"followed", "modified", "replaced", "skipped", "unplanned", "missed", "completed", "partial"}
 _IN_CHUNK = 400
@@ -109,7 +109,8 @@ class CanonicalProspectiveObservationService:
                 "observation_status": "excluded",
                 "ledger_quality": "shadow_excluded_from_production",
             }
-        observations = self.resolve(today=today, include_shadow=False)
+        records, tip_day = self._load_chain_for_resolve_one(requested)
+        observations = self._canonicalize(records, today=today, start=tip_day, end=tip_day)
         for row in observations:
             if record_id in row["chain_member_ids"] or row["recommendation_id"] == record_id:
                 payload = dict(row)
@@ -137,6 +138,11 @@ class CanonicalProspectiveObservationService:
         if end is not None:
             seed = seed.filter(RecommendationRecord.as_of_date <= end)
         loaded: Dict[int, RecommendationRecord] = {row.id: row for row in seed.all()}
+        self._close_records(loaded, base)
+        return list(loaded.values())
+
+    def _close_records(self, loaded: Dict[int, RecommendationRecord], base) -> None:
+        """Walk superseded_by_id in both directions until the loaded set is closed."""
         for _ in range(_CLOSURE_ROUNDS):
             changed = False
             missing_targets = {
@@ -157,7 +163,26 @@ class CanonicalProspectiveObservationService:
                         changed = True
             if not changed:
                 break
-        return list(loaded.values())
+
+    def _load_chain_for_resolve_one(
+        self,
+        requested: RecommendationRecord,
+    ) -> tuple:
+        """Chain that contains requested, plus other tips on the canonical day.
+
+        Same-day collapse compares every tip on that as_of_date. Loading only
+        the requested chain would publish a predecessor that lost that contest.
+        Unrelated history stays unloaded.
+        """
+        base = self.db.query(RecommendationRecord).filter(RecommendationRecord.is_shadow.is_(False))
+        loaded: Dict[int, RecommendationRecord] = {requested.id: requested}
+        self._close_records(loaded, base)
+        tip, _, _ = _select_tip(list(loaded.values()))
+        tip_day = tip.as_of_date
+        for row in base.filter(RecommendationRecord.as_of_date == tip_day).all():
+            loaded.setdefault(row.id, row)
+        self._close_records(loaded, base)
+        return list(loaded.values()), tip_day
 
     def _canonicalize(
         self,
