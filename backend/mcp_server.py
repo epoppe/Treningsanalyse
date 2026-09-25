@@ -242,6 +242,22 @@ def comparable_sessions(activity_id: Optional[str] = None, limit: int = 10) -> d
 
 
 @mcp.tool()
+def data_quality_snapshot(
+    end_date: Optional[str] = None,
+    window_days: int = 90,
+) -> dict:
+    """Freshness, source coverage and canonical coaching-observation counts.
+
+    Same definition as data_quality_snapshot on GET /api/dashboard/coaching-evidence.
+    """
+    return _call_tool(
+        training_tools.data_quality_snapshot,
+        end_date=end_date,
+        window_days=window_days,
+    )
+
+
+@mcp.tool()
 def coaching_evaluation_report(
     target_date: Optional[str] = None,
     lookback_days: int = 90,

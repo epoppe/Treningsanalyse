@@ -157,3 +157,18 @@ def coaching_evaluation_report(
         lookback_days=lookback_days,
     )
     return {"status": "ok", **payload}
+
+
+def data_quality_snapshot(
+    db: Session,
+    storage: DataStorage,
+    *,
+    end_date: Optional[str] = None,
+    window_days: int = 90,
+) -> Dict[str, Any]:
+    """Same snapshot the coaching-evidence API returns. storage is unused."""
+    from ...services.data_quality_snapshot import DataQualitySnapshotService
+
+    del storage
+    end = parse_date(end_date) if end_date else date.today()
+    return DataQualitySnapshotService(db).build(end=end, window_days=window_days)

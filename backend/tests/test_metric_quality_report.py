@@ -1,7 +1,12 @@
 import unittest
 from datetime import date
 
-from app.mcp.metric_quality import build_metric_quality_report, format_metric_quality_markdown
+from app.mcp.metric_quality import (
+    build_metric_quality_report,
+    format_metric_quality_markdown,
+    summary_delta,
+)
+from app.tools.metric_quality import build_payload
 
 
 def _empty_ok_series():
@@ -162,6 +167,21 @@ class MetricQualityReportTests(unittest.TestCase):
         md = format_metric_quality_markdown(report)
         self.assertIn("fitness.ctl", md)
         self.assertIn("Availability", md)
+        self.assertIn("no_data means the metric is supported", md)
+
+    def test_summary_delta_separates_capability_gap_from_a_bug(self):
+        current = {"total": 3, "ok": 1, "no_data": 2, "bug": 0}
+        previous = {"total": 3, "ok": 2, "no_data": 1, "bug": 0}
+        delta = summary_delta(current, previous)
+        self.assertEqual(delta["no_data"], 1)
+        self.assertEqual(delta["ok"], -1)
+        self.assertEqual(delta["bug"], 0)
+        payload = build_payload(
+            {"schema_version": "metric-quality-1", "summary": current},
+            {"summary": previous},
+        )
+        self.assertEqual(payload["summary_delta"]["no_data"], 1)
+        self.assertIn("not the same problem", payload["capability_vs_availability"])
 
 
 if __name__ == "__main__":

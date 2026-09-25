@@ -2,7 +2,7 @@
 
 GitHub Actions-pipeline: `.github/workflows/ci.yml`
 
-Kjører på push/PR mot `main`. Feiler ved lint-, test-, type- eller build-feil.
+Kjører på push mot `main` og på pull requests mot alle brancher, inkludert stablede PR-er. Feiler ved lint-, test-, type- eller build-feil.
 
 ## Backend-jobb
 
@@ -22,6 +22,7 @@ Kjører på push/PR mot `main`. Feiler ved lint-, test-, type- eller build-feil.
 - `test_coaching_correctness.py` — drift semantics, freshness, integrity
 - `test_coaching_v9_operational.py` — sufficiency, restore, prospective, monitors, alembic step-upgrade
 - `test_prospective_evidence_correctness.py` — HRV sign, canonical observations, maturity, calibration, model-change evidence
+- `test_coaching_evidence_feedback_api.py` — read-only coaching evidence dashboard and idempotent activity feedback
 - `test_adaptive_coaching_v5.py` — preview no-persist, no-lookahead
 - `test_adaptive_coaching_v7.py` — shadow isolation, promotion gate
 - `test_analysis_workspace_api.py` — `/api/analysis/development|timeseries|relationships` wrappers

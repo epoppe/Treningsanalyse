@@ -8,13 +8,18 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.database.models.activity import Activity, ActivityType
 from app.database.models.base import Base
-from app.database.models.coaching_v5 import RecommendationExecution, RecommendationRecord
+from app.database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
+from app.services.athlete_feedback_service import AthleteFeedbackService
 from app.services.canonical_prospective_observation import CanonicalProspectiveObservationService
+from app.services.coaching_orchestrator import latest_execution_on_or_before
+from app.services.deload_need_service import DeloadNeedService
+from app.services.perceived_load_service import PerceivedLoadService
+from app.services.recovery_cost_service import RecoveryCostService
 from app.services.coaching_operational_monitors import (
     DecisionConfidenceMonitor,
     ModelChangeImpactService,
@@ -505,6 +510,265 @@ class CanonicalObservationTests(unittest.TestCase):
         self.assertIn("threshold", report["types_from_zero"])
         self.assertIn("vo2_intervals", report["types_from_zero"])
         self.assertFalse(report["unexpected_shift"])
+
+
+    def test_feedback_after_the_short_term_window_stays_out_of_the_observation(self):
+        day = date(2026, 1, 10)
+        record = _rec(as_of_date=day, config_hash="feedback-window")
+        self.db.add(record)
+        self.db.flush()
+        self.db.add(
+            Activity(
+                activity_id="run-fb",
+                activity_name="Easy",
+                start_time=datetime(2026, 1, 10, 8, tzinfo=timezone.utc),
+                duration=3000,
+                distance=8000,
+                activity_type_id=self.running.id,
+            )
+        )
+        self.db.add(
+            RecommendationExecution(
+                recommendation_id=record.id,
+                activity_id="run-fb",
+                execution_status="followed",
+                planned_type="easy_run",
+                actual_type="easy_run",
+                linked_at=datetime(2026, 1, 10, 9, tzinfo=timezone.utc),
+            )
+        )
+        self.db.add(
+            AthleteFeedback(
+                activity_id="run-fb",
+                recorded_at=datetime(2026, 1, 12, 9, tzinfo=timezone.utc),
+                rpe=5,
+                session_feel="as_expected",
+            )
+        )
+        self.db.add(
+            AthleteFeedback(
+                activity_id="run-fb",
+                recorded_at=datetime(2026, 2, 1, 9, tzinfo=timezone.utc),
+                rpe=9,
+                pain=6,
+                session_feel="very_hard",
+            )
+        )
+        self.db.commit()
+
+        closed = CanonicalProspectiveObservationService(self.db).resolve(today=date(2026, 3, 1))[0]
+        self.assertEqual(closed["subjective_feedback"]["rpe"], 5)
+        self.assertEqual(closed["subjective_feedback"]["pain"], None)
+        self.assertTrue(closed["subjective_feedback"]["recorded_at"].startswith("2026-01-12"))
+
+        replay = CanonicalProspectiveObservationService(self.db).resolve(today=date(2026, 1, 11))[0]
+        self.assertIsNone(replay["subjective_feedback"])
+
+    def test_only_late_feedback_stays_missing(self):
+        day = date(2026, 1, 10)
+        record = _rec(as_of_date=day, config_hash="late-only")
+        self.db.add(record)
+        self.db.flush()
+        self.db.add(
+            Activity(
+                activity_id="run-late",
+                activity_name="Easy",
+                start_time=datetime(2026, 1, 10, 8, tzinfo=timezone.utc),
+                duration=3000,
+                distance=8000,
+                activity_type_id=self.running.id,
+            )
+        )
+        self.db.add(
+            RecommendationExecution(
+                recommendation_id=record.id,
+                activity_id="run-late",
+                execution_status="followed",
+                planned_type="easy_run",
+                actual_type="easy_run",
+                linked_at=datetime(2026, 1, 10, 9, tzinfo=timezone.utc),
+            )
+        )
+        self.db.add(
+            AthleteFeedback(
+                activity_id="run-late",
+                recorded_at=datetime(2026, 2, 1, 9, tzinfo=timezone.utc),
+                rpe=9,
+                pain=4,
+            )
+        )
+        self.db.commit()
+        observation = CanonicalProspectiveObservationService(self.db).resolve(today=date(2026, 3, 1))[0]
+        self.assertIsNone(observation["subjective_feedback"])
+
+    def test_late_feedback_does_not_extend_a_closed_recovery_estimate(self):
+        act_day = date(2026, 1, 10)
+        self.db.add(
+            Activity(
+                activity_id="run-cost",
+                activity_name="Easy",
+                start_time=datetime(2026, 1, 10, 8, tzinfo=timezone.utc),
+                duration=3000,
+                distance=8000,
+                activity_type_id=self.running.id,
+            )
+        )
+        self.db.add(
+            AthleteFeedback(
+                activity_id="run-cost",
+                recorded_at=datetime(2026, 2, 1, 9, tzinfo=timezone.utc),
+                rpe=9,
+                pain=4,
+            )
+        )
+        self.db.commit()
+        activity = self.db.query(Activity).filter_by(activity_id="run-cost").one()
+        execution = RecommendationExecution(activity_id="run-cost", execution_status="followed")
+        ppap = MagicMock()
+        ppap.get_hrv_delta_pct.return_value = None
+        ppap.get_rhr_delta_bpm.return_value = None
+        service = RecoveryCostService(self.db, ppap)
+        self.assertIsNone(service._estimate_days_to_recover(act_day, execution, activity))
+
+        row = self.db.query(AthleteFeedback).one()
+        row.recorded_at = datetime(2026, 1, 12, 9, tzinfo=timezone.utc)
+        self.db.commit()
+        self.assertGreaterEqual(service._estimate_days_to_recover(act_day, execution, activity), 2.0)
+
+    def test_deload_ignores_feedback_recorded_after_the_assessed_day(self):
+        day = date(2026, 1, 10)
+        self.db.add(
+            Activity(
+                activity_id="run-deload",
+                activity_name="Easy",
+                start_time=datetime(2026, 1, 10, 8, tzinfo=timezone.utc),
+                duration=3000,
+                distance=8000,
+                activity_type_id=self.running.id,
+            )
+        )
+        for hour in range(3):
+            self.db.add(
+                AthleteFeedback(
+                    activity_id="run-deload",
+                    recorded_at=datetime(2026, 3, 1, hour, tzinfo=timezone.utc),
+                    rpe=9,
+                )
+            )
+        self.db.commit()
+        service = DeloadNeedService(self.db, None, MagicMock())
+        service._load = MagicMock()
+        service._load.analyze.return_value = {"flags": []}
+        service._phase = MagicMock()
+        service._phase.determine.return_value = {"phase": "build"}
+        service._ppap.get_hrv_delta_pct.return_value = None
+        service._ppap.get_rhr_delta_bpm.return_value = None
+        service._ppap.get_tsb.return_value = None
+        assessed = service.assess(day)
+        self.assertNotIn("rpe_drift", assessed["evidence"])
+        self.assertEqual(AthleteFeedbackService(self.db).on_or_before(day, limit=5), [])
+
+    def test_late_feedback_does_not_change_perceived_load(self):
+        activity = Activity(
+            activity_id="run-rpe",
+            activity_name="Easy",
+            start_time=datetime(2026, 1, 10, 8, tzinfo=timezone.utc),
+            duration=3600,
+            distance=10000,
+            training_stress_score=50,
+            activity_type_id=self.running.id,
+        )
+        self.db.add(activity)
+        self.db.add(
+            AthleteFeedback(
+                activity_id="run-rpe",
+                recorded_at=datetime(2026, 3, 1, 9, tzinfo=timezone.utc),
+                rpe=9,
+            )
+        )
+        self.db.commit()
+        late = PerceivedLoadService(self.db).analyze(activity, today=date(2026, 4, 1))
+        self.assertTrue(late["feedback_missing"])
+        self.assertIsNone(late["rpe"])
+        self.assertEqual(late["flags"], [])
+
+        self.db.query(AthleteFeedback).one().recorded_at = datetime(2026, 1, 12, 9, tzinfo=timezone.utc)
+        self.db.commit()
+        inside = PerceivedLoadService(self.db).analyze(activity, today=date(2026, 4, 1))
+        self.assertEqual(inside["rpe"], 9)
+        self.assertIn("higher_perceived_cost_than_expected", inside["flags"])
+        replay = PerceivedLoadService(self.db).analyze(activity, today=date(2026, 1, 11))
+        self.assertTrue(replay["feedback_missing"])
+
+    def test_recent_execution_ignores_links_after_the_day(self):
+        early = RecommendationExecution(
+            activity_id=None,
+            execution_status="followed",
+            planned_type="easy_run",
+            actual_type="easy_run",
+            linked_at=datetime(2026, 1, 10, 18, tzinfo=timezone.utc),
+        )
+        later = RecommendationExecution(
+            activity_id=None,
+            execution_status="replaced",
+            planned_type="threshold",
+            actual_type="vo2_intervals",
+            linked_at=datetime(2026, 3, 1, 18, tzinfo=timezone.utc),
+        )
+        self.db.add_all([early, later])
+        self.db.commit()
+        chosen = latest_execution_on_or_before(self.db, date(2026, 1, 15))
+        self.assertEqual(chosen.execution_status, "followed")
+        self.assertIsNone(latest_execution_on_or_before(self.db, date(2026, 1, 9)))
+
+    def test_feedback_for_many_observations_is_one_query(self):
+        for index in range(3):
+            day = date(2026, 3, 1 + index)
+            record = _rec(as_of_date=day, config_hash=f"fbq-{index}")
+            self.db.add(record)
+            self.db.flush()
+            self.db.add(
+                Activity(
+                    activity_id=f"run-{index}",
+                    activity_name="Easy",
+                    start_time=datetime(2026, 3, 1 + index, 8, tzinfo=timezone.utc),
+                    duration=3000,
+                    distance=8000,
+                    activity_type_id=self.running.id,
+                )
+            )
+            self.db.add(
+                RecommendationExecution(
+                    recommendation_id=record.id,
+                    activity_id=f"run-{index}",
+                    execution_status="followed",
+                    planned_type="easy_run",
+                    actual_type="easy_run",
+                    linked_at=datetime(2026, 3, 1 + index, 9, tzinfo=timezone.utc),
+                )
+            )
+            self.db.add(
+                AthleteFeedback(
+                    activity_id=f"run-{index}",
+                    recorded_at=datetime(2026, 3, 1 + index, 12, tzinfo=timezone.utc),
+                    rpe=4,
+                )
+            )
+        self.db.commit()
+        statements = []
+
+        def grab(_conn, _cursor, statement, _params, _context, _executemany):
+            if "athlete_feedback" in statement:
+                statements.append(statement)
+
+        event.listen(self.db.get_bind(), "before_cursor_execute", grab)
+        try:
+            rows = CanonicalProspectiveObservationService(self.db).resolve(today=date(2026, 4, 1))
+        finally:
+            event.remove(self.db.get_bind(), "before_cursor_execute", grab)
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(len(statements), 1)
+        self.assertTrue(all(row["subjective_feedback"]["rpe"] == 4 for row in rows))
 
 
 class SessionQualityUtilityTests(unittest.TestCase):

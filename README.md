@@ -206,5 +206,5 @@ Personlig prosjekt - Ikke for kommersiell bruk
 
 ---
 
-**Status:** ✅ Produksjonsklar  
-**Siste oppdatering:** Juli 2026
+**Status:** Observasjonsbasert coaching-evidens ligger oppå den prospektive kontrakten. Anbefalinger, gjennomføring, feedback og utfall telles som én kanonisk observasjon per beslutningskjede. Dashboardet sier fra når evidensen er for liten til å konkludere.  
+**Siste oppdatering:** September 2026

@@ -318,6 +318,7 @@ class AdaptiveCoachingV5Tests(unittest.TestCase):
             legs="heavy",
             pain=6,
             motivation=2,
+            recorded_at=datetime(2026, 5, 20, 12, tzinfo=timezone.utc),
         )
         high = PerceivedLoadService(self.db).analyze(activity)
         self.assertIn("higher_perceived_cost_than_expected", high["flags"])
@@ -329,6 +330,7 @@ class AdaptiveCoachingV5Tests(unittest.TestCase):
             legs="normal",
             pain=0,
             motivation=4,
+            recorded_at=datetime(2026, 5, 21, 12, tzinfo=timezone.utc),
         )
         normal = PerceivedLoadService(self.db).analyze(normal_act)
         self.assertNotIn("higher_perceived_cost_than_expected", normal["flags"])

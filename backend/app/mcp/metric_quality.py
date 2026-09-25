@@ -131,10 +131,39 @@ def build_metric_quality_report(
     }
 
 
+SUMMARY_KEYS = (
+    "total",
+    "ok",
+    "no_data",
+    "not_ingested",
+    "empty_source",
+    "unsupported",
+    "bug",
+    "unknown",
+    "heuristic_with_value",
+)
+
+CAPABILITY_NOTE = (
+    "no_data means the metric is supported or computed in code but has no points "
+    "in the current database. not_ingested and empty_source mean the source is "
+    "absent. bug means the query failed. Those are not the same problem."
+)
+
+
+def summary_delta(current: Dict[str, Any], previous: Dict[str, Any]) -> Dict[str, int]:
+    """Count change from a previous summary. Missing keys count as zero."""
+    return {
+        key: int(current.get(key) or 0) - int(previous.get(key) or 0)
+        for key in SUMMARY_KEYS
+    }
+
+
 def format_metric_quality_markdown(report: Dict[str, Any]) -> str:
     """Render rapport som markdown-tabell."""
     lines = [
         f"# Metric quality report — {report['reference_date']}",
+        "",
+        CAPABILITY_NOTE,
         "",
         f"- OK: **{report['summary']['ok']}** / {report['summary']['total']}",
         f"- Uten data: **{report['summary']['no_data']}**",

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Skriv METRIC_QUALITY_REPORT.md fra metric_quality_report()."""
+"""Overwrite METRIC_QUALITY_REPORT.md from the current database.
+
+Prefer `python -m app.tools.metric_quality` when you only want the summary.
+This script still writes the markdown file, and only when asked:
+
+    python scripts/generate_metric_quality_report.py --write-report
+"""
 
 from __future__ import annotations
 
@@ -9,20 +15,15 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
-from app.mcp.training_tools import metric_quality_report  # noqa: E402
-
-OUTPUT = Path(__file__).resolve().parents[2] / "METRIC_QUALITY_REPORT.md"
-
-
-def main() -> None:
-    report = metric_quality_report(markdown=True)
-    OUTPUT.write_text(report["markdown"], encoding="utf-8")
-    summary = report["summary"]
-    print(
-        f"Wrote {OUTPUT} — ok={summary['ok']}/{summary['total']}, "
-        f"no_data={summary['no_data']}, bug={summary['bug']}"
-    )
+from app.tools.metric_quality import main  # noqa: E402
 
 
 if __name__ == "__main__":
-    main()
+    argv = sys.argv[1:]
+    if "--write-report" not in argv:
+        sys.stderr.write(
+            "Refusing to overwrite METRIC_QUALITY_REPORT.md without --write-report.\n"
+            "Print a summary with: python -m app.tools.metric_quality\n"
+        )
+        raise SystemExit(2)
+    raise SystemExit(main(argv))

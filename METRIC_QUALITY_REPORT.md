@@ -1,5 +1,12 @@
 # Metric quality report — 2026-06-07
 
+> Fast snapshot fra 2026-06-07 mot en database med Garmin-data.
+> Filen er ikke en live måling. Regenerer bevisst med
+> `python -m app.tools.metric_quality --write-report` fra `backend/` når
+> databasen har de aktivitetene rapporten skal beskrive.
+> `no_data` betyr at metrikken er støttet i kode, men mangler punkter i
+> aktuell database. Det er ikke det samme som `bug`.
+
 - OK: **328** / 404
 - Uten data: **29**
 - Ikke ingestet: **25**

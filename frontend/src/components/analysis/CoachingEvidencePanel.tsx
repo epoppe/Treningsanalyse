@@ -1,0 +1,364 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { EvidenceBadge, AnalysisEmpty, AnalysisError, AnalysisSkeleton } from "@/components/analysis/ui";
+import { useCoachingEvidence } from "@/hooks/useCoachingEvidence";
+import type { CoachingEvidencePayload, CoachingTypeEvidence } from "@/types/coachingEvidence";
+
+const WINDOWS = [30, 90, 180, 365];
+
+function percent(value: number | null | undefined): string {
+  if (value == null) return "–";
+  return `${Math.round(value * 100)} %`;
+}
+
+function metric(value: number | null, sampleCount: number): string {
+  if (value == null || sampleCount === 0) return "–";
+  return `${value.toFixed(2)} (N ${sampleCount})`;
+}
+
+function matchLabel(source: string | null | undefined): string {
+  if (source === "explicit_execution") return "eksplisitt";
+  if (source === "legacy_heuristic") return "heuristisk";
+  return source || "";
+}
+
+function executionLabel(status: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    followed: "fulgt",
+    modified: "justert",
+    replaced: "erstattet",
+    skipped: "hoppet over",
+    pending: "venter",
+  };
+  if (!status) return "ukjent";
+  return labels[status] || status;
+}
+
+const GROUP_LABELS: Record<string, string> = {
+  easy: "rolig",
+  long: "langtur",
+  threshold: "terskel",
+  intervals: "intervaller",
+  race: "konkurranse",
+};
+
+function DataQualitySection({
+  snapshot,
+}: {
+  snapshot: NonNullable<CoachingEvidencePayload["data_quality_snapshot"]>;
+}) {
+  const counts = snapshot.observations;
+  const missing = snapshot.missing_sources.map((item) => item.source).join(", ");
+  const groups = Object.entries(snapshot.feedback_by_group)
+    .filter(([, bucket]) => bucket.recommendations > 0)
+    .map(([name, bucket]) => `${GROUP_LABELS[name] || name} ${percent(bucket.coverage)}`)
+    .join(" · ");
+  const shift =
+    snapshot.coverage_shifts.length > 0
+      ? snapshot.coverage_shifts
+          .map((item) => `${item.source} ${item.delta > 0 ? "+" : ""}${Math.round(item.delta * 100)} pp`)
+          .join(", ")
+      : "Ingen brå endring i HRV-, søvn- eller hvilepulsdekning.";
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+      <h3 className="font-semibold text-slate-900">Datakvalitet</h3>
+      <p className="mt-1">Siste sync {snapshot.freshness.last_sync_at ?? "ukjent"}</p>
+      <p>
+        Venter {counts.pending} · vurdert {counts.evaluated} · ufullstendig {counts.incomplete} · utelatt{" "}
+        {counts.excluded}
+      </p>
+      <p>Manglende kilder: {missing || "ingen"}</p>
+      <p>{shift}</p>
+      {groups ? <p>Feedback {groups}</p> : null}
+    </section>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function TypeCard({
+  row,
+  open,
+  onToggle,
+}: {
+  row: CoachingTypeEvidence;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <article className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">{row.label}</h3>
+        <EvidenceBadge evidence={(row.evidence_level || "insufficient").toLowerCase()} />
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-slate-600 sm:grid-cols-3">
+        <div>Anbefalinger {row.recommendation_count}</div>
+        <div>Utførelse {row.execution_count}</div>
+        <div>Modne utfall {row.mature_outcome_count}</div>
+        <div>Venter {row.pending_count}</div>
+        <div>Ufullstendig {row.incomplete_count}</div>
+        <div>Feedback {row.feedback_count}</div>
+        <div>Korttid {metric(row.short_term_outcome, row.short_term_sample_count)}</div>
+        <div>Restitusjon {metric(row.observed_recovery_response, row.observed_recovery_sample_count)}</div>
+        <div>Sesjonskvalitet {metric(row.session_quality, row.session_quality_sample_count)}</div>
+        <div>Datakvalitet {metric(row.data_quality_mean ?? null, row.data_quality_sample_count ?? 0)}</div>
+      </dl>
+      <p className="mt-2 text-xs text-slate-700">
+        Konklusjonsstyrke {row.conclusion_strength_label || row.conclusion_strength}
+      </p>
+      <button type="button" className="mt-2 text-xs font-medium text-slate-900 underline" onClick={onToggle}>
+        {open ? "Skjul observasjoner" : "Vis observasjoner"}
+      </button>
+      {open ? (
+        <ul className="mt-2 space-y-1 text-xs text-slate-700">
+          {row.observations.length === 0 ? <li>Ingen observasjoner i vinduet.</li> : null}
+          {row.observations.map((item) => (
+            <li key={`${item.recommendation_id}-${item.as_of_date}`}>
+              {item.as_of_date} · {executionLabel(item.execution_status)} · {item.short_term_maturity || "–"}
+              {item.match_source ? ` · ${matchLabel(item.match_source)}` : ""}
+              {item.activity_id ? (
+                <>
+                  {" "}
+                  <Link className="underline" href={`/activities/${item.activity_id}`}>
+                    Åpne økt
+                  </Link>
+                </>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </article>
+  );
+}
+
+export function CoachingEvidenceView({
+  data,
+  windowDays,
+  onWindow,
+}: {
+  data: CoachingEvidencePayload;
+  windowDays: number;
+  onWindow: (days: number) => void;
+}) {
+  const [openType, setOpenType] = useState<string | null>(null);
+  const overview = data.overview;
+  const empty = overview.canonical_recommendation_count === 0;
+
+  return (
+    <div className="space-y-4">
+      <header className="space-y-2">
+        <h2 className="text-lg font-semibold text-slate-900">Lærer coachen faktisk av treningen din?</h2>
+        <p className="text-sm text-slate-600">
+          Prospektiv observasjon i valgt vindu. Vinduet endrer ikke modeller eller kalibrering.
+        </p>
+        {data.coaching_change?.text ? (
+          <p className="text-sm text-slate-700">{data.coaching_change.text}</p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          {(data.period.allowed_windows || WINDOWS).map((days) => (
+            <button
+              key={days}
+              type="button"
+              onClick={() => onWindow(days)}
+              className={
+                days === windowDays
+                  ? "rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white"
+                  : "rounded-md bg-white px-2 py-1 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200"
+              }
+            >
+              {days === 365 ? "1 år" : `${days} dager`}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {data.data_quality_snapshot ? (
+        <DataQualitySection snapshot={data.data_quality_snapshot} />
+      ) : null}
+
+      <section className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        <SummaryCard label="Prospektive anbefalinger" value={String(overview.canonical_recommendation_count)} />
+        <SummaryCard label="Modne short-term outcomes" value={String(overview.short_term_outcome_count)} />
+        <SummaryCard label="Personlig evidens" value={overview.evidence_label} />
+        <SummaryCard label="Feedback-dekning" value={percent(overview.feedback_coverage)} />
+        <SummaryCard label="Eksplisitt activity matching" value={percent(overview.explicit_matching_share)} />
+      </section>
+
+      {empty ? (
+        <AnalysisEmpty
+          title="Ingen kanoniske anbefalinger i vinduet"
+          description="Venter og manglende data er ikke et negativt utfall."
+        />
+      ) : null}
+
+      <section className="grid gap-2 sm:grid-cols-2">
+        {data.maturity_legend.map((item) => (
+          <div key={item.status} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <p className="text-xs font-semibold text-slate-900">{item.label}</p>
+            <p className="mt-1 text-xs text-slate-600">{item.text}</p>
+          </div>
+        ))}
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-slate-900">Hva systemet har lært om deg</h3>
+        {data.what_we_know.length === 0 ? (
+          <AnalysisEmpty title="Ingen støttet eller fremvoksende læring i vinduet" />
+        ) : (
+          data.what_we_know.map((item) => (
+            <p key={item.workout_type || item.text} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              {item.text}
+            </p>
+          ))
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-slate-900">Hva systemet fortsatt ikke vet</h3>
+        {data.what_we_do_not_know.map((item) => (
+          <p key={`${item.code}-${item.workout_type || "all"}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+            {item.text}
+          </p>
+        ))}
+      </section>
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-slate-900">Effekt og gjennomføring</h3>
+        <p className="text-xs text-slate-500">{data.feasibility.note}</p>
+        <p className="text-xs text-slate-600">
+          Fulgt {data.feasibility.followed} · Justert {data.feasibility.modified} · Erstattet {data.feasibility.replaced} · Hoppet over {data.feasibility.skipped} · Venter {data.feasibility.pending}
+        </p>
+        <div className="grid gap-2 md:grid-cols-2">
+          {data.effectiveness.map((row) => (
+            <TypeCard
+              key={row.workout_type}
+              row={row}
+              open={openType === row.workout_type}
+              onToggle={() => setOpenType(openType === row.workout_type ? null : row.workout_type)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="grid gap-2 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+          <h3 className="font-semibold text-slate-900">Confidence</h3>
+          <p className="mt-1">Status {data.confidence.status}</p>
+          <p>N {data.confidence.sample_count}</p>
+          <p>Brier {data.confidence.brier_score ?? "–"}</p>
+          <p>Kalibreringsfeil {data.confidence.expected_calibration_error ?? "–"}</p>
+          {data.confidence.status !== "INSUFFICIENT_DATA" && data.confidence.bins && data.confidence.bins.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs text-slate-600">
+              {data.confidence.bins.map((bin) => (
+                <li key={bin.bin}>
+                  {bin.bin}: N {bin.n}, predikert {bin.predicted_mean}, observert {bin.empirical_frequency}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+          <h3 className="font-semibold text-slate-900">Evidenskvalitet</h3>
+          <p className="mt-1">
+            Rå N {data.evidence_quality.raw_sample_count} · effektiv N {data.evidence_quality.effective_sample_count}
+          </p>
+          <p>Spredning {data.evidence_quality.spread_days ?? "–"} dager · {data.evidence_quality.sufficiency_label}</p>
+          <p>
+            Eksplisitt {data.evidence_quality.explicit_execution_matches} · heuristisk {data.evidence_quality.legacy_heuristic_matches}
+          </p>
+          <p>
+            Venter {data.evidence_quality.pending_windows} · ufullstendig {data.evidence_quality.incomplete_windows}
+          </p>
+        </div>
+      </section>
+
+      <section className="grid gap-2 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+          <h3 className="font-semibold text-slate-900">Objektive signaler</h3>
+          <p className="mt-1">{data.signals.objective.sources.join(", ")}</p>
+          <p>Korttid N {data.signals.objective.short_term_sample_count}</p>
+          <p>Sesjonskvalitet N {data.signals.objective.session_quality_sample_count}</p>
+        </div>
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+          <h3 className="font-semibold text-slate-900">Subjektive signaler</h3>
+          <p className="mt-1">{data.signals.subjective.sources.join(", ")}</p>
+          <p>N {data.signals.subjective.sample_count} · dekning {percent(data.signals.subjective.coverage)}</p>
+          {data.signals.subjective.fields ? (
+            <p>
+              RPE {data.signals.subjective.fields.rpe} · følelse {data.signals.subjective.fields.session_feel} · bein{" "}
+              {data.signals.subjective.fields.legs} · motivasjon {data.signals.subjective.fields.motivation} · smerte{" "}
+              {data.signals.subjective.fields.pain}
+            </p>
+          ) : null}
+          {data.signals.subjective.quality_session_count ? (
+            <p>
+              Kvalitetsøkter {data.signals.subjective.quality_feedback_count ?? 0} av{" "}
+              {data.signals.subjective.quality_session_count}
+            </p>
+          ) : null}
+          <p>Kilde {data.signals.subjective.provenance}. Ikke fasit.</p>
+        </div>
+      </section>
+
+      {data.operations_lines && data.operations_lines.length > 0 ? (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-900">Drift</h3>
+          <div className="grid gap-2 md:grid-cols-2">
+            {data.operations_lines.map((line) => (
+              <p key={line.code} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+                <span className="font-medium text-slate-900">{line.label}. </span>
+                {line.text}
+              </p>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section className="rounded-xl border border-slate-200 bg-white px-3 py-3">
+        <h3 className="text-sm font-semibold text-slate-900">Dette bør ikke endres ennå</h3>
+        <ul className="mt-2 list-disc space-y-1 pl-4 text-sm text-slate-700">
+          {(data.do_not_change_nb || data.do_not_change).map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+export function CoachingEvidencePanel() {
+  const [windowDays, setWindowDays] = useState(90);
+  const query = useCoachingEvidence(windowDays);
+
+  if (query.isLoading) {
+    return (
+      <div className="space-y-2" role="status" aria-label="Laster coaching-evidens">
+        <AnalysisSkeleton className="h-8 w-2/3" />
+        <AnalysisSkeleton className="h-24 w-full" />
+      </div>
+    );
+  }
+  if (query.isError) {
+    return (
+      <AnalysisError
+        title="Kunne ikke laste coaching-evidens"
+        description={query.error instanceof Error ? query.error.message : undefined}
+        onRetry={() => query.refetch()}
+      />
+    );
+  }
+  if (!query.data) {
+    return <AnalysisEmpty title="Ingen evidens å vise" />;
+  }
+  return <CoachingEvidenceView data={query.data} windowDays={windowDays} onWindow={setWindowDays} />;
+}

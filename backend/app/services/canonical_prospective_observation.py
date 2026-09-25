@@ -16,9 +16,11 @@ from sqlalchemy.orm import Session, joinedload
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback, RecommendationExecution, RecommendationRecord
 from ..utils.activity_filters import is_running_activity
+from .athlete_feedback_service import feedback_on_or_before
 from .outcome_maturity import (
     EVALUATED,
     PENDING,
+    SHORT_TERM_LAG_DAYS,
     execution_maturity,
 )
 from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
@@ -62,6 +64,9 @@ class CanonicalProspectiveObservationService:
         query = self.db.query(RecommendationRecord)
         if not include_shadow:
             query = query.filter(RecommendationRecord.is_shadow.is_(False))
+        # Keep the full non-shadow table here. An as_of_date filter in SQL drops
+        # supersede partners outside the window and can publish a predecessor as
+        # its own observation. The window is applied after the chain is built.
         records = query.all()
         observations = self._canonicalize(records, today=today)
         if start is not None:
@@ -119,6 +124,7 @@ class CanonicalProspectiveObservationService:
         components = _components(records)
         executions = self._executions_by_recommendation()
         activities = self._activities_by_id()
+        feedback_index = self._feedback_index()
         tips: List[Dict[str, Any]] = []
         for members in components:
             tip, quality, chain_ids = _select_tip(members)
@@ -153,6 +159,7 @@ class CanonicalProspectiveObservationService:
                     excluded_ids=excluded_ids,
                     executions=executions,
                     activities=activities,
+                    feedback_index=feedback_index,
                     today=today,
                     as_of=day,
                 )
@@ -168,6 +175,7 @@ class CanonicalProspectiveObservationService:
         excluded_ids: List[int],
         executions: Dict[int, RecommendationExecution],
         activities: Dict[str, Activity],
+        feedback_index: Dict[str, List[AthleteFeedback]],
         today: date,
         as_of: date,
     ) -> Dict[str, Any]:
@@ -246,7 +254,12 @@ class CanonicalProspectiveObservationService:
             observation_status = execution_maturity(as_of, today, has_outcome=has_execution_outcome)
             exec_maturity = observation_status
 
-        feedback = self._feedback_for_activity(activity_id)
+        feedback = self._feedback_for_activity(
+            activity_id,
+            as_of=as_of,
+            today=today,
+            feedback_index=feedback_index,
+        )
         return {
             "recommendation_id": tip.id,
             "as_of_date": as_of.isoformat(),
@@ -330,20 +343,48 @@ class CanonicalProspectiveObservationService:
             )
         return None
 
-    def _feedback_for_activity(self, activity_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _feedback_index(self) -> Dict[str, List[AthleteFeedback]]:
+        grouped: Dict[str, List[AthleteFeedback]] = defaultdict(list)
+        rows = (
+            self.db.query(AthleteFeedback)
+            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+            .all()
+        )
+        for row in rows:
+            grouped[str(row.activity_id)].append(row)
+        return grouped
+
+    def _feedback_for_activity(
+        self,
+        activity_id: Optional[str],
+        *,
+        as_of: date,
+        today: date,
+        feedback_index: Dict[str, List[AthleteFeedback]],
+    ) -> Optional[Dict[str, Any]]:
+        """Latest feedback that existed by the short-term cutoff.
+
+        Feedback recorded after min(today, as_of + SHORT_TERM_LAG_DAYS) is not
+        part of this observation. A missing row stays missing. The index is
+        loaded once per resolve and is already newest-first.
+        """
         if not activity_id:
             return None
-        row = (
-            self.db.query(AthleteFeedback)
-            .filter(AthleteFeedback.activity_id == str(activity_id))
-            .order_by(AthleteFeedback.recorded_at.desc())
-            .first()
+        cutoff = min(today, as_of + timedelta(days=SHORT_TERM_LAG_DAYS))
+        row = next(
+            (
+                item
+                for item in feedback_index.get(str(activity_id), [])
+                if feedback_on_or_before(item.recorded_at, cutoff)
+            ),
+            None,
         )
         if row is None:
             return None
         return {
             "id": row.id,
             "activity_id": row.activity_id,
+            "recorded_at": row.recorded_at.isoformat() if row.recorded_at else None,
             "rpe": row.rpe,
             "pain": row.pain,
             "session_feel": row.session_feel,

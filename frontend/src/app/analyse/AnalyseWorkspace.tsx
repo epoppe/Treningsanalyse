@@ -27,6 +27,7 @@ import { RelationshipCard } from "@/components/analysis/RelationshipCard";
 import { RelationshipMatrixView } from "@/components/analysis/RelationshipMatrixView";
 import { TrainingResponsePanel } from "@/components/analysis/TrainingResponsePanel";
 import { TrendSummaryCard } from "@/components/analysis/TrendSummaryCard";
+import { CoachingEvidencePanel } from "@/components/analysis/CoachingEvidencePanel";
 import {
   AnalysisEmpty,
   AnalysisError,
@@ -398,13 +399,14 @@ export default function AnalyseWorkspace() {
         </p>
       </header>
 
-      <AnalysisFiltersBar />
-      <SavedAnalysisViews />
+      {state.tab === "coaching" ? null : <AnalysisFiltersBar />}
+      {state.tab === "coaching" ? null : <SavedAnalysisViews />}
       <AnalysisTabs />
 
       {state.tab === "utvikling" ? <UtviklingPanel /> : null}
       {state.tab === "sammenhenger" ? <SammenhengerPanel /> : null}
       {state.tab === "historikk" ? <HistorikkPanel /> : null}
+      {state.tab === "coaching" ? <CoachingEvidencePanel /> : null}
     </div>
   );
 }

@@ -731,3 +731,66 @@ def get_activity_efficiency_metrics(
     except Exception as e:
         logger.error(f"Feil ved beregning av efficiency metrics for aktivitet {activity_id}: {e}")
         raise HTTPException(status_code=500, detail=f"En feil oppstod: {str(e)}")
+
+
+class ActivityFeedbackBody(BaseModel):
+    rpe: Optional[int] = None
+    pain: Optional[int] = None
+    motivation: Optional[int] = None
+    session_feel: Optional[str] = None
+    legs: Optional[str] = None
+    notes: Optional[str] = Field(None, max_length=2000)
+
+
+def _feedback_or_404(db: Session, activity_id: str):
+    activity = db.query(Activity).filter(Activity.activity_id == str(activity_id)).first()
+    if activity is None:
+        raise HTTPException(status_code=404, detail="activity not found")
+    return activity
+
+
+@router.get("/activities/{activity_id}/feedback")
+def read_activity_feedback(activity_id: str, db: Session = Depends(get_db)) -> dict:
+    from ..services.athlete_feedback_service import AthleteFeedbackService, feedback_scales
+
+    _feedback_or_404(db, activity_id)
+    return {
+        "status": "ok",
+        "activity_id": str(activity_id),
+        "feedback": AthleteFeedbackService(db).get_for_activity(activity_id),
+        **feedback_scales(),
+    }
+
+
+@router.put("/activities/{activity_id}/feedback")
+def put_activity_feedback(
+    activity_id: str,
+    body: ActivityFeedbackBody,
+    db: Session = Depends(get_db),
+) -> dict:
+    from ..services.athlete_feedback_service import AthleteFeedbackService, feedback_scales
+
+    _feedback_or_404(db, activity_id)
+    try:
+        saved = AthleteFeedbackService(db).upsert(
+            activity_id,
+            rpe=body.rpe,
+            pain=body.pain,
+            motivation=body.motivation,
+            session_feel=body.session_feel,
+            legs=body.legs,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"status": "ok", "feedback": saved, **feedback_scales()}
+
+
+@router.get("/activities/{activity_id}/feedback-prompt")
+def read_activity_feedback_prompt(activity_id: str, db: Session = Depends(get_db)) -> dict:
+    from ..services.feedback_prompt_service import FeedbackPromptService
+
+    result = FeedbackPromptService(db).for_activity(activity_id)
+    if result.get("status") == "not_found":
+        raise HTTPException(status_code=404, detail="activity not found")
+    return result

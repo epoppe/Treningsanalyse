@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import ActivityAnalytics from "@/components/ActivityAnalytics";
 import ActivityDetailsCharts from "@/components/ActivityDetailsCharts";
 import { ComparableSessionsSection } from "@/components/cockpit/ComparableSessionsCard";
+import { SessionFeelFeedback } from "@/components/cockpit/SessionFeelFeedback";
 import type { AsyncLoadState } from "@/utils/metricState";
 
 function InterpretationBlock({
@@ -107,6 +108,10 @@ const ActivityDetailPage = () => {
           Session type og struktur vurderes av coaching-/analysebackend. Frontend lager ikke egne
           anbefalinger.
         </p>
+      </InterpretationBlock>
+
+      <InterpretationBlock eyebrow="Hvordan føltes økten?" title="Subjektiv feedback">
+        <SessionFeelFeedback activityId={String(id)} />
       </InterpretationBlock>
 
       <InterpretationBlock eyebrow="How well did it go?" title="Session quality & execution">
