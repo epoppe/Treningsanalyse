@@ -125,7 +125,9 @@ before `min(today, as_of + SHORT_TERM_LAG_DAYS)`. A later row does not replace
 an in-window row, and feedback that exists only after the cutoff stays missing.
 Edits update the latest row and keep the original `recorded_at`. The same cutoff
 applies when feedback raises an observed recovery estimate. Deload on a date
-uses feedback recorded on or before that date.
+uses feedback recorded on or before that date. Perceived load for an activity
+uses `min(today, activity day + SHORT_TERM_LAG_DAYS)`. The decision brief's
+latest execution is the latest link on or before the brief date.
 
 ## Sufficiency
 

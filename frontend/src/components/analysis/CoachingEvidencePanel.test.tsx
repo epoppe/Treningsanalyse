@@ -180,6 +180,18 @@ describe("CoachingEvidenceView", () => {
     expect(screen.queryByText(/0.5-0.6/)).not.toBeInTheDocument();
   });
 
+  it("shows an observational before/after only when the payload includes one", () => {
+    const data = payload({
+      coaching_change: {
+        status: "OBSERVATIONAL",
+        text: "Korttidsutfall er høyere i andre halvdel (0.70) enn i første (0.40), N 12 og 12. Observasjonelt, ikke en påvist effekt av coachen.",
+      },
+    });
+    render(<CoachingEvidenceView data={data} windowDays={90} onWindow={() => undefined} />);
+    expect(screen.getByText(/ikke en påvist effekt av coachen/)).toBeInTheDocument();
+    expect(screen.queryByText(/For lite prospektiv evidens til å konkludere/)).not.toBeInTheDocument();
+  });
+
   it("shows calibration bins only when the status is not insufficient", () => {
     const data = payload();
     data.confidence.status = "well_calibrated";

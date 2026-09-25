@@ -24,6 +24,7 @@ from app.database.models.coaching_v5 import (
     TrainingPlanVersion,
 )
 from app.services.canonical_prospective_observation import CanonicalProspectiveObservationService
+from app.services.coaching_evidence_dashboard_service import coaching_change_comparison
 
 
 def _rec(**overrides) -> RecommendationRecord:
@@ -246,6 +247,76 @@ class CoachingEvidenceApiTests(unittest.TestCase):
     def test_invalid_window_is_422(self):
         res = self.client.get("/api/dashboard/coaching-evidence", params={"window_days": 14})
         self.assertEqual(res.status_code, 422)
+
+
+class CoachingChangeTests(unittest.TestCase):
+    def test_emerging_window_stays_insufficient(self):
+        start = date(2026, 1, 1)
+        end = date(2026, 7, 1)
+        observations, utilities = _halves(start)
+        result = coaching_change_comparison(
+            observations,
+            utilities,
+            {"level": "EMERGING"},
+            start=start,
+            end=end,
+        )
+        self.assertEqual(result["status"], "INSUFFICIENT_EVIDENCE")
+        self.assertNotIn("direction", result)
+
+    def test_supported_window_with_thin_halves_stays_insufficient(self):
+        start = date(2026, 1, 1)
+        end = date(2026, 7, 1)
+        observations = []
+        utilities = {}
+        for index in range(12):
+            observations.append(
+                {"recommendation_id": index, "as_of_date": (start + timedelta(days=index)).isoformat()}
+            )
+            utilities[index] = {"short_term_maturity": "evaluated", "short_term_utility": 0.6}
+        result = coaching_change_comparison(
+            observations,
+            utilities,
+            {"level": "SUPPORTED"},
+            start=start,
+            end=end,
+        )
+        self.assertEqual(result["status"], "INSUFFICIENT_EVIDENCE")
+        self.assertEqual(result["later_n"], 0)
+
+    def test_two_full_halves_are_observational(self):
+        start = date(2026, 1, 1)
+        end = date(2026, 7, 1)
+        observations, utilities = _halves(start, earlier=0.4, later=0.7)
+        result = coaching_change_comparison(
+            observations,
+            utilities,
+            {"level": "STRONG"},
+            start=start,
+            end=end,
+        )
+        self.assertEqual(result["status"], "OBSERVATIONAL")
+        self.assertEqual(result["direction"], "later_higher")
+        self.assertFalse(result["causal"])
+        self.assertEqual(result["earlier_n"], 12)
+        self.assertEqual(result["later_n"], 12)
+        self.assertIn("ikke en påvist effekt", result["text"])
+
+
+def _halves(start: date, *, earlier: float = 0.4, later: float = 0.7):
+    observations = []
+    utilities = {}
+    for index in range(12):
+        observations.append(
+            {"recommendation_id": index, "as_of_date": (start + timedelta(days=index)).isoformat()}
+        )
+        utilities[index] = {"short_term_maturity": "evaluated", "short_term_utility": earlier}
+        late_id = index + 100
+        observations.append(
+            {"recommendation_id": late_id, "as_of_date": date(2026, 6, 1 + index).isoformat()}
+        )
+        utilities[late_id] = {"short_term_maturity": "evaluated", "short_term_utility": later}
+    return observations, utilities
 
 
 class MediumGapTests(unittest.TestCase):

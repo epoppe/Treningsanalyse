@@ -67,9 +67,11 @@ the short-term cutoff in `docs/PROSPECTIVE_EVIDENCE_CONTRACT.md`.
 `data_quality_snapshot` on this response is the same object as the MCP tool
 `data_quality_snapshot`. It composes `DataLatencyMonitor` and
 `DataQualityTrendService` with the canonical observations already resolved for
-the dashboard. `coaching_change.status` stays `INSUFFICIENT_EVIDENCE` until a
-before/after comparison exists. One sufficient window is not proof that
-coaching improved.
+the dashboard. `coaching_change.status` is `INSUFFICIENT_EVIDENCE` unless the short-term
+window is `SUPPORTED` or `STRONG` and each half of the window has at least
+the workout-effectiveness emerging floor. Only then is the status
+`OBSERVATIONAL`, with early and late means, N, and an explicit non-causal
+wording. A small difference stays `unchanged`.
 
 `GET /api/activities/{activity_id}/feedback-prompt` asks `FeedbackValueService`
 whether a prompt has information value. It does not prompt every workout,

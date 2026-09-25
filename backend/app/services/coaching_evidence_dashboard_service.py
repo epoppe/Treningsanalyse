@@ -28,6 +28,7 @@ from .data_quality_snapshot import DataQualitySnapshotService
 from .feedback_prompt_service import QUALITY_SESSION_TYPES
 from .monthly_coaching_review_service import coaching_do_not_change
 from .outcome_maturity import EVALUATED, INCOMPLETE_DATA, PENDING, is_usable_status
+from .sample_sufficiency_policy import DOMAIN_FLOORS
 from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
 from .sample_sufficiency_policy import SampleSufficiencyPolicy
 
@@ -107,6 +108,83 @@ MATURITY_LEGEND = (
         "text": "Enkelte outcomes finnes, men samlet N eller spredning er for lav.",
     },
 )
+
+
+_INSUFFICIENT_CHANGE = {
+    "status": "INSUFFICIENT_EVIDENCE",
+    "text": "For lite prospektiv evidens til å konkludere om coachen har blitt bedre.",
+    "causal": False,
+}
+_CHANGE_DELTA_FLOOR = 0.05
+
+
+def coaching_change_comparison(
+    observations: List[Dict[str, Any]],
+    utilities: Dict[int, Dict[str, Any]],
+    short_sufficiency: Dict[str, Any],
+    *,
+    start: date,
+    end: date,
+) -> Dict[str, Any]:
+    """Observational early-vs-late short-term utility.
+
+    The comparison is returned only when the whole window is SUPPORTED or
+    STRONG and each half meets the workout-effectiveness emerging floor.
+    """
+    level = short_sufficiency.get("level")
+    if level not in {"SUPPORTED", "STRONG"}:
+        return {**_INSUFFICIENT_CHANGE, "evidence_level": level}
+    points = []
+    for row in observations:
+        utility = utilities.get(row["recommendation_id"]) or {}
+        if is_usable_status(utility.get("short_term_maturity")) and utility.get("short_term_utility") is not None:
+            points.append((date.fromisoformat(row["as_of_date"]), float(utility["short_term_utility"])))
+    midpoint = start + (end - start) / 2
+    earlier = [value for day, value in points if day < midpoint]
+    later = [value for day, value in points if day >= midpoint]
+    floor = DOMAIN_FLOORS["workout_effectiveness"]["emerging"]
+    if len(earlier) < floor or len(later) < floor:
+        return {
+            **_INSUFFICIENT_CHANGE,
+            "evidence_level": level,
+            "earlier_n": len(earlier),
+            "later_n": len(later),
+            "reason": "Each half of the window needs the emerging short-term floor before a comparison is shown.",
+        }
+    earlier_mean = round(sum(earlier) / len(earlier), 3)
+    later_mean = round(sum(later) / len(later), 3)
+    delta = round(later_mean - earlier_mean, 3)
+    if abs(delta) < _CHANGE_DELTA_FLOOR:
+        direction = "unchanged"
+        text = (
+            f"Korttidsutfall er omtrent uendret fra første til andre halvdel "
+            f"({earlier_mean} og {later_mean}, N {len(earlier)} og {len(later)}). "
+            "Det er en observasjon, ikke en årsak."
+        )
+    elif delta > 0:
+        direction = "later_higher"
+        text = (
+            f"Korttidsutfall er høyere i andre halvdel ({later_mean}) enn i første ({earlier_mean}), "
+            f"N {len(earlier)} og {len(later)}. Observasjonelt, ikke en påvist effekt av coachen."
+        )
+    else:
+        direction = "later_lower"
+        text = (
+            f"Korttidsutfall er lavere i andre halvdel ({later_mean}) enn i første ({earlier_mean}), "
+            f"N {len(earlier)} og {len(later)}. Observasjonelt, ikke en påvist effekt av coachen."
+        )
+    return {
+        "status": "OBSERVATIONAL",
+        "evidence_level": level,
+        "direction": direction,
+        "earlier_mean": earlier_mean,
+        "later_mean": later_mean,
+        "earlier_n": len(earlier),
+        "later_n": len(later),
+        "delta": delta,
+        "text": text,
+        "causal": False,
+    }
 
 
 def _mean(values: List[float]) -> Optional[float]:
@@ -215,14 +293,13 @@ class CoachingEvidenceDashboardService:
             "operations": operations,
             "operations_lines": _operations_lines(operations),
             "data_quality_snapshot": snapshot,
-            "coaching_change": {
-                "status": "INSUFFICIENT_EVIDENCE",
-                "text": "For lite prospektiv evidens til å konkludere om coachen har blitt bedre.",
-                "reason": (
-                    "No before/after comparison is defined. "
-                    "A sufficient window is not evidence that coaching improved."
-                ),
-            },
+            "coaching_change": coaching_change_comparison(
+                observations,
+                utilities,
+                short_sufficiency,
+                start=start,
+                end=end,
+            ),
             "what_we_know": known,
             "what_we_do_not_know": unknown,
             "do_not_change": do_not_change,

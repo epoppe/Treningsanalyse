@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database.models.activity import Activity
 from ..database.models.coaching_v5 import AthleteFeedback
 from .athlete_feedback_service import AthleteFeedbackService
+from .outcome_maturity import SHORT_TERM_LAG_DAYS
 
 
 class PerceivedLoadService:
@@ -16,8 +19,11 @@ class PerceivedLoadService:
         self.db = db
         self._feedback = AthleteFeedbackService(db)
 
-    def analyze(self, activity: Activity) -> Dict[str, Any]:
-        feedback = self._feedback.get_for_activity(activity.activity_id)
+    def analyze(self, activity: Activity, *, today: Optional[date] = None) -> Dict[str, Any]:
+        today = today or date.today()
+        act_day = activity.start_time.date() if activity.start_time is not None else today
+        cutoff = min(today, act_day + timedelta(days=SHORT_TERM_LAG_DAYS))
+        feedback = self._feedback_on_or_before(activity.activity_id, cutoff)
         duration_min = (float(activity.duration) / 60.0) if activity.duration else None
         rpe = feedback.get("rpe") if feedback else None
         srpe = round(duration_min * rpe, 1) if duration_min and rpe else None
@@ -33,7 +39,7 @@ class PerceivedLoadService:
                 flags.append("higher_perceived_cost_than_expected")
             elif srpe < expected_srpe * 0.75:
                 flags.append("lower_perceived_cost_than_expected")
-        systematic = self._systematic_bias(activity.activity_id)
+        systematic = self._systematic_bias(cutoff)
         return {
             "activity_id": activity.activity_id,
             "session_rpe_load": srpe,
@@ -49,19 +55,36 @@ class PerceivedLoadService:
             "note": "Single-session mismatch is not a diagnosis. Look for repeated bias.",
         }
 
-    def _systematic_bias(self, current_id: str) -> Optional[str]:
+    def _feedback_on_or_before(self, activity_id: str, cutoff: date) -> Optional[Dict[str, Any]]:
+        row = (
+            self.db.query(AthleteFeedback)
+            .filter(AthleteFeedback.activity_id == str(activity_id))
+            .filter(func.date(AthleteFeedback.recorded_at) <= cutoff.isoformat())
+            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
+            .first()
+        )
+        return AthleteFeedbackService._to_dict(row) if row else None
+
+    def _systematic_bias(self, cutoff: date) -> Optional[str]:
         rows = (
             self.db.query(AthleteFeedback)
             .filter(AthleteFeedback.rpe.isnot(None))
-            .order_by(AthleteFeedback.recorded_at.desc())
+            .filter(func.date(AthleteFeedback.recorded_at) <= cutoff.isoformat())
+            .order_by(AthleteFeedback.recorded_at.desc(), AthleteFeedback.id.desc())
             .limit(8)
             .all()
         )
         if len(rows) < 4:
             return None
+        activities = {
+            row.activity_id: row
+            for row in self.db.query(Activity)
+            .filter(Activity.activity_id.in_([item.activity_id for item in rows]))
+            .all()
+        }
         high = 0
         for row in rows:
-            activity = self.db.query(Activity).filter(Activity.activity_id == row.activity_id).first()
+            activity = activities.get(row.activity_id)
             if activity is None or not activity.duration or row.rpe is None:
                 continue
             duration_min = float(activity.duration) / 60.0

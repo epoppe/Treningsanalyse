@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any, Dict, Optional
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..schemas.coaching import DetailLevel, coerce_enum
@@ -31,6 +32,18 @@ from .coaching_health_service import CoachingHealthService
 from .plan_stability import PlanRobustnessService, PlanStabilityService
 from .personalization_evidence_policy import PersonalizationEvidencePolicy
 from .evidence_quality_propagation import apply_data_quality_to_evidence
+
+
+def latest_execution_on_or_before(db: Session, day: date):
+    """Latest execution whose link date is on or before `day`."""
+    from ..database.models.coaching_v5 import RecommendationExecution
+
+    return (
+        db.query(RecommendationExecution)
+        .filter(func.date(RecommendationExecution.linked_at) <= day.isoformat())
+        .order_by(RecommendationExecution.linked_at.desc(), RecommendationExecution.id.desc())
+        .first()
+    )
 
 
 class CoachingOrchestrator:
@@ -312,11 +325,7 @@ class CoachingOrchestrator:
             prospective=True,
             as_of=day,
         )
-        recent_exec = (
-            self.db.query(RecommendationExecution)
-            .order_by(RecommendationExecution.linked_at.desc())
-            .first()
-        )
+        recent_exec = latest_execution_on_or_before(self.db, day)
         recent_feedback = AthleteFeedbackService(self.db).on_or_before(day, limit=1)
 
         brief = {
