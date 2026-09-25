@@ -9,7 +9,7 @@ export type AnalysisSession =
   | "threshold"
   | "vo2"
   | "race";
-export type AnalysisTab = "utvikling" | "sammenhenger" | "historikk";
+export type AnalysisTab = "utvikling" | "sammenhenger" | "historikk" | "coaching";
 
 export type EvidenceBand = "strong" | "supported" | "emerging" | "insufficient";
 export type TrendDirection = "improving" | "stable" | "declining" | "uncertain" | string;

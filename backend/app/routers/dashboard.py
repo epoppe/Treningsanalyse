@@ -305,6 +305,31 @@ def get_post_sync_summary(
     }
 
 
+@router.get("/coaching-evidence")
+def get_coaching_evidence(
+    window_days: int = Query(90, description="Analysis window: 30, 90, 180 or 365"),
+    end_date: Optional[str] = Query(None, description="ISO date. Defaults to today. Does not change models."),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Read-only prospective evidence. Does not recommend, persist, or promote."""
+    from datetime import datetime as dt
+
+    from ..services.coaching_evidence_dashboard_service import (
+        ALLOWED_WINDOWS,
+        CoachingEvidenceDashboardService,
+    )
+
+    if window_days not in ALLOWED_WINDOWS:
+        raise HTTPException(status_code=422, detail=f"window_days must be one of {list(ALLOWED_WINDOWS)}")
+    end = None
+    if end_date:
+        try:
+            end = dt.strptime(end_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="end_date must be YYYY-MM-DD") from exc
+    return CoachingEvidenceDashboardService(db).build(window_days=window_days, end=end)
+
+
 @router.get("/recommendation-history")
 def get_recommendation_history(
     limit: int = Query(30, ge=1, le=100),

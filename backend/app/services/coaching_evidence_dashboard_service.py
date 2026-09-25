@@ -1,0 +1,586 @@
+"""Read-only coaching evidence for the analyse workspace.
+
+Composes canonical observations and the existing monitors. It does not
+recommend, persist, promote, recalibrate, or write feedback.
+Depends on the prospective-evidence semantics: one canonical observation,
+pending windows outside mature denominators, SampleSufficiencyPolicy.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from datetime import date, timedelta
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from .canonical_prospective_observation import CanonicalProspectiveObservationService
+from .coaching_model_registry import CoachingModelRegistry
+from .coaching_operational_monitors import (
+    AbstentionQualityService,
+    DataLatencyMonitor,
+    DataQualityTrendService,
+    DecisionConfidenceMonitor,
+    PlanChurnMonitor,
+    RecommendationChurnMonitor,
+    RecommendationDistributionMonitor,
+    ShadowPromotionReadinessService,
+)
+from .monthly_coaching_review_service import coaching_do_not_change
+from .outcome_maturity import EVALUATED, INCOMPLETE_DATA, PENDING, is_usable_status
+from .recommendation_utility_evaluator import RecommendationUtilityEvaluator
+from .sample_sufficiency_policy import SampleSufficiencyPolicy
+
+ALLOWED_WINDOWS = (30, 90, 180, 365)
+_OBSERVATION_CAP = 12
+
+_LEVEL_LABEL = {
+    "INSUFFICIENT": "Utilstrekkelig",
+    "EMERGING": "Fremvoksende",
+    "SUPPORTED": "Støttet",
+    "STRONG": "Sterk",
+}
+_STRENGTH = {
+    "INSUFFICIENT": "none",
+    "EMERGING": "limited",
+    "SUPPORTED": "supported",
+    "STRONG": "strong",
+}
+_TYPE_LABEL = {
+    "easy_run": "Easy aerobic",
+    "long_run": "Langtur",
+    "threshold": "Threshold",
+    "vo2_intervals": "VO₂-intervaller",
+    "rest": "Hvile",
+    "race_pace": "Konkurransefart",
+    "race": "Konkurranse",
+}
+
+MATURITY_LEGEND = (
+    {
+        "status": "pending",
+        "label": "Pending",
+        "text": "Outcome-vinduet er ikke ferdig ennå.",
+    },
+    {
+        "status": "incomplete_data",
+        "label": "Incomplete",
+        "text": "Vinduet er ferdig, men nødvendige datapunkter manglet.",
+    },
+    {
+        "status": "evaluated",
+        "label": "Evaluated",
+        "text": "Vinduet er lukket og utfallet har en verdi.",
+    },
+    {
+        "status": "insufficient",
+        "label": "Insufficient evidence",
+        "text": "Enkelte outcomes finnes, men samlet N eller spredning er for lav.",
+    },
+)
+
+
+def _mean(values: List[float]) -> Optional[float]:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
+
+def _level_label(level: Optional[str]) -> str:
+    return _LEVEL_LABEL.get(level or "", "Utilstrekkelig")
+
+
+class CoachingEvidenceDashboardService:
+    def __init__(self, db: Session):
+        self.db = db
+        self._canonical = CanonicalProspectiveObservationService(db)
+        self._utility = RecommendationUtilityEvaluator(db)
+        self._sufficiency = SampleSufficiencyPolicy()
+
+    def build(self, *, window_days: int = 90, end: Optional[date] = None) -> Dict[str, Any]:
+        if window_days not in ALLOWED_WINDOWS:
+            raise ValueError(f"window_days must be one of {ALLOWED_WINDOWS}")
+        end = min(end or date.today(), date.today())
+        start = end - timedelta(days=window_days)
+        observations = self._canonical.resolve(start=start, end=end, today=end)
+        utilities = {
+            row["recommendation_id"]: self._utility.evaluate_for_observation(row, today=end)
+            for row in observations
+        }
+        by_type = self._by_type(observations, utilities, as_of=end)
+        confidence = DecisionConfidenceMonitor(self.db).assess(
+            start=start,
+            end=end,
+            observations=observations,
+            utility_by_id=utilities,
+        )
+        abstention = AbstentionQualityService().assess(
+            self.db, start=start, end=end, observations=observations
+        )
+        distribution = RecommendationDistributionMonitor().assess(
+            self.db, start=start, end=end, current_observations=observations
+        )
+        short_dates = []
+        short_weights = []
+        for row in observations:
+            utility = utilities[row["recommendation_id"]]
+            if is_usable_status(utility.get("short_term_maturity")) and utility.get("short_term_utility") is not None:
+                short_dates.append(date.fromisoformat(row["as_of_date"]))
+                short_weights.append(float(row.get("evidence_weight") or 0.0) or 1.0)
+        short_sufficiency = self._sufficiency.assess_weighted(
+            domain="workout_effectiveness",
+            observation_dates=short_dates,
+            evidence_weights=short_weights,
+            as_of=end,
+        )
+        overview = self._overview(observations, utilities, short_sufficiency)
+        evidence_quality = self._evidence_quality(observations, utilities, short_sufficiency)
+        feasibility = self._feasibility(observations, as_of=end)
+        active = CoachingModelRegistry(self.db).get_active("ranker")
+        known, unknown = self._insights(by_type, confidence, overview)
+        operations = self._operations(
+            start=start,
+            end=end,
+            abstention=abstention,
+            distribution=distribution,
+        )
+        do_not_change = coaching_do_not_change(
+            recommendation_count=overview["canonical_recommendation_count"],
+            effectiveness_supported=bool(short_sufficiency.get("may_override_defaults")),
+            shadow_status=(operations.get("shadow") or {}).get("status"),
+            confidence_status=confidence.get("status"),
+        )
+        return {
+            "status": "ok",
+            "read_only": True,
+            "evaluation_kind": "observational_outcome",
+            "period": {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "window_days": window_days,
+                "allowed_windows": list(ALLOWED_WINDOWS),
+            },
+            "meta": {
+                "depends_on": "canonical prospective evidence",
+                "causal": False,
+                "note": (
+                    "Observational evidence inside the selected window. "
+                    "The window does not change models, calibration, or the plan."
+                ),
+            },
+            "maturity_legend": list(MATURITY_LEGEND),
+            "overview": {**overview, "model_version": active.get("version"), "model_status": active.get("status")},
+            "effectiveness": by_type,
+            "feasibility": feasibility,
+            "confidence": _public_confidence(confidence),
+            "evidence_quality": evidence_quality,
+            "signals": _signals(observations, utilities),
+            "operations": operations,
+            "what_we_know": known,
+            "what_we_do_not_know": unknown,
+            "do_not_change": do_not_change,
+        }
+
+    def _overview(
+        self,
+        observations: List[Dict[str, Any]],
+        utilities: Dict[int, Dict[str, Any]],
+        short_sufficiency: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        pending = 0
+        mature_execution = 0
+        short_n = 0
+        medium_n = 0
+        feedback_n = 0
+        explicit = 0
+        legacy = 0
+        for row in observations:
+            status = (row.get("execution_status") or "").lower()
+            if status == "pending":
+                pending += 1
+            else:
+                mature_execution += 1
+            if row.get("match_source") == "explicit_execution":
+                explicit += 1
+            elif row.get("match_source") == "legacy_heuristic":
+                legacy += 1
+            if row.get("subjective_feedback"):
+                feedback_n += 1
+            utility = utilities[row["recommendation_id"]]
+            if is_usable_status(utility.get("short_term_maturity")) and utility.get("short_term_utility") is not None:
+                short_n += 1
+            if is_usable_status(utility.get("medium_term_maturity")) and utility.get("medium_term_utility") is not None:
+                medium_n += 1
+        matched = explicit + legacy
+        n = len(observations)
+        return {
+            "canonical_recommendation_count": n,
+            "mature_execution_count": mature_execution,
+            "pending_count": pending,
+            "short_term_outcome_count": short_n,
+            "medium_term_outcome_count": medium_n,
+            "evidence_level": short_sufficiency.get("level"),
+            "evidence_label": _level_label(short_sufficiency.get("level")),
+            "feedback_count": feedback_n,
+            "feedback_coverage": round(feedback_n / n, 3) if n else None,
+            "explicit_match_count": explicit,
+            "legacy_match_count": legacy,
+            "explicit_matching_share": round(explicit / matched, 3) if matched else None,
+        }
+
+    def _by_type(
+        self,
+        observations: List[Dict[str, Any]],
+        utilities: Dict[int, Dict[str, Any]],
+        *,
+        as_of: date,
+    ) -> List[Dict[str, Any]]:
+        buckets: Dict[str, Dict[str, Any]] = defaultdict(
+            lambda: {
+                "short_vals": [],
+                "short_dates": [],
+                "short_weights": [],
+                "medium_vals": [],
+                "quality_vals": [],
+                "recovery_vals": [],
+                "pending": 0,
+                "execution": 0,
+                "recommendations": 0,
+                "feedback": 0,
+                "incomplete": 0,
+                "observations": [],
+            }
+        )
+        for row in observations:
+            wtype = row.get("recommended_workout_type") or "unknown"
+            bucket = buckets[wtype]
+            bucket["recommendations"] += 1
+            status = (row.get("execution_status") or "").lower()
+            if status == "pending":
+                bucket["pending"] += 1
+            else:
+                bucket["execution"] += 1
+            if row.get("subjective_feedback"):
+                bucket["feedback"] += 1
+            utility = utilities[row["recommendation_id"]]
+            weight = float(row.get("evidence_weight") or 0.0) or 1.0
+            obs_date = date.fromisoformat(row["as_of_date"])
+            if utility.get("short_term_maturity") == PENDING:
+                pass
+            elif utility.get("short_term_maturity") == INCOMPLETE_DATA:
+                bucket["incomplete"] += 1
+            elif is_usable_status(utility.get("short_term_maturity")) and utility.get("short_term_utility") is not None:
+                bucket["short_vals"].append(float(utility["short_term_utility"]))
+                bucket["short_dates"].append(obs_date)
+                bucket["short_weights"].append(weight)
+            if is_usable_status(utility.get("medium_term_maturity")) and utility.get("medium_term_utility") is not None:
+                bucket["medium_vals"].append(float(utility["medium_term_utility"]))
+            if utility.get("session_quality_included") and utility.get("session_quality_component") is not None:
+                bucket["quality_vals"].append(float(utility["session_quality_component"]))
+            observed = utility.get("observed_recovery_response") or {}
+            if is_usable_status(observed.get("maturity_status")) and observed.get("value") is not None:
+                bucket["recovery_vals"].append(float(observed["value"]))
+            if len(bucket["observations"]) < _OBSERVATION_CAP:
+                bucket["observations"].append(
+                    {
+                        "recommendation_id": row.get("recommendation_id"),
+                        "as_of_date": row.get("as_of_date"),
+                        "activity_id": row.get("activity_id"),
+                        "execution_status": row.get("execution_status"),
+                        "match_source": row.get("match_source"),
+                        "short_term_maturity": utility.get("short_term_maturity"),
+                        "short_term_utility": utility.get("short_term_utility"),
+                    }
+                )
+        result = []
+        for wtype, bucket in sorted(buckets.items()):
+            sufficiency = self._sufficiency.assess_weighted(
+                domain="workout_effectiveness",
+                observation_dates=bucket["short_dates"],
+                evidence_weights=bucket["short_weights"],
+                as_of=as_of,
+            )
+            level = sufficiency.get("level")
+            result.append(
+                {
+                    "workout_type": wtype,
+                    "label": _TYPE_LABEL.get(wtype, wtype),
+                    "recommendation_count": bucket["recommendations"],
+                    "execution_count": bucket["execution"],
+                    "mature_outcome_count": len(bucket["short_vals"]),
+                    "pending_count": bucket["pending"],
+                    "incomplete_count": bucket["incomplete"],
+                    "short_term_outcome": _mean(bucket["short_vals"]),
+                    "short_term_sample_count": len(bucket["short_vals"]),
+                    "medium_term_outcome": _mean(bucket["medium_vals"]),
+                    "medium_term_sample_count": len(bucket["medium_vals"]),
+                    "session_quality": _mean(bucket["quality_vals"]),
+                    "session_quality_sample_count": len(bucket["quality_vals"]),
+                    "observed_recovery_response": _mean(bucket["recovery_vals"]),
+                    "observed_recovery_sample_count": len(bucket["recovery_vals"]),
+                    "feedback_count": bucket["feedback"],
+                    "evidence_level": level,
+                    "evidence_label": _level_label(level),
+                    "conclusion_strength": _STRENGTH.get(level or "", "none"),
+                    "sufficiency": sufficiency,
+                    "observations": bucket["observations"],
+                }
+            )
+        return result
+
+    def _feasibility(self, observations: List[Dict[str, Any]], *, as_of: date) -> Dict[str, Any]:
+        counts = {"followed": 0, "modified": 0, "replaced": 0, "skipped": 0, "pending": 0, "unplanned": 0}
+        adherence = []
+        dates = []
+        weights = []
+        for row in observations:
+            status = (row.get("execution_status") or "").lower()
+            if status in counts:
+                counts[status] += 1
+            elif status in {"completed", "executed", "done"}:
+                counts["followed"] += 1
+            if status != "pending":
+                dates.append(date.fromisoformat(row["as_of_date"]))
+                weights.append(float(row.get("evidence_weight") or 0.0) or 1.0)
+                if row.get("overall_adherence") is not None:
+                    adherence.append(float(row["overall_adherence"]))
+        sufficiency = self._sufficiency.assess_weighted(
+            domain="execution_patterns",
+            observation_dates=dates,
+            evidence_weights=weights,
+            as_of=as_of,
+        )
+        return {
+            **counts,
+            "adherence": _mean(adherence),
+            "adherence_sample_count": len(adherence),
+            "execution_sample_count": len(dates),
+            "evidence_level": sufficiency.get("level"),
+            "evidence_label": _level_label(sufficiency.get("level")),
+            "sufficiency": sufficiency,
+            "note": "Feasibility and adherence are not physiological effectiveness.",
+        }
+
+    def _evidence_quality(
+        self,
+        observations: List[Dict[str, Any]],
+        utilities: Dict[int, Dict[str, Any]],
+        short_sufficiency: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        explicit = legacy = pending = incomplete = 0
+        quality_scores = []
+        for row in observations:
+            if row.get("match_source") == "explicit_execution":
+                explicit += 1
+            elif row.get("match_source") == "legacy_heuristic":
+                legacy += 1
+            if (row.get("execution_status") or "") == "pending":
+                pending += 1
+            utility = utilities[row["recommendation_id"]]
+            if utility.get("short_term_maturity") == INCOMPLETE_DATA:
+                incomplete += 1
+            if row.get("data_quality_score") is not None:
+                quality_scores.append(float(row["data_quality_score"]))
+        return {
+            "raw_sample_count": short_sufficiency.get("sample_count"),
+            "effective_sample_count": short_sufficiency.get("effective_sample_count"),
+            "spread_days": short_sufficiency.get("spread_days"),
+            "sufficiency_level": short_sufficiency.get("level"),
+            "sufficiency_label": _level_label(short_sufficiency.get("level")),
+            "data_quality_coverage": round(len(quality_scores) / len(observations), 3) if observations else None,
+            "data_quality_mean": _mean(quality_scores),
+            "explicit_execution_matches": explicit,
+            "legacy_heuristic_matches": legacy,
+            "pending_windows": pending,
+            "incomplete_windows": incomplete,
+            "may_override_defaults": short_sufficiency.get("may_override_defaults"),
+        }
+
+    def _insights(
+        self,
+        by_type: List[Dict[str, Any]],
+        confidence: Dict[str, Any],
+        overview: Dict[str, Any],
+    ) -> tuple:
+        known = []
+        unknown = []
+        for row in by_type:
+            label = row["label"]
+            n = row["mature_outcome_count"]
+            level = row["evidence_level"]
+            if n == 0 and row["recommendation_count"] == 0:
+                continue
+            if level in {"EMERGING", "SUPPORTED", "STRONG"} and n > 0:
+                recovery = row["observed_recovery_response"]
+                recovery_text = (
+                    f" Observert restitusjonsrespons: {recovery}."
+                    if recovery is not None
+                    else ""
+                )
+                known.append(
+                    {
+                        "workout_type": row["workout_type"],
+                        "title": label,
+                        "sample_count": n,
+                        "evidence_level": level,
+                        "evidence_label": row["evidence_label"],
+                        "conclusion_strength": row["conclusion_strength"],
+                        "observed_recovery_response": recovery,
+                        "observed_recovery_sample_count": row["observed_recovery_sample_count"],
+                        "text": (
+                            f"{label} har {n} modne korttidsutfall. "
+                            f"Evidens: {row['evidence_label']}. "
+                            f"Konklusjonsstyrke: {row['conclusion_strength']}.{recovery_text}"
+                        ),
+                    }
+                )
+            else:
+                unknown.append(
+                    {
+                        "code": "insufficient_type",
+                        "workout_type": row["workout_type"],
+                        "sample_count": n,
+                        "evidence_level": level,
+                        "text": (
+                            f"{label} har foreløpig {n} modne observasjoner. "
+                            "Systemet beholder derfor standardreglene."
+                        ),
+                    }
+                )
+            if row["medium_term_sample_count"] == 0 and row["recommendation_count"] > 0:
+                unknown.append(
+                    {
+                        "code": "medium_term_not_mature",
+                        "workout_type": row["workout_type"],
+                        "sample_count": 0,
+                        "evidence_level": "INSUFFICIENT",
+                        "text": f"Medium-term response etter {label} er ikke moden i dette vinduet.",
+                    }
+                )
+        if confidence.get("status") == "INSUFFICIENT_DATA":
+            unknown.append(
+                {
+                    "code": "confidence_underpowered",
+                    "sample_count": confidence.get("sample_count"),
+                    "evidence_level": "INSUFFICIENT",
+                    "text": "Confidence-kalibrering har for få modne utfall til å vurderes.",
+                }
+            )
+        coverage = overview.get("feedback_coverage")
+        if overview["canonical_recommendation_count"] and (coverage is None or coverage < 0.25):
+            pct = 0 if coverage is None else round(coverage * 100)
+            unknown.append(
+                {
+                    "code": "low_feedback_coverage",
+                    "sample_count": overview["feedback_count"],
+                    "text": f"Subjektiv feedback finnes for {pct} % av de kanoniske anbefalingene.",
+                }
+            )
+        race_n = sum(
+            row["mature_outcome_count"]
+            for row in by_type
+            if row["workout_type"] in {"race", "race_pace"}
+        )
+        if race_n < 6:
+            unknown.append(
+                {
+                    "code": "too_few_races",
+                    "sample_count": race_n,
+                    "evidence_level": "INSUFFICIENT",
+                    "text": "For få konkurranser til å personliggjøre taper.",
+                }
+            )
+        return known, unknown
+
+    def _operations(
+        self,
+        *,
+        start: date,
+        end: date,
+        abstention: Dict[str, Any],
+        distribution: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        churn = RecommendationChurnMonitor().assess(self.db, day=end)
+        plan = PlanChurnMonitor().assess(self.db, as_of=end, window_days=(end - start).days or 1)
+        latency = DataLatencyMonitor().assess(self.db)
+        quality = DataQualityTrendService().assess(self.db, end=end, window_days=min(28, (end - start).days or 1))
+        shadow = ShadowPromotionReadinessService().assess(self.db, start=start, end=end)
+        return {
+            "abstention": {
+                "status": abstention.get("status"),
+                "sample_count": abstention.get("sample_count"),
+                "abstention_rate": abstention.get("abstention_rate"),
+                "note": abstention.get("note"),
+            },
+            "distribution": {
+                "sample_count": distribution.get("sample_count"),
+                "unexpected_shift": distribution.get("unexpected_shift"),
+                "types_from_zero": distribution.get("types_from_zero"),
+                "note": distribution.get("note"),
+            },
+            "recommendation_churn": {
+                "status": churn.get("status"),
+                "sample_count": churn.get("sample_count"),
+                "type_changes": churn.get("type_changes"),
+            },
+            "plan_churn": {"status": plan.get("status"), "sample_count": plan.get("sample_count")},
+            "data_latency": {
+                "stale_local_despite_source": latency.get("stale_local_despite_source"),
+                "last_sync_at": latency.get("last_sync_at"),
+            },
+            "data_quality_trend": {
+                "hrv_coverage": quality.get("hrv_coverage"),
+                "rhr_coverage": quality.get("rhr_coverage"),
+                "sleep_coverage": quality.get("sleep_coverage"),
+                "activity_count": quality.get("activity_count"),
+            },
+            "shadow": {
+                "status": shadow.get("status"),
+                "sample_count": shadow.get("sample_count"),
+                "note": shadow.get("note"),
+            },
+        }
+
+
+def _public_confidence(report: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "sample_count": report.get("sample_count"),
+        "brier_score": report.get("brier_score"),
+        "expected_calibration_error": report.get("expected_calibration_error"),
+        "bins": report.get("bins"),
+        "status": report.get("status"),
+        "coverage": report.get("coverage"),
+        "abstention_rate": report.get("abstention_rate"),
+        "level": report.get("level"),
+        "favorable_outcome_definition": report.get("favorable_outcome_definition"),
+        "note": report.get("note"),
+    }
+
+
+def _signals(observations: List[Dict[str, Any]], utilities: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    short_n = sum(
+        1
+        for row in observations
+        if is_usable_status(utilities[row["recommendation_id"]].get("short_term_maturity"))
+        and utilities[row["recommendation_id"]].get("short_term_utility") is not None
+    )
+    quality_n = sum(
+        1 for utility in utilities.values() if utility.get("session_quality_included")
+    )
+    feedback_n = sum(1 for row in observations if row.get("subjective_feedback"))
+    return {
+        "objective": {
+            "sources": ["garmin_activity", "hrv", "rhr", "tss_epoc", "session_quality"],
+            "short_term_sample_count": short_n,
+            "session_quality_sample_count": quality_n,
+        },
+        "subjective": {
+            "sources": ["rpe", "session_feel", "legs", "motivation", "pain"],
+            "sample_count": feedback_n,
+            "coverage": round(feedback_n / len(observations), 3) if observations else None,
+            "provenance": "athlete_feedback",
+            "ground_truth": False,
+            "replaces_objective_data": False,
+        },
+    }
+

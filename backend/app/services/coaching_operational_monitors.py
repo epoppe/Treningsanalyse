@@ -172,8 +172,16 @@ class DecisionConfidenceMonitor:
         self._utility = RecommendationUtilityEvaluator(db)
         self._canonical = CanonicalProspectiveObservationService(db)
 
-    def assess(self, *, start: date, end: date) -> Dict[str, Any]:
-        observations = self._canonical.resolve(start=start, end=end, today=end)
+    def assess(
+        self,
+        *,
+        start: date,
+        end: date,
+        observations: Optional[List[Dict[str, Any]]] = None,
+        utility_by_id: Optional[Dict[int, Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        if observations is None:
+            observations = self._canonical.resolve(start=start, end=end, today=end)
         pairs: List[Tuple[float, bool]] = []
         abstentions = 0
         for observation in observations:
@@ -182,7 +190,12 @@ class DecisionConfidenceMonitor:
             confidence = observation.get("decision_confidence")
             if confidence is None:
                 continue
-            utility = self._utility.evaluate_for_observation(observation, today=end)
+            if utility_by_id is not None:
+                utility = utility_by_id.get(observation.get("recommendation_id"))
+                if utility is None:
+                    continue
+            else:
+                utility = self._utility.evaluate_for_observation(observation, today=end)
             favorable = favorable_from_utility(
                 utility.get("short_term_utility"),
                 utility.get("short_term_maturity"),
@@ -194,8 +207,19 @@ class DecisionConfidenceMonitor:
 
 
 class AbstentionQualityService:
-    def assess(self, db: Session, *, start: date, end: date) -> Dict[str, Any]:
-        recs = CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=end)
+    def assess(
+        self,
+        db: Session,
+        *,
+        start: date,
+        end: date,
+        observations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        recs = (
+            observations
+            if observations is not None
+            else CanonicalProspectiveObservationService(db).resolve(start=start, end=end, today=end)
+        )
         n = len(recs)
         abstain = [
             r
@@ -233,9 +257,22 @@ class AbstentionQualityService:
 class RecommendationDistributionMonitor:
     TYPES = ("easy_run", "long_run", "threshold", "vo2_intervals", "rest", "strength", "cycling")
 
-    def assess(self, db: Session, *, start: date, end: date, prior_start: Optional[date] = None) -> Dict[str, Any]:
+    def assess(
+        self,
+        db: Session,
+        *,
+        start: date,
+        end: date,
+        prior_start: Optional[date] = None,
+        current_observations: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
         prior_start = prior_start or (start - (end - start))
-        current = self._counts(db, start, end)
+        if current_observations is None:
+            current = self._counts(db, start, end)
+        else:
+            current = dict(
+                Counter(r.get("recommended_workout_type") or "unknown" for r in current_observations)
+            )
         prior = self._counts(db, prior_start, start - timedelta(days=1))
         shifts = {}
         for t in self.TYPES:

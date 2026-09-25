@@ -100,9 +100,15 @@ class CacheHeadersMiddleware(BaseHTTPMiddleware):
         """
         Finn cache-strategi basert på request path
         """
-        # Fjern leading slash og split på /
-        path_parts = path.strip('/').split('/')
-        
+        # Feedback og evidens endres av brukerhandlinger. ETag her er bare path-hash,
+        # så en cachet GET ville skjule at prompten skal vekk etter lagret feedback.
+        if (
+            path.endswith("/feedback")
+            or path.endswith("/feedback-prompt")
+            or path.rstrip("/").endswith("/coaching-evidence")
+        ):
+            return {"max-age": 0, "public": False, "no-store": True}
+
         # Finn relevant endpoint type
         for endpoint_type, strategy in self.CACHE_STRATEGIES.items():
             if endpoint_type in path:

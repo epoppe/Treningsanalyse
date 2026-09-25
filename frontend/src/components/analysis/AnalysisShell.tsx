@@ -19,10 +19,11 @@ const TABS: Array<{ id: AnalysisTab; label: string }> = [
   { id: "utvikling", label: "Utvikling" },
   { id: "sammenhenger", label: "Sammenhenger" },
   { id: "historikk", label: "Historikk" },
+  { id: "coaching", label: "Coaching" },
 ];
 
 function parseTab(v: string | null): AnalysisTab {
-  if (v === "sammenhenger" || v === "historikk" || v === "utvikling") return v;
+  if (v === "sammenhenger" || v === "historikk" || v === "utvikling" || v === "coaching") return v;
   return "utvikling";
 }
 

@@ -24,6 +24,36 @@ from .ppap_metrics_service import PpapMetricsService
 from .prospective_evidence_report_service import ProspectiveEvidenceReportService
 
 
+def coaching_do_not_change(
+    *,
+    recommendation_count: int,
+    effectiveness_supported: bool,
+    shadow_status: Optional[str],
+    confidence_status: Optional[str],
+) -> list:
+    """Shared governance sentences for the monthly review and the evidence dashboard.
+
+    This is presentation of the existing gates. It does not promote, recalibrate, or persist.
+    """
+    statements = [
+        "Do not add a new predictive coaching model without ProspectiveEvidenceReport deficiency.",
+        "Do not treat sparse samples as proof of stability or improvement.",
+    ]
+    if recommendation_count < MONTHLY_REVIEW_SPARSE_N:
+        statements.append("Sample too sparse for model changes — collect more prospective data.")
+    if not effectiveness_supported:
+        statements.append(
+            "Short-term effectiveness is below SUPPORTED — collect mature prospective outcomes before any model change."
+        )
+    if shadow_status == "ELIGIBLE":
+        statements.append("Shadow ELIGIBLE is not a promotion. Promotion still requires a validation run.")
+    else:
+        statements.append("Shadow model is not ELIGIBLE — do not promote.")
+    if confidence_status in {"overconfident", "insufficient_data", "INSUFFICIENT_DATA"}:
+        statements.append("Confidence calibration not proven — do not tune confidence blindly.")
+    return statements
+
+
 def generate_monthly_coaching_review(
     db: Session,
     *,
@@ -57,24 +87,12 @@ def generate_monthly_coaching_review(
     ctl = ppap.get_ctl(end)
     tsb = ppap.get_tsb(end)
 
-    do_not_change = [
-        "Do not add a new predictive coaching model without ProspectiveEvidenceReport deficiency.",
-        "Do not treat sparse samples as proof of stability or improvement.",
-    ]
-    if n < MONTHLY_REVIEW_SPARSE_N:
-        do_not_change.append("Sample too sparse for model changes — collect more prospective data.")
-    if not effectiveness_supported:
-        do_not_change.append(
-            "Short-term effectiveness is below SUPPORTED — collect mature prospective outcomes before any model change."
-        )
-    if shadow["status"] == "ELIGIBLE":
-        do_not_change.append(
-            "Shadow ELIGIBLE is not a promotion. Promotion still requires a validation run."
-        )
-    else:
-        do_not_change.append("Shadow model is not ELIGIBLE — do not promote.")
-    if conf["status"] in {"overconfident", "insufficient_data", "INSUFFICIENT_DATA"}:
-        do_not_change.append("Confidence calibration not proven — do not tune confidence blindly.")
+    do_not_change = coaching_do_not_change(
+        recommendation_count=n,
+        effectiveness_supported=effectiveness_supported,
+        shadow_status=shadow.get("status"),
+        confidence_status=conf.get("status"),
+    )
 
     answers = {
         "1_training_completed": {
