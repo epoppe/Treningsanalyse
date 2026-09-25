@@ -7,25 +7,31 @@ import { workoutTypeLabel } from "@/components/cockpit/cockpitUtils";
 import { useRecommendationHistory } from "@/hooks/useDashboard";
 import type { RecommendationHistoryItem } from "@/types/dashboard";
 
-type ExecutionFilter = "all" | "followed" | "modified" | "skipped";
+type ExecutionFilter = "all" | "followed" | "modified" | "skipped" | "pending";
 
 const FILTERS: Array<{ id: ExecutionFilter; label: string }> = [
   { id: "all", label: "Alle" },
   { id: "followed", label: "Fulgt" },
   { id: "modified", label: "Justert" },
+  { id: "pending", label: "Venter" },
   { id: "skipped", label: "Hoppet over" },
 ];
 
 function executionLabel(status?: string | null) {
   if (status === "followed") return "Fulgt";
   if (status === "modified") return "Justert";
+  if (status === "replaced") return "Erstattet";
+  if (status === "pending") return "Venter";
+  if (status === "unplanned") return "Uplanlagt";
+  if (status === "unknown") return "Ukjent";
   if (status === "skipped" || status === "missed") return "Hoppet over";
   return status || "—";
 }
 
 function executionTone(status?: string | null) {
   if (status === "followed") return "text-emerald-700";
-  if (status === "modified") return "text-amber-700";
+  if (status === "modified" || status === "replaced") return "text-amber-700";
+  if (status === "pending") return "text-sky-700";
   if (status === "skipped" || status === "missed") return "text-slate-500";
   return "text-slate-600";
 }
