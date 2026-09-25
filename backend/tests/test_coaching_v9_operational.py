@@ -215,7 +215,7 @@ class ProspectiveAndMonitorTests(unittest.TestCase):
         result = DecisionConfidenceMonitor(self.db).assess(
             start=self.day - timedelta(days=30), end=self.day
         )
-        self.assertEqual(result["status"], "insufficient_data")
+        self.assertEqual(result["status"], "INSUFFICIENT_DATA")
 
     def test_shadow_insufficient_evidence(self):
         result = ShadowPromotionReadinessService().assess(

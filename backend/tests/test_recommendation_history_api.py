@@ -118,6 +118,25 @@ class RecommendationHistoryApiTests(unittest.TestCase):
         self.assertTrue(body["items"])
         self.assertTrue(all(i["execution_status"] == "followed" for i in body["items"]))
 
+    def test_today_without_activity_is_pending_not_skipped(self):
+        pending = _rec(
+            as_of_date=date.today(),
+            recommended_workout_type="easy_run",
+            config_hash="pending-today",
+            generated_at=datetime.now(timezone.utc),
+        )
+        self.db.add(pending)
+        self.db.commit()
+        res = self.client.get(
+            "/api/dashboard/recommendation-history",
+            params={"limit": 10, "execution": "pending"},
+        )
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertTrue(body["items"])
+        self.assertTrue(all(item["execution_status"] == "pending" for item in body["items"]))
+        self.assertTrue(any(item["as_of_date"] == date.today().isoformat() for item in body["items"]))
+
     def test_filter_skipped_uses_fallback(self):
         res = self.client.get(
             "/api/dashboard/recommendation-history",

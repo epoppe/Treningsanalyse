@@ -60,7 +60,7 @@ def generate_monthly_coaching_review(
         do_not_change.append("Sample too sparse for model changes — collect more prospective data.")
     if shadow["status"] != "ELIGIBLE":
         do_not_change.append("Shadow model is not ELIGIBLE — do not promote.")
-    if conf["status"] in {"overconfident", "insufficient_data"}:
+    if conf["status"] in {"overconfident", "insufficient_data", "INSUFFICIENT_DATA"}:
         do_not_change.append("Confidence calibration not proven — do not tune confidence blindly.")
 
     answers = {
@@ -78,12 +78,22 @@ def generate_monthly_coaching_review(
             "adherence": prospective["execution"].get("adherence"),
             "executed": prospective["recommendations"].get("executed"),
             "modified": prospective["recommendations"].get("modified"),
+            "replaced": prospective["recommendations"].get("replaced"),
             "skipped": prospective["recommendations"].get("skipped"),
-            "sample_count": prospective["execution"]["sample_count"],
+            "pending": prospective["recommendations"].get("pending"),
+            "sample_count": prospective["sample_counts"]["execution_outcomes"],
+            "adherence_sample_count": prospective["execution"]["sample_count"],
+            "note": "Feasibility/adherence is separate from physiological effectiveness.",
         },
         "4_recovery_behaviour": {
-            "recovery_cost": prospective["outcomes"].get("recovery_cost"),
-            "sample_count": prospective["outcomes"]["sample_count"],
+            "recovery_cost": prospective["outcomes"].get("observed_recovery_response"),
+            "expected_recovery_cost": prospective["outcomes"].get("expected_recovery_cost"),
+            "sample_count": prospective["outcomes"].get("observed_recovery_sample_count"),
+            "pending_count": prospective["outcomes"].get("pending_count"),
+            "medium_term_sample_count": prospective["outcomes"].get("medium_term_sample_count"),
+            "subjective_feedback_sample_count": prospective["outcomes"].get(
+                "subjective_feedback_sample_count"
+            ),
         },
         "5_fitness_moving": {
             "ctl": ctl,
