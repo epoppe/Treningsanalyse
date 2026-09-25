@@ -466,19 +466,31 @@ class McpDerivedMetricsService:
             elif decoupling is not None:
                 drift_values.append(float(decoupling))
         if not drift_values:
-            analysis = self._coaching(day)
-            fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
-                "recent_median_hr_drift_pct"
-            )
-            if fallback_drift is None:
-                fallback_drift = analysis.get("thresholds", {}).get("drift", {}).get(
-                    "recent_median_decoupling_pct"
-                )
+            fallback_drift = self._recent_drift_median(day)
             if fallback_drift is None:
                 return None
-            drift_values = [float(fallback_drift)]
+            drift_values = [fallback_drift]
         median_drift = stats_median(drift_values)
         return round(max(0.0, min(100.0, 100.0 - median_drift * 2.5)), 1)
+
+    def _recent_drift_median(self, day: date) -> Optional[float]:
+        """Median drift fra siste aktiviteter, uten full coaching-analyse per dag."""
+        rows = (
+            self.db.query(Activity.hr_drift_pct, Activity.decoupling_percent)
+            .filter(func.date(Activity.start_time) <= day)
+            .order_by(Activity.start_time.desc())
+            .limit(20)
+            .all()
+        )
+        values: List[float] = []
+        for hr_drift, decoupling in rows:
+            if hr_drift is not None:
+                values.append(float(hr_drift))
+            elif decoupling is not None:
+                values.append(float(decoupling))
+        if not values:
+            return None
+        return float(stats_median(values))
 
     def _garmin_row(self, day: date) -> Optional[GarminPerformanceMetric]:
         return (

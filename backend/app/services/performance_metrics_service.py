@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..database.models.activity import Activity, AnalyticsSnapshot
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .coaching_request_cache import cached_activity_details
 from .power_service import PowerService
 
 
@@ -50,6 +51,7 @@ class PerformanceMetricsService:
         self.db = db
         self.storage = storage
         self._power_service = PowerService(storage)
+        self._details_cache: Dict[str, Optional[pd.DataFrame]] = {}
 
     @property
     def _speed_duration_seconds(self) -> List[int]:
@@ -143,10 +145,14 @@ class PerformanceMetricsService:
         return float(power_watts) <= self._max_plausible_avg_power(duration_s)
 
     def _details_for_activity(self, activity: Activity) -> Optional[pd.DataFrame]:
-        try:
-            return self.storage.get_activity_details(int(activity.activity_id))
-        except Exception:
+        if activity.activity_id is None:
             return None
+        key = str(activity.activity_id)
+        if key in self._details_cache:
+            return self._details_cache[key]
+        frame = cached_activity_details(self.storage, activity.activity_id)
+        self._details_cache[key] = frame
+        return frame
 
     def _prepare_samples(
         self,

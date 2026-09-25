@@ -153,6 +153,32 @@ class AdaptiveCoachingV3Tests(unittest.TestCase):
         )
         self.assertIn("adjustments", result)
 
+    def test_performance_bundle_does_not_rebuild_coaching_per_activity(self):
+        from app.services.coaching_analysis_service import CoachingAnalysisService
+
+        class _Storage:
+            def __init__(self):
+                self.calls = 0
+
+            def get_activity_details(self, activity_id):
+                self.calls += 1
+                return None
+
+        for idx in range(4):
+            self._run(
+                str(9100 + idx),
+                date(2026, 5, 1) + timedelta(days=idx * 7),
+                hr=130,
+                ef=0.025,
+            )
+        storage = _Storage()
+        service = ContextAdjustedTrendService(self.db, storage)
+        with patch.object(CoachingAnalysisService, "build_coaching_analysis") as full:
+            result = service.analyze_performance_bundle(end_date=date(2026, 6, 15), window_days=90)
+        full.assert_not_called()
+        self.assertEqual(set(result["metrics"]), {"easy_run_efficiency", "hr_drift", "decoupling"})
+        self.assertEqual(storage.calls, 4)
+
     def test_load_variability_flags(self):
         for idx in range(7):
             self._run(

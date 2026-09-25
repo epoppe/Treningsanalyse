@@ -140,23 +140,32 @@ class LoadVariabilityService:
         return daily
 
     def _hard_day_count(self, day: date, window: int) -> int:
-        count = 0
-        for offset in range(window):
-            check = day - timedelta(days=offset)
-            activities = (
-                self.db.query(Activity)
-                .options(joinedload(Activity.activity_type))
-                .filter(func.date(Activity.start_time) == check)
-                .all()
+        start = day - timedelta(days=window - 1)
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= day,
+                )
             )
-            for activity in activities:
-                if not is_running_activity(activity):
-                    continue
-                st = self._classifier.classify_activity(activity, end_date=check).get("session_type")
-                if st in HARD_SESSION_TYPES:
-                    count += 1
-                    break
-        return count
+            .all()
+        )
+        lt1_hr, lt2_hr = self._classifier.resolve_thresholds(day, False)
+        hard_days = set()
+        for activity in activities:
+            if not activity.start_time or not is_running_activity(activity):
+                continue
+            st = self._classifier.classify_activity(
+                activity,
+                end_date=day,
+                lt1_hr=lt1_hr,
+                lt2_hr=lt2_hr,
+            ).get("session_type")
+            if st in HARD_SESSION_TYPES:
+                hard_days.add(activity.start_time.date())
+        return len(hard_days)
 
     @staticmethod
     def _max_consecutive_load_days(daily_loads: Dict[date, float]) -> int:

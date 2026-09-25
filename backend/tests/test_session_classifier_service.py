@@ -1,7 +1,8 @@
 import tempfile
 import unittest
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -9,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from app.database.models import Base
 from app.database.models.activity import Activity, ActivityLap, ActivityType
 from app.database.models.lactate_threshold_history import LactateThresholdHistory
+from app.services.coaching_analysis_service import CoachingAnalysisService
 from app.services.session_classifier_service import SessionClassifierService
 from app.storage import DataStorage
 
@@ -168,6 +170,25 @@ class SessionClassifierServiceTests(unittest.TestCase):
         activity.activity_type = cycle_type
         result = self.service.classify_activity(activity)
         self.assertEqual(result["session_type"], "unknown")
+
+    def test_repeated_classify_skips_full_coaching_analysis(self):
+        activities = [self._run(str(2000 + index), hr=140) for index in range(4)]
+        calls = {"details": 0}
+        original = self.storage.get_activity_details
+
+        def _details(activity_id):
+            calls["details"] += 1
+            return original(activity_id)
+
+        self.storage.get_activity_details = _details
+        with patch.object(CoachingAnalysisService, "build_coaching_analysis") as full:
+            for activity in activities:
+                result = self.service.classify_activity(activity, end_date=datetime(2026, 5, 20).date())
+                self.assertNotEqual(result["session_type"], "unknown")
+            again = self.service.classify_activity(activities[0], end_date=datetime(2026, 5, 20).date())
+        full.assert_not_called()
+        self.assertEqual(calls["details"], len(activities))
+        self.assertEqual(again["session_type"], self.service.classify_activity(activities[0])["session_type"])
 
 
 if __name__ == "__main__":

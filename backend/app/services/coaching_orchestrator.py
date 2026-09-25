@@ -67,13 +67,14 @@ class CoachingOrchestrator:
         detail: str = "concise",
     ) -> Dict[str, Any]:
         """Never persist recommendation/plan/calibration."""
-        return self._build(
-            day or date.today(),
-            include_treadmill=include_treadmill,
-            goal=goal or self.goal,
-            persist=False,
-            detail=detail,
-        )
+        with coaching_request_cache():
+            return self._build(
+                day or date.today(),
+                include_treadmill=include_treadmill,
+                goal=goal or self.goal,
+                persist=False,
+                detail=detail,
+            )
 
     def generate_live_decision(
         self,

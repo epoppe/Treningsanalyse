@@ -155,13 +155,18 @@ class ContextAdjustedTrendService:
             .order_by(Activity.start_time)
             .all()
         )
+        lt1_hr, lt2_hr = self._classifier.resolve_thresholds(end, False)
 
         points: List[Dict[str, Any]] = []
         for activity in activities:
             if not is_running_activity(activity) or not activity.start_time:
                 continue
-            # Prefer easy sessions for efficiency/drift trends
-            session_type = self._classifier.classify_activity(activity).get("session_type")
+            session_type = self._classifier.classify_activity(
+                activity,
+                end_date=end,
+                lt1_hr=lt1_hr,
+                lt2_hr=lt2_hr,
+            ).get("session_type")
             if metric in {"easy_run_efficiency", "hr_drift", "decoupling"}:
                 if session_type not in {"easy_aerobic", "long_aerobic", "recovery_run", "steady", "unknown"}:
                     continue
