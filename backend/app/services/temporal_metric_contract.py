@@ -682,11 +682,25 @@ TREND_METRIC_KEYS: Dict[str, str] = {
     "hr_drift": "cardio.drift_score",
     "decoupling": "cardio.drift_score",
     "ctl": "fitness.ctl",
+    "atl": "fitness.atl",
+    "consistency": "consistency.score",
     "resting_hr": "cardio.rhr_7d",
     "hrv_rmssd": "cardio.hrv_7d",
     "sleep_score": "recovery.sleep_score",
     "durability": "running.durability_score",
     "lactate_threshold_pace": "performance.threshold_pace",
+}
+
+# Coarse training-response ids resolve to one canonical stimulus contract.
+# Window-specific keys (stimulus.tss_7d vs stimulus.tss_28d) stay distinct.
+STIMULUS_ALIASES: Dict[str, str] = {
+    "easy_volume": "stimulus.easy_minutes_28d",
+    "threshold_volume": "stimulus.threshold_minutes_14d",
+    "vo2_volume": "stimulus.vo2_minutes_14d",
+    "long_run_volume": "stimulus.long_run_minutes_28d",
+    "weekly_tss": "stimulus.tss_7d",
+    "tss_7d": "stimulus.tss_7d",
+    "tss_28d": "stimulus.tss_28d",
 }
 
 
@@ -698,9 +712,44 @@ def contract_for_trend(metric: str) -> Optional[TemporalMetricContract]:
     return TEMPORAL_CONTRACTS.get(TREND_METRIC_KEYS.get(metric, metric))
 
 
+def resolve_stimulus(stimulus: str) -> Optional[TemporalMetricContract]:
+    """Return the contract for a dotted stimulus key or a coarse alias."""
+    if stimulus in TEMPORAL_CONTRACTS and stimulus.startswith("stimulus."):
+        return TEMPORAL_CONTRACTS[stimulus]
+    alias = STIMULUS_ALIASES.get(stimulus)
+    if alias is None:
+        return None
+    return TEMPORAL_CONTRACTS.get(alias)
+
+
+def stimulus_producer_family(stimulus: str) -> str:
+    """One producer family shared by the registry and TrainingResponseService."""
+    if stimulus == "high_intensity_volume":
+        return "zone_high"
+    contract = resolve_stimulus(stimulus)
+    if contract is None:
+        return "unknown"
+    producer = contract.canonical_producer
+    if producer.endswith("vo2_interval_minutes"):
+        return "vo2_intervals"
+    if producer.endswith("long_aerobic_minutes"):
+        return "long_aerobic"
+    if contract.canonical_unit == "tss":
+        return "tss_sum"
+    kind = contract.dependencies[0] if contract.dependencies else ""
+    return {
+        "easy_volume": "zone_low",
+        "threshold_volume": "zone_threshold",
+        "high_intensity_volume": "zone_high",
+    }.get(kind, "unknown")
+
+
 def aggregation_window_days(stimulus: str, explicit: Optional[int] = None) -> int:
     if explicit is not None and explicit > 0:
         return int(explicit)
+    contract = resolve_stimulus(stimulus)
+    if contract is not None and contract.aggregation_window_days:
+        return int(contract.aggregation_window_days)
     if stimulus in TEMPORAL_CONTRACTS and TEMPORAL_CONTRACTS[stimulus].aggregation_window_days:
         return int(TEMPORAL_CONTRACTS[stimulus].aggregation_window_days or 7)
     return int(STIMULUS_AGGREGATION_DAYS.get(stimulus, 7))
