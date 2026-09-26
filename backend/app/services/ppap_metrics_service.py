@@ -87,7 +87,9 @@ class PpapMetricsService:
         # Delt PerformanceMetricsService + per-dag duration-curve cache for
         # rullerende *_hist-metrikker (deles på tvers av de 16 rolling-metrikkene).
         self._perf_service_instance: Optional[PerformanceMetricsService] = None
-        self._rolling_curve_cache: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        self._rolling_curve_cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
+        self._asof_curve_cache: Dict[date, Dict[str, Any]] = {}
+        self._critical_speed_cache: Dict[date, Tuple[Optional[float], Optional[float]]] = {}
 
     def _build_load_series(self, start_date: date, end_date: date) -> None:
         """Bygger CTL/ATL/TSB-serie over [start_date, end_date] og cacher den.
@@ -314,12 +316,28 @@ class PpapMetricsService:
         self._duration_curve_cache = payload or {}
         return self._duration_curve_cache
 
-    def get_duration_curve_value(self, metric_key: str, _day: date) -> Optional[float]:
+    def _asof_duration_curve(self, day: date) -> Dict[str, Any]:
+        """Best efforts with activity timestamp <= day. Not the current snapshot."""
+        cached = self._asof_curve_cache.get(day)
+        if cached is not None:
+            return cached
+        if self.storage is None:
+            self._asof_curve_cache[day] = {}
+            return {}
+        curve = self._perf_service().build_duration_curve(
+            days=None,
+            include_treadmill=False,
+            end_date=day,
+        )
+        self._asof_curve_cache[day] = curve or {}
+        return self._asof_curve_cache[day]
+
+    def get_duration_curve_value(self, metric_key: str, day: date) -> Optional[float]:
         spec = DURATION_CURVE_METRICS.get(metric_key)
         if spec is None:
             return None
         metric_type, duration_s = spec
-        curves = self._duration_curve_payload().get("all_time", {}).get("curves", {})
+        curves = self._asof_duration_curve(day).get("curves", {})
         entries = curves.get(metric_type, [])
         for entry in entries:
             if entry.get("duration_seconds") == duration_s:
@@ -689,23 +707,36 @@ class PpapMetricsService:
         return round(debt_seconds / 3600.0, 2)
 
     def get_critical_speed_snapshot(self, day: date) -> Tuple[Optional[float], Optional[float]]:
-        if self.storage is None:
-            return None, None
-        service = PerformanceMetricsService(self.db, self.storage)
-        payload = service.get_snapshot_payload("critical_speed")
-        if not payload:
-            payload = service.calculate_critical_speed()
-        outdoor = payload.get("outdoor") or payload
-        cs = outdoor.get("critical_speed_mps")
-        w_prime = outdoor.get("d_prime")
-        if cs is None:
-            return None, None
-        return round(float(cs), 4), round(float(w_prime), 1) if w_prime is not None else None
+        """Critical speed in m/s fitted only on efforts <= day within the lookback.
 
-    def get_critical_power_snapshot(self, _day: date) -> Tuple[Optional[float], Optional[float]]:
+        Display conversion to km/h happens at the metric presentation boundary.
+        """
         if self.storage is None:
             return None, None
-        curves = self._duration_curve_payload().get("all_time", {}).get("curves", {})
+        cached = self._critical_speed_cache.get(day)
+        if cached is not None:
+            return cached
+        payload = self._perf_service().calculate_critical_speed(
+            days=PerformanceMetricsService.CRITICAL_SPEED_LOOKBACK_DAYS,
+            include_treadmill=False,
+            end_date=day,
+        )
+        cs = payload.get("critical_speed_mps")
+        w_prime = payload.get("d_prime")
+        if cs is None:
+            result: Tuple[Optional[float], Optional[float]] = (None, None)
+        else:
+            result = (
+                round(float(cs), 4),
+                round(float(w_prime), 1) if w_prime is not None else None,
+            )
+        self._critical_speed_cache[day] = result
+        return result
+
+    def get_critical_power_snapshot(self, day: date) -> Tuple[Optional[float], Optional[float]]:
+        if self.storage is None:
+            return None, None
+        curves = self._asof_duration_curve(day).get("curves", {})
         power_points = curves.get("power", [])
         if len(power_points) < 2:
             return None, None

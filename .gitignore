@@ -83,6 +83,7 @@ Thumbs.db
 # Ignorer test-relaterte filer
 *.test.js
 *.test.ts
+!frontend/src/lib/timelineSeries.test.ts
 *.spec.js
 *.spec.ts
 
@@ -124,6 +125,7 @@ test_*.py
 !backend/tests/test_pb_calibration_and_training_response.py
 !backend/tests/test_sync_metrics.py
 !backend/tests/test_mcp_derived_metrics_bugs.py
+!backend/tests/test_longitudinal_metric_integrity.py
 !backend/tests/test_metric_quality_report.py
 !backend/tests/test_activity_data_validation.py
 !backend/tests/test_metric_catalog_units.py

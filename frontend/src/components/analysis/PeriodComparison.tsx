@@ -7,15 +7,25 @@ import { EvidenceBadge } from "./ui";
 export function PeriodComparison({
   rows,
   disclaimer,
+  days,
+  exactRange,
 }: {
   rows: PeriodComparisonRow[];
   disclaimer?: string;
+  days?: number;
+  exactRange?: boolean;
 }) {
   const notable = rows.filter((r) => r.difference != null).slice(0, 10);
+  const windowLabel =
+    days != null
+      ? `Siste ${days} dager vs forrige ${days} dager${exactRange ? "" : ""}`
+      : "Siste vindu vs forrige like lange vindu";
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-slate-900">Periode-sammenligning</h2>
-      <p className="mt-0.5 text-[11px] text-slate-500">Siste vindu vs forrige like lange vindu</p>
+      <p className="mt-0.5 text-[11px] text-slate-500" data-period-days={days ?? ""}>
+        {windowLabel}
+      </p>
       <PeriodExplanationPanel rows={rows} />
       <div className="mt-2 overflow-x-auto">
         <table className="w-full min-w-[480px] text-left text-xs">
@@ -31,7 +41,10 @@ export function PeriodComparison({
           <tbody>
             {notable.map((r) => (
               <tr key={r.metric} className="border-b border-slate-100">
-                <td className="py-1.5 font-medium text-slate-800">{r.metric}</td>
+                <td className="py-1.5 font-medium text-slate-800">
+                  {r.metric}
+                  {r.unit ? <span className="ml-1 text-slate-500">({r.unit})</span> : null}
+                </td>
                 <td className="py-1.5 tabular-nums">
                   {r.period_a.value == null ? "—" : Number(r.period_a.value).toFixed(1)}
                 </td>

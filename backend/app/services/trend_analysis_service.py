@@ -14,6 +14,12 @@ from .coaching_decision_metrics_service import CoachingDecisionMetricsService
 from .metric_evidence import confidence_from_sample_count
 from .mcp_derived_metrics_service import McpDerivedMetricsService
 from .ppap_metrics_service import PpapMetricsService
+from .statistical_uncertainty import block_bootstrap_delta
+from .temporal_metric_contract import (
+    contract_for_trend,
+    effective_sample_count,
+    personal_noise_threshold,
+)
 
 TrendDirection = str  # improving|stable|declining|uncertain
 
@@ -23,7 +29,6 @@ TREND_WINDOWS_DAYS = (7, 28, 90, 365)
 MIN_SAMPLES_FOR_SLOPE = 5
 MIN_SAMPLES_FOR_DIRECTION = 3
 CHANGE_POINT_Z_THRESHOLD = 2.0
-STABLE_RELATIVE_CHANGE_PCT = 3.0
 
 METRIC_FETCHERS: Dict[str, str] = {
     "vo2max": "__custom_vo2max__",
@@ -275,6 +280,134 @@ class TrendAnalysisService:
                 points.append((day, 1000.0 / float(row.lactate_threshold_speed)))
         return points
 
+    def summarize_period(
+        self,
+        metric: str,
+        *,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, Any]:
+        """Metric-specific level over an exact [start, end] window."""
+        series = self._fetch_series(metric, start_date, end_date)
+        values = [value for _day, value in series]
+        contract = contract_for_trend(metric)
+        method = contract.period_summary if contract else "latest_snapshot"
+        span_days = max(1, (end_date - start_date).days + 1)
+        smoothing = contract.smoothing_window_days if contract else None
+        raw_n = len(values)
+        effective_n = effective_sample_count(
+            raw_n,
+            span_days=span_days,
+            smoothing_window_days=smoothing,
+        )
+        coverage = round(raw_n / span_days, 3) if span_days else 0.0
+        summary: Dict[str, Any] = {
+            "metric": metric,
+            "method": method,
+            "unit": contract.display_unit if contract else None,
+            "temporal_semantics": contract.temporal_semantics if contract else None,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "period_days": span_days,
+            "value": None,
+            "end_value": round(values[-1], 4) if values else None,
+            "mean": round(sum(values) / len(values), 4) if values else None,
+            "median": round(median(values), 4) if values else None,
+            "best": None,
+            "sample_count": raw_n,
+            "raw_sample_count": raw_n,
+            "effective_sample_count": effective_n,
+            "coverage_ratio": coverage,
+            "smoothing_window_days": smoothing,
+            "point_in_time": method in {"latest_snapshot", "end_and_mean"},
+        }
+        if not values:
+            return summary
+        higher_is_better = True if contract is None else contract.direction != "lower_is_better"
+        best = max(values) if higher_is_better else min(values)
+        summary["best"] = round(best, 4)
+        if method == "median":
+            level = summary["median"]
+        elif method == "mean":
+            level = summary["mean"]
+        elif method == "sum":
+            level = round(sum(values), 4)
+        elif method == "best":
+            level = summary["best"]
+        elif method == "end_and_mean":
+            level = summary["end_value"]
+        else:
+            level = summary["end_value"]
+        summary["value"] = level
+        return summary
+
+    def compare_periods(
+        self,
+        metric: str,
+        *,
+        start_a: date,
+        end_a: date,
+        start_b: date,
+        end_b: date,
+    ) -> Dict[str, Any]:
+        period_a = self.summarize_period(metric, start_date=start_a, end_date=end_a)
+        period_b = self.summarize_period(metric, start_date=start_b, end_date=end_b)
+        a_val = period_a.get("value")
+        b_val = period_b.get("value")
+        absolute = None
+        relative = None
+        if isinstance(a_val, (int, float)) and isinstance(b_val, (int, float)):
+            absolute = round(float(a_val) - float(b_val), 4)
+            if b_val == 0:
+                relative = None
+            else:
+                relative = round((float(a_val) - float(b_val)) / abs(float(b_val)) * 100.0, 2)
+        series_a = [v for _d, v in self._fetch_series(metric, start_a, end_a)]
+        series_b = [v for _d, v in self._fetch_series(metric, start_b, end_b)]
+        uncertainty = block_bootstrap_delta(series_a, series_b)
+        contract = contract_for_trend(metric)
+        noise = personal_noise_threshold(
+            self._fetch_series(metric, start_b, end_a),
+            contract,
+            baseline=b_val if isinstance(b_val, (int, float)) else None,
+        )
+        effect = None
+        if absolute is not None and noise["threshold_absolute"] > 0:
+            effect = round(abs(absolute) / noise["threshold_absolute"], 2)
+        ci = uncertainty.get("ci95")
+        crosses_zero = bool(ci and ci[0] <= 0 <= ci[1])
+        effective_n = min(
+            int(period_a.get("effective_sample_count") or 0),
+            int(period_b.get("effective_sample_count") or 0),
+        )
+        higher_is_better = contract is None or contract.direction != "lower_is_better"
+        if absolute is None or effective_n < 3 or crosses_zero:
+            status = "uncertain"
+        elif effect is not None and effect < 1.0:
+            status = "stable_within_noise"
+        elif (absolute > 0) == higher_is_better:
+            status = "improving"
+        else:
+            status = "declining"
+        return {
+            "metric": metric,
+            "unit": period_a.get("unit"),
+            "period_a_summary": period_a,
+            "period_b_summary": period_b,
+            "absolute_delta": absolute,
+            "relative_delta": relative,
+            "effect_vs_personal_noise": effect,
+            "sample_count": min(int(period_a["sample_count"]), int(period_b["sample_count"])),
+            "effective_sample_count": effective_n,
+            "coverage": {
+                "period_a": period_a.get("coverage_ratio"),
+                "period_b": period_b.get("coverage_ratio"),
+            },
+            "uncertainty": uncertainty,
+            "evidence": status,
+            "from_zero": bool(b_val == 0 and a_val not in (None, 0)),
+        }
+
     def _compute_trend(
         self,
         metric: str,
@@ -286,6 +419,14 @@ class TrendAnalysisService:
         values = [v for _d, v in series]
         sample_count = len(values)
 
+        contract = contract_for_trend(metric)
+        smoothing = contract.smoothing_window_days if contract else None
+        span_days = max(1, (end - start).days + 1)
+        effective_n = effective_sample_count(
+            sample_count,
+            span_days=span_days,
+            smoothing_window_days=smoothing,
+        )
         empty: Dict[str, Any] = {
             "metric": metric,
             "current": None,
@@ -293,12 +434,30 @@ class TrendAnalysisService:
             "absolute_change": None,
             "relative_change_pct": None,
             "slope": None,
+            "slope_per_day": None,
+            "slope_per_week": None,
+            "slope_per_28d": None,
+            "standardized_slope": None,
             "direction": "uncertain",
             "sample_count": sample_count,
+            "raw_sample_count": sample_count,
+            "observation_days": sample_count,
+            "coverage_ratio": round(sample_count / span_days, 3),
+            "smoothing_window_days": smoothing,
+            "effective_sample_count": effective_n,
+            "temporal_semantics": contract.temporal_semantics if contract else None,
+            "native_cadence_days": contract.native_cadence_days if contract else None,
+            "unit": contract.display_unit if contract else None,
             "confidence": 0.0,
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
+            "window_days": window_days,
             "change_point_detected": False,
+            "change_point": {
+                "change_detected": False,
+                "change_date": None,
+            },
+            "meaningful_change": None,
         }
 
         if sample_count == 0:
@@ -315,10 +474,17 @@ class TrendAnalysisService:
         )
 
         slope = self._theil_sen_slope(series) if sample_count >= MIN_SAMPLES_FOR_SLOPE else None
-        direction = self._direction(metric, relative_change_pct, slope, sample_count)
-        change_point = self._detect_change_point(values)
+        noise = personal_noise_threshold(series, contract, baseline=baseline)
+        direction = self._direction(
+            metric,
+            absolute_change,
+            noise["threshold_absolute"],
+            effective_n,
+            sample_count,
+        )
+        change_point = self._detect_change_point(series)
 
-        confidence = confidence_from_sample_count(sample_count)
+        confidence = confidence_from_sample_count(effective_n)
         if sample_count < MIN_SAMPLES_FOR_DIRECTION:
             confidence *= 0.5
         if slope is None:
@@ -330,6 +496,10 @@ class TrendAnalysisService:
             "decoupling",
             "lactate_threshold_pace",
         }
+        slope_per_week = slope * 7.0 if slope is not None else None
+        standardized = None
+        if slope_per_week is not None and noise["threshold_absolute"] > 0:
+            standardized = slope_per_week / noise["threshold_absolute"]
 
         return {
             "metric": metric,
@@ -338,12 +508,27 @@ class TrendAnalysisService:
             "absolute_change": round(absolute_change, 4),
             "relative_change_pct": round(relative_change_pct, 2) if relative_change_pct is not None else None,
             "slope": round(slope, 6) if slope is not None else None,
+            "slope_per_day": round(slope, 6) if slope is not None else None,
+            "slope_per_week": round(slope_per_week, 6) if slope_per_week is not None else None,
+            "slope_per_28d": round(slope * 28.0, 6) if slope is not None else None,
+            "standardized_slope": round(standardized, 3) if standardized is not None else None,
             "direction": direction,
             "sample_count": sample_count,
+            "raw_sample_count": sample_count,
+            "observation_days": sample_count,
+            "coverage_ratio": round(sample_count / span_days, 3),
+            "smoothing_window_days": smoothing,
+            "effective_sample_count": effective_n,
+            "temporal_semantics": contract.temporal_semantics if contract else None,
+            "native_cadence_days": contract.native_cadence_days if contract else None,
+            "unit": contract.display_unit if contract else None,
             "confidence": round(confidence, 2),
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-            "change_point_detected": change_point,
+            "window_days": window_days,
+            "change_point_detected": bool(change_point.get("change_detected")),
+            "change_point": change_point,
+            "meaningful_change": noise,
             "higher_is_better": higher_is_better,
         }
 
@@ -367,56 +552,99 @@ class TrendAnalysisService:
     def _direction(
         self,
         metric: str,
-        relative_change_pct: Optional[float],
-        slope: Optional[float],
+        absolute_change: float,
+        noise_threshold: float,
+        effective_n: int,
         sample_count: int,
     ) -> TrendDirection:
-        if sample_count < MIN_SAMPLES_FOR_DIRECTION:
+        if sample_count < MIN_SAMPLES_FOR_DIRECTION or effective_n < 2:
             return "uncertain"
-        if relative_change_pct is None and slope is None:
-            return "uncertain"
-
         higher_is_better = metric not in {
             "resting_hr",
             "hr_drift",
             "decoupling",
             "lactate_threshold_pace",
         }
-
-        rel = relative_change_pct or 0.0
-        if abs(rel) < STABLE_RELATIVE_CHANGE_PCT and (slope is None or abs(slope) < 1e-6):
-            return "stable"
-
-        improving = rel > STABLE_RELATIVE_CHANGE_PCT
-        if not higher_is_better:
-            improving = rel < -STABLE_RELATIVE_CHANGE_PCT
-
-        if slope is not None:
-            slope_improving = slope > 0
-            if not higher_is_better:
-                slope_improving = slope < 0
-            if abs(slope) > 1e-6:
-                improving = slope_improving
-
-        if abs(rel) < STABLE_RELATIVE_CHANGE_PCT * 2 and slope is None:
-            return "stable"
+        if abs(absolute_change) < max(noise_threshold, 0.0):
+            return "stable_within_noise"
+        improving = absolute_change > 0 if higher_is_better else absolute_change < 0
         return "improving" if improving else "declining"
 
-    def _detect_change_point(self, values: List[float]) -> bool:
-        if len(values) < 8:
-            return False
-        mid = len(values) // 2
-        early = values[:mid]
-        late = values[mid:]
-        if len(early) < 3 or len(late) < 3:
-            return False
-        early_mean = sum(early) / len(early)
-        late_mean = sum(late) / len(late)
-        early_std = self._pstdev(early)
-        if early_std <= 0:
-            return abs(late_mean - early_mean) > 0.01
-        z = abs(late_mean - early_mean) / early_std
-        return z >= CHANGE_POINT_Z_THRESHOLD
+    def _detect_change_point(self, series: List[Any]) -> Dict[str, Any]:
+        """Scan split points. Returns the strongest robust shift and its date."""
+        if series and isinstance(series[0], tuple):
+            dates = [item[0] for item in series]
+            values = [float(item[1]) for item in series]
+        else:
+            dates = [None] * len(series)
+            values = [float(item) for item in series]
+        empty = {
+            "change_detected": False,
+            "change_date": None,
+            "before_level": None,
+            "after_level": None,
+            "absolute_shift": None,
+            "standardized_shift": None,
+            "evidence": "insufficient",
+        }
+        n = len(values)
+        if n < 8:
+            return empty
+        min_segment = max(4, n // 5)
+        best: Optional[Dict[str, Any]] = None
+        for split in range(min_segment, n - min_segment + 1):
+            before = values[:split]
+            after = values[split:]
+            before_level = float(median(before))
+            after_level = float(median(after))
+            scale = self._pooled_mad(before, after)
+            shift = after_level - before_level
+            impurity = self._mean_abs_dev(before, before_level) + self._mean_abs_dev(after, after_level)
+            if scale <= 1e-9:
+                standardized = 0.0 if abs(shift) < 1e-6 else 99.0
+            else:
+                standardized = abs(shift) / scale
+            if standardized < CHANGE_POINT_Z_THRESHOLD:
+                continue
+            candidate = {
+                "change_detected": True,
+                "change_date": dates[split].isoformat() if hasattr(dates[split], "isoformat") else None,
+                "before_level": round(before_level, 4),
+                "after_level": round(after_level, 4),
+                "absolute_shift": round(shift, 4),
+                "standardized_shift": round(float(standardized), 3),
+                "evidence": "moderate" if standardized < 4 else "supported",
+                "split_index": split,
+                "_impurity": impurity,
+            }
+            rank = (float(candidate["standardized_shift"]), -impurity)
+            if best is None or rank > best["_rank"]:
+                candidate["_rank"] = rank
+                best = candidate
+        if best is None:
+            return empty
+        best.pop("_rank", None)
+        best.pop("_impurity", None)
+        return best
+
+    @staticmethod
+    def _pooled_mad(before: List[float], after: List[float]) -> float:
+        def _mad(vals: List[float]) -> float:
+            if not vals:
+                return 0.0
+            mid = float(median(vals))
+            return float(median([abs(v - mid) for v in vals]))
+
+        left = _mad(before)
+        right = _mad(after)
+        # 1.4826 * MAD is a robust scale. Used only as a heuristic effect denominator.
+        return 1.4826 * ((left + right) / 2.0)
+
+    @staticmethod
+    def _mean_abs_dev(values: List[float], level: float) -> float:
+        if not values:
+            return 0.0
+        return sum(abs(value - level) for value in values) / len(values)
 
     @staticmethod
     def _pstdev(values: List[float]) -> float:

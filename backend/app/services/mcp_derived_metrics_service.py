@@ -20,6 +20,7 @@ from .ppap_metrics_service import (
     PpapMetricsService,
     READINESS_COMPONENT_METRICS,
 )
+from .temporal_metric_contract import present_value
 
 
 RACE_DISTANCES_M = {
@@ -174,7 +175,10 @@ class McpDerivedMetricsService:
 
         points: List[Dict[str, Any]] = []
         for day in dates:
-            value = self._ppap.get_rolling_duration_curve_value(metric_key, day)
+            value = present_value(
+                metric_key,
+                self._ppap.get_rolling_duration_curve_value(metric_key, day),
+            )
             if value is None:
                 continue
             points.append({"date": day.isoformat(), "timestamp": None, "value": value})
@@ -255,13 +259,13 @@ class McpDerivedMetricsService:
             return self._ppap.get_rhr_rolling(day, window)
         if metric_key == "running.critical_speed":
             cs, _w = self._ppap.get_critical_speed_snapshot(day)
-            return cs
+            return present_value(metric_key, cs)
         if metric_key == "running.w_prime":
             _cs, w_prime = self._ppap.get_critical_speed_snapshot(day)
             return w_prime
 
         if metric_key in DURATION_CURVE_METRICS:
-            return self._ppap.get_duration_curve_value(metric_key, day)
+            return present_value(metric_key, self._ppap.get_duration_curve_value(metric_key, day))
         if metric_key in COACHING_ZONE_METRICS:
             return self._ppap.get_coaching_zone_pct(day, metric_key)
         if metric_key in READINESS_COMPONENT_METRICS:

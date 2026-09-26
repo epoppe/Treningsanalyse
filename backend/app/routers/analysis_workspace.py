@@ -132,8 +132,8 @@ def _direction_no(direction: str, higher_is_better: bool = True) -> str:
         return "Forbedring"
     if d == "declining":
         return "Nedgang"
-    if d == "stable":
-        return "Stabil"
+    if d in {"stable", "stable_within_noise"}:
+        return "Stabil innenfor støy" if d == "stable_within_noise" else "Stabil"
     return "Usikker"
 
 
@@ -172,6 +172,23 @@ def _domain_from_block(spec: Dict[str, Any], block: Optional[Dict[str, Any]], wi
     }
 
 
+def _attach_temporal_contract(series: Dict[str, Any]) -> None:
+    from ..services.temporal_metric_contract import contract_for
+
+    for payload in series.values():
+        key = str(payload.get("metric") or "")
+        contract = contract_for(key)
+        if contract is None:
+            continue
+        payload["unit"] = contract.display_unit
+        payload["canonical_unit"] = contract.canonical_unit
+        payload["display_multiplier"] = contract.display_multiplier
+        payload["temporal_semantics"] = contract.temporal_semantics
+        payload["native_cadence_days"] = contract.native_cadence_days
+        payload["smoothing_window_days"] = contract.smoothing_window_days
+        payload["show_gaps"] = contract.show_gaps
+
+
 def _period_explanation_nb(metric: str, diff: Optional[float], evidence: str) -> str:
     label = metric.replace("_", " ")
     if diff is None:
@@ -198,10 +215,15 @@ def get_development(
 ) -> Dict[str, Any]:
     """Domain summary cards for the Utvikling tab."""
     start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
-    window = _window_key(min(days, 365))
-    window_days = int(window.replace("d", ""))
+    explicit_range = start_date is not None
+    if explicit_range:
+        window_days = days
+        window = f"{window_days}d"
+    else:
+        window = _window_key(min(days, 365))
+        window_days = int(window.replace("d", ""))
     try:
-        windows = (28, 90, 365) if multi_horizon else (window_days,)
+        windows = (28, 90, 365) if multi_horizon and not explicit_range else (window_days,)
         trends = TrendAnalysisService(db, storage).analyze_all(
             end_date=end,
             windows=windows,
@@ -226,6 +248,8 @@ def get_development(
             "end_date": end.isoformat(),
             "period": period,
             "period_days": days,
+            "analyzed_days": window_days,
+            "exact_range": explicit_range,
             "window": window,
             "multi_horizon": multi_horizon,
             "domains": domains,
@@ -322,6 +346,7 @@ def get_timeseries(
                 }
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown metric: {original}")
+        _attach_temporal_contract(series)
         return {
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
@@ -378,10 +403,12 @@ def get_relationship_matrix(
     end = end_date or date.today()
     lookback = _period_days(period)
     stimulus_map = {
-        "stimulus.easy_minutes_28d": "easy_volume",
-        "stimulus.threshold_minutes_14d": "threshold_volume",
-        "stimulus.tss_28d": "weekly_tss",
-        "stimulus.tss_7d": "weekly_tss",
+        "stimulus.easy_minutes_28d": ("easy_volume", 28),
+        "stimulus.threshold_minutes_14d": ("threshold_volume", 14),
+        "stimulus.tss_28d": ("tss_28d", 28),
+        "stimulus.tss_7d": ("tss_7d", 7),
+        "stimulus.vo2_minutes_14d": ("vo2_volume", 14),
+        "stimulus.long_run_minutes_28d": ("long_run_volume", 28),
     }
     outcome_map = {
         "fitness.ef_30d": "easy_efficiency",
@@ -391,13 +418,15 @@ def get_relationship_matrix(
         "cardio.hrv_7d": "hrv",
     }
     try:
-        raw = TrainingResponseService(db, storage).analyze_responses(
+        tr = TrainingResponseService(db, storage)
+        raw = tr.analyze_responses(
             end_date=end,
             lookback_days=lookback,
         )
         by_pair = {
             (r.get("stimulus"), r.get("outcome")): r for r in (raw.get("relationships") or [])
         }
+        start = end - timedelta(days=lookback)
         cells: List[Dict[str, Any]] = []
         for pred in MATRIX_PREDICTORS:
             for outcome in MATRIX_OUTCOMES:
@@ -426,7 +455,19 @@ def get_relationship_matrix(
                         }
                     )
                     continue
-                hit = by_pair.get((stim, out))
+                stim_id, agg_days = stim
+                if stim_id == "tss_28d":
+                    hit = tr._best_lag_relationship(  # noqa: SLF001
+                        "tss_28d",
+                        out,
+                        start,
+                        end,
+                        (14, 21, 28),
+                        aggregation_days=agg_days,
+                    )
+                else:
+                    lookup = "weekly_tss" if stim_id == "tss_7d" else stim_id
+                    hit = by_pair.get((lookup, out))
                 if not hit:
                     cells.append(
                         {
@@ -634,41 +675,11 @@ def get_history(
     end = end_date or date.today()
     start = end - timedelta(days=_period_days(period) - 1)
     try:
-        months = (
-            db.query(MonthlySummary)
-            .filter(
-                MonthlySummary.month_start_date >= start,
-                MonthlySummary.month_end_date <= end + timedelta(days=31),
-            )
-            .order_by(MonthlySummary.month_start_date.desc())
-            .limit(36)
-            .all()
+        return HistoryCockpitService(db).monthly_history(
+            start=start,
+            end=end,
+            period=period,
         )
-        years: Dict[str, List[Dict[str, Any]]] = {}
-        for m in months:
-            payload = {
-                "month_start": m.month_start_date.isoformat() if m.month_start_date else None,
-                "month_end": m.month_end_date.isoformat() if m.month_end_date else None,
-                "year": m.year,
-                "month": m.month,
-                "total_duration_seconds": m.total_duration,
-                "total_distance_meters": m.total_distance,
-                "activity_count": m.total_activities,
-                "total_tss": m.total_tss,
-            }
-            year = str(m.month_start_date.year) if m.month_start_date else "unknown"
-            years.setdefault(year, []).append(payload)
-        return {
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
-            "period": period,
-            "years": [
-                {"year": y, "months": ms}
-                for y, ms in sorted(years.items(), key=lambda item: item[0], reverse=True)
-            ],
-            "month_count": len(months),
-            "note": "Hierarchical history from MonthlySummary — expand for weeks/sessions later.",
-        }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -689,7 +700,7 @@ def get_history_yoy(
 
 @router.get("/history/performance-recovery")
 def get_history_performance_recovery(
-    months: int = Query(12, ge=3, le=24),
+    months: int = Query(12, ge=3, le=60),
     end_date: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     storage: DataStorage = Depends(get_data_storage),
@@ -728,62 +739,104 @@ def get_period_comparison(
 ) -> Dict[str, Any]:
     """Compare last N days vs previous N days using TrendAnalysisService windows."""
     start, end, days = _resolve_range(period, end_date=end_date, start_date=start_date)
-    days = min(days, 365)
-    window = _window_key(days)
-    window_days = int(window.replace("d", ""))
+    explicit_range = start_date is not None
+    if explicit_range:
+        window_days = days
+        window = f"{window_days}d"
+        period_start = start
+        period_end = end
+    else:
+        window = _window_key(min(days, 365))
+        window_days = int(window.replace("d", ""))
+        period_end = end
+        period_start = end - timedelta(days=window_days - 1)
+    previous_end = period_start - timedelta(days=1)
+    previous_start = previous_end - timedelta(days=window_days - 1)
     try:
         svc = TrendAnalysisService(db, storage)
-        current = svc.analyze_all(end_date=end, windows=(window_days,))
-        previous_end = start - timedelta(days=1)
-        previous = svc.analyze_all(end_date=previous_end, windows=(window_days,))
         rows: List[Dict[str, Any]] = []
         for metric in sorted(METRIC_FETCHERS.keys()):
-            a = ((current.get("metrics") or {}).get(metric) or {}).get(window) or {}
-            b = ((previous.get("metrics") or {}).get(metric) or {}).get(window) or {}
-            a_val = a.get("current")
-            b_val = b.get("current")
-            diff = None
-            if isinstance(a_val, (int, float)) and isinstance(b_val, (int, float)):
-                diff = round(float(a_val) - float(b_val), 4)
-            n = min(int(a.get("sample_count") or 0), int(b.get("sample_count") or 0))
+            compared = svc.compare_periods(
+                metric,
+                start_a=period_start,
+                end_a=period_end,
+                start_b=previous_start,
+                end_b=previous_end,
+            )
+            a = compared["period_a_summary"]
+            b = compared["period_b_summary"]
+            diff = compared.get("absolute_delta")
+            evidence = compared.get("evidence") or "uncertain"
+            if evidence == "uncertain":
+                evidence_label = "insufficient"
+            elif evidence == "stable_within_noise":
+                evidence_label = "emerging"
+            else:
+                evidence_label = _evidence_label(0.7, int(compared.get("effective_sample_count") or 0))
             rows.append(
                 {
                     "metric": metric,
+                    "unit": compared.get("unit"),
                     "period_a": {
-                        "label": f"{start.isoformat()} – {end.isoformat()}",
-                        "end": end.isoformat(),
-                        "value": a_val,
+                        "label": f"{period_start.isoformat()} – {period_end.isoformat()}",
+                        "start": period_start.isoformat(),
+                        "end": period_end.isoformat(),
+                        "value": a.get("value"),
+                        "summary_method": a.get("method"),
+                        "mean": a.get("mean"),
+                        "median": a.get("median"),
+                        "end_value": a.get("end_value"),
                         "sample_count": a.get("sample_count") or 0,
+                        "effective_sample_count": a.get("effective_sample_count"),
+                        "coverage_ratio": a.get("coverage_ratio"),
+                        "point_in_time": a.get("point_in_time"),
                     },
                     "period_b": {
-                        "label": f"Forrige {days}d",
+                        "label": f"{previous_start.isoformat()} – {previous_end.isoformat()}",
+                        "start": previous_start.isoformat(),
                         "end": previous_end.isoformat(),
-                        "value": b_val,
+                        "value": b.get("value"),
+                        "summary_method": b.get("method"),
+                        "mean": b.get("mean"),
+                        "median": b.get("median"),
+                        "end_value": b.get("end_value"),
                         "sample_count": b.get("sample_count") or 0,
+                        "effective_sample_count": b.get("effective_sample_count"),
+                        "coverage_ratio": b.get("coverage_ratio"),
+                        "point_in_time": b.get("point_in_time"),
                     },
+                    "period_a_summary": a,
+                    "period_b_summary": b,
                     "difference": diff,
-                    "evidence": _evidence_label(
-                        min(float(a.get("confidence") or 0), float(b.get("confidence") or 0)),
-                        n,
-                    ),
-                    "explanation": _period_explanation_nb(
-                        metric,
-                        diff,
-                        _evidence_label(
-                            min(float(a.get("confidence") or 0), float(b.get("confidence") or 0)),
-                            n,
-                        ),
-                    ),
+                    "absolute_delta": diff,
+                    "relative_delta": compared.get("relative_delta"),
+                    "effect_vs_personal_noise": compared.get("effect_vs_personal_noise"),
+                    "sample_count": compared.get("sample_count"),
+                    "effective_sample_count": compared.get("effective_sample_count"),
+                    "coverage": compared.get("coverage"),
+                    "uncertainty": compared.get("uncertainty"),
+                    "from_zero": compared.get("from_zero"),
+                    "evidence": evidence if evidence in {"uncertain", "stable_within_noise"} else evidence_label,
+                    "change_status": evidence,
+                    "explanation": _period_explanation_nb(metric, diff, evidence_label),
                 }
             )
         return {
             "period": period,
-            "days": days,
-            "start_date": start.isoformat(),
-            "end_date": end.isoformat(),
+            "days": window_days,
+            "requested_days": days,
+            "exact_range": explicit_range or window_days == days,
+            "start_date": period_start.isoformat(),
+            "end_date": period_end.isoformat(),
+            "previous_start_date": previous_start.isoformat(),
+            "previous_end_date": previous_end.isoformat(),
             "window": window,
             "rows": rows,
-            "disclaimer": "Differences are descriptive. Low sample → insufficient evidence.",
+            "disclaimer": (
+                "Each row compares the same number of days. "
+                "Summary method is metric-specific. Uncertainty is a week-block bootstrap heuristic. "
+                "Not causal."
+            ),
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -925,8 +978,8 @@ def _stimulus_aggregate_series(
     stimulus_id = {
         "easy_volume": "easy_volume",
         "threshold_volume": "threshold_volume",
-        "vo2_volume": "high_intensity_volume",
-        "long_run_volume": "easy_volume",
+        "vo2_volume": "vo2_volume",
+        "long_run_volume": "long_run_volume",
         "weekly_tss": "weekly_tss",
     }.get(kind)
     if not stimulus_id:
@@ -1194,14 +1247,17 @@ def get_change_aligned(
             end_date=end, windows=(window_days,)
         )
         block = ((trends.get("metrics") or {}).get(legacy) or {}).get(window) or {}
-        if not block.get("change_point_detected"):
+        change = block.get("change_point") or {}
+        change_iso = change.get("change_date")
+        if not block.get("change_point_detected") or not change_iso:
             return {
                 "metric": metric,
                 "status": "no_change_point",
                 "wording": "No meaningful change point detected in the selected window.",
                 "comparison": None,
+                "change_point": change or None,
             }
-        change_day = end - timedelta(days=window_days // 2)
+        change_day = date.fromisoformat(str(change_iso)[:10])
         before_end = change_day - timedelta(days=1)
         before_start = before_end - timedelta(days=41)
         prior_end = before_start - timedelta(days=1)
@@ -1238,7 +1294,7 @@ def get_change_aligned(
                 "prior_6_weeks": _week_stats(prior_start, prior_end),
             },
             "wording": "Changes observed before the improvement — not causal attribution.",
-            "disclaimer": "Change date is approximate from trend window midpoint.",
+            "disclaimer": "Change date is the split found by a robust median scan, not the window midpoint.",
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

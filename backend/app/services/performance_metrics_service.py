@@ -730,8 +730,18 @@ class PerformanceMetricsService:
         days: Optional[int] = CRITICAL_SPEED_LOOKBACK_DAYS,
         *,
         include_treadmill: bool = False,
+        end_date: Optional[date] = None,
     ) -> Dict[str, Any]:
-        efforts = self.collect_best_efforts(days=days, include_treadmill=include_treadmill)
+        """Fit critical speed from eligible efforts on or before `end_date`.
+
+        Lookback is `days` (default 365) ending at `end_date`. Efforts after
+        `end_date` are excluded. This is the only critical-speed fit.
+        """
+        efforts = self.collect_best_efforts(
+            days=days,
+            include_treadmill=include_treadmill,
+            end_date=end_date,
+        )
         speed_efforts = [e for e in efforts if e.get("metric_type") == "speed"]
         best_by_duration: Dict[int, Dict[str, Any]] = {}
         for duration_s in self.CRITICAL_SPEED_DURATIONS:
@@ -757,6 +767,7 @@ class PerformanceMetricsService:
                 "efforts": list(best_by_duration.values()),
                 "include_treadmill": include_treadmill,
                 "lookback_days": days,
+                "as_of": end_date.isoformat() if end_date else None,
             }
 
         times = np.array(sorted(best_by_duration.keys()), dtype=float)
@@ -777,6 +788,7 @@ class PerformanceMetricsService:
             "efforts": list(best_by_duration.values()),
             "include_treadmill": include_treadmill,
             "lookback_days": days,
+            "as_of": end_date.isoformat() if end_date else None,
         }
 
     def resolve_critical_speed_payload(

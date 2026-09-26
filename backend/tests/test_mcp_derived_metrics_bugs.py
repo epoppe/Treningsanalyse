@@ -99,7 +99,7 @@ class RollingDailySeriesTests(unittest.TestCase):
             4,
         )
         self.assertEqual(len(points), 4)
-        self.assertEqual(points[-1]["value"], 4.2)
+        self.assertEqual(points[-1]["value"], 15.12)
 
 
 class RecoveryEfficiencyTests(unittest.TestCase):

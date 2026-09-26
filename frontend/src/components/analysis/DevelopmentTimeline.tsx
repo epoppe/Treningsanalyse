@@ -18,6 +18,12 @@ import {
 } from "@/components/charts/ThemedRecharts";
 import { formatRangeLabel } from "@/lib/analysisRange";
 import {
+  groupSeriesByUnit,
+  insertGapNulls,
+  seriesShowsGaps,
+  type TimelineSeriesMeta,
+} from "@/lib/timelineSeries";
+import {
   axisLabelProps,
   formatChartAxisDate,
   formatChartTooltipDate,
@@ -27,22 +33,19 @@ import { getAnalysisMetricLabel } from "@/lib/metrics";
 
 const COLORS = [...ANALYSIS_CHART_COLORS];
 
-function mergeSeries(payload: TimeseriesPayload) {
-  const keys = Object.keys(payload.series);
-  const byDate = new Map<string, Record<string, number | string>>();
+function seriesRows(payload: TimeseriesPayload, keys: string[]) {
+  const byDate = new Map<string, Record<string, number | string | null>>();
   keys.forEach((key) => {
-    for (const p of payload.series[key].points) {
-      const row = byDate.get(p.date) || { date: p.date };
-      row[key] = p.value;
-      byDate.set(p.date, row);
+    const meta = payload.series[key] as TimelineSeriesMeta | undefined;
+    const showGaps = seriesShowsGaps(meta);
+    const points = insertGapNulls(payload.series[key].points || [], showGaps);
+    for (const point of points) {
+      const row = byDate.get(point.date) || { date: point.date };
+      row[key] = point.value;
+      byDate.set(point.date, row);
     }
   });
-  return {
-    keys,
-    rows: Array.from(byDate.values()).sort((a, b) =>
-      String(a.date).localeCompare(String(b.date)),
-    ),
-  };
+  return Array.from(byDate.values()).sort((a, b) => String(a.date).localeCompare(String(b.date)));
 }
 
 export function DevelopmentTimeline({
@@ -66,31 +69,28 @@ export function DevelopmentTimeline({
   onRangeSelect?: (from: string, to: string) => void;
   onClearRange?: () => void;
 }) {
-  const { keys, rows } = data ? mergeSeries(data) : { keys: selected, rows: [] };
+  const keys = data ? Object.keys(data.series) : selected;
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const seriesMeta = useMemo(() => {
-    const meta: Record<string, { label: string; unit: string }> = {};
+    const meta: Record<string, { label: string; unit: string; showGaps: boolean }> = {};
     keys.forEach((key) => {
       const s = data?.series[key];
       meta[key] = {
         label: getAnalysisMetricLabel(key, s),
         unit: s?.unit || s?.unit_note || "",
+        showGaps: seriesShowsGaps(s),
       };
     });
     return meta;
   }, [data, keys]);
 
-  const brushIndexes = useMemo(() => {
-    if (!rangeFrom || !rangeTo || rows.length === 0) return undefined;
-    const startIndex = rows.findIndex((r) => String(r.date) >= rangeFrom);
-    const endIndex = [...rows].reverse().findIndex((r) => String(r.date) <= rangeTo);
-    if (startIndex < 0 || endIndex < 0) return undefined;
-    return {
-      startIndex,
-      endIndex: rows.length - 1 - endIndex,
-    };
-  }, [rangeFrom, rangeTo, rows]);
+  const unitGroups = useMemo(() => groupSeriesByUnit(keys, seriesMeta), [keys, seriesMeta]);
+  const panelRows = useMemo(() => {
+    if (!data) return unitGroups.map(() => []);
+    return unitGroups.map((group) => seriesRows(data, group));
+  }, [data, unitGroups]);
+  const hasAnyPoints = panelRows.some((panel) => panel.length > 0);
 
   const hasSelection = Boolean(rangeFrom && rangeTo);
 
@@ -138,78 +138,118 @@ export function DevelopmentTimeline({
           );
         })}
       </div>
-      <div className="mt-3 h-64 w-full">
-        {rows.length === 0 ? (
-          <p className="flex h-full items-center justify-center text-xs text-slate-500">
+      <div className="mt-3 space-y-3">
+        {!hasAnyPoints ? (
+          <p className="flex h-64 items-center justify-center text-xs text-slate-500">
             Ingen tidsseriedata for valgt periode.
           </p>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={rows}
-              margin={{ ...CHART_MARGIN.compact, bottom: 8, left: 8 }}
-              onClick={(state) => {
-                const label = state?.activeLabel;
-                if (label && onSelectDate) onSelectDate(String(label));
-              }}
-            >
-              <ThemedCartesianGrid />
-              <ThemedXAxis
-                dataKey="date"
-                minTickGap={32}
-                tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
-              />
-              <ThemedYAxis width={44} />
-              <ThemedTooltip
-                labelFormatter={(label) => formatChartTooltipDate(String(label))}
-                formatter={(value: any, name: any) => {
-                  const meta = seriesMeta[String(name)];
-                  const unit = meta?.unit || "";
-                  const formatted = unit
-                    ? formatWithUnit(Number(value), unit, 1)
-                    : String(value);
-                  return [formatted, meta?.label || String(name)];
-                }}
-              />
-              <ThemedLegend
-                formatter={(value) => seriesMeta[String(value)]?.label || String(value)}
-              />
-              {keys.map((key, i) => (
-                <Line
-                  key={key}
-                  type="monotone"
-                  dataKey={key}
-                  name={seriesMeta[key]?.label || key}
-                  stroke={COLORS[i % COLORS.length]}
-                  dot={CHART_LINE.dot}
-                  strokeWidth={CHART_LINE.strokeWidth}
-                  connectNulls
-                />
-              ))}
-              <Brush
-                dataKey="date"
-                height={22}
-                stroke="#334155"
-                travellerWidth={8}
-                startIndex={brushIndexes?.startIndex}
-                endIndex={brushIndexes?.endIndex}
-                tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
-                onChange={(range) => {
-                  if (!onRangeSelect || !range) return;
-                  const startIndex = range.startIndex;
-                  const endIndex = range.endIndex;
-                  if (startIndex == null || endIndex == null) return;
-                  const from = rows[startIndex]?.date;
-                  const to = rows[endIndex]?.date;
-                  if (!from || !to) return;
-                  if (debounceRef.current) clearTimeout(debounceRef.current);
-                  debounceRef.current = setTimeout(() => {
-                    onRangeSelect(String(from), String(to));
-                  }, 250);
-                }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          unitGroups.map((group, groupIndex) => {
+            const groupRows = panelRows[groupIndex] || [];
+            const unit = seriesMeta[group[0]]?.unit || "";
+            const hasMeasuredGap = groupRows.some((row) =>
+              group.some((key) => row[key] == null),
+            );
+            const isLast = groupIndex === unitGroups.length - 1;
+            return (
+              <div key={unit || group.join("-")} data-unit-panel={unit || "ukjent"}>
+                <p className="mb-1 text-[11px] font-medium text-slate-600">
+                  {unit || "Ukjent enhet"}
+                  {unitGroups.length > 1 ? " · eget panel" : ""}
+                  {hasMeasuredGap ? " · hull er manglende målinger" : ""}
+                </p>
+                <div className="h-52 w-full">
+                {groupRows.length === 0 ? (
+                  <p className="flex h-full items-center justify-center text-xs text-slate-500">
+                    Ingen målinger i {unit || "denne enheten"} for valgt periode.
+                  </p>
+                ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={groupRows}
+                    margin={{ ...CHART_MARGIN.compact, bottom: 8, left: 8 }}
+                    onClick={(state) => {
+                      const label = state?.activeLabel;
+                      if (label && onSelectDate) onSelectDate(String(label));
+                    }}
+                  >
+                    <ThemedCartesianGrid />
+                    <ThemedXAxis
+                      dataKey="date"
+                      minTickGap={32}
+                      tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
+                    />
+                    <ThemedYAxis width={44} unit={unit ? ` ${unit}` : undefined} />
+                    <ThemedTooltip
+                      labelFormatter={(label) => formatChartTooltipDate(String(label))}
+                      formatter={(value: any, name: any) => {
+                        const meta = seriesMeta[String(name)];
+                        const formatted =
+                          value == null
+                            ? "mangler"
+                            : meta?.unit
+                              ? formatWithUnit(Number(value), meta.unit, 1)
+                              : String(value);
+                        return [formatted, meta?.label || String(name)];
+                      }}
+                    />
+                    <ThemedLegend
+                      formatter={(value) => seriesMeta[String(value)]?.label || String(value)}
+                    />
+                    {group.map((key) => (
+                      <Line
+                        key={key}
+                        type="monotone"
+                        dataKey={key}
+                        name={seriesMeta[key]?.label || key}
+                        stroke={COLORS[keys.indexOf(key) % COLORS.length]}
+                        dot={CHART_LINE.dot}
+                        strokeWidth={CHART_LINE.strokeWidth}
+                        connectNulls={!seriesMeta[key]?.showGaps}
+                      />
+                    ))}
+                    {isLast ? (
+                      <Brush
+                        dataKey="date"
+                        height={22}
+                        stroke="#334155"
+                        travellerWidth={8}
+                        startIndex={
+                          rangeFrom
+                            ? Math.max(0, groupRows.findIndex((row) => String(row.date) >= rangeFrom))
+                            : undefined
+                        }
+                        endIndex={
+                          rangeTo
+                            ? groupRows.reduce(
+                                (found, row, index) => (String(row.date) <= rangeTo ? index : found),
+                                groupRows.length - 1,
+                              )
+                            : undefined
+                        }
+                        tickFormatter={(v) => formatChartAxisDate(String(v), "dayMonth")}
+                        onChange={(range) => {
+                          if (!onRangeSelect || !range) return;
+                          const startIndex = range.startIndex;
+                          const endIndex = range.endIndex;
+                          if (startIndex == null || endIndex == null) return;
+                          const from = groupRows[startIndex]?.date;
+                          const to = groupRows[endIndex]?.date;
+                          if (!from || !to) return;
+                          if (debounceRef.current) clearTimeout(debounceRef.current);
+                          debounceRef.current = setTimeout(() => {
+                            onRangeSelect(String(from), String(to));
+                          }, 250);
+                        }}
+                      />
+                    ) : null}
+                  </LineChart>
+                </ResponsiveContainer>
+                )}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
       {data?.note ? <p className="mt-2 text-[11px] text-slate-500">{data.note}</p> : null}

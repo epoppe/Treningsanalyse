@@ -194,7 +194,12 @@ function UtviklingPanel() {
       <div id="period-comparison">
         {comparison.isLoading ? <AnalysisSkeleton className="h-40" /> : null}
         {comparison.data ? (
-          <PeriodComparison rows={comparison.data.rows} disclaimer={comparison.data.disclaimer} />
+          <PeriodComparison
+            rows={comparison.data.rows}
+            disclaimer={comparison.data.disclaimer}
+            days={comparison.data.days}
+            exactRange={comparison.data.exact_range}
+          />
         ) : null}
       </div>
 
@@ -337,8 +342,9 @@ function HistorikkPanel() {
     state.period === "28d" || state.period === "90d" ? "2y" : state.period;
   const query = useHistory(historyPeriod);
   const weekQuery = useWeekExplorer(state.week || undefined);
+  const [historyMonths, setHistoryMonths] = useState(12);
   const yoy = useHistoryYoy(12);
-  const performance = useHistoryPerformanceRecovery(12);
+  const performance = useHistoryPerformanceRecovery(historyMonths);
   const annotations = useHistoryAnnotations(20);
 
   if (query.isLoading) return <AnalysisSkeleton className="h-64" />;
@@ -369,7 +375,12 @@ function HistorikkPanel() {
       ) : null}
 
       <YoYComparisonPanel data={yoy.data} isLoading={yoy.isLoading} />
-      <PerformanceRecoveryHistoryPanel data={performance.data} isLoading={performance.isLoading} />
+      <PerformanceRecoveryHistoryPanel
+        data={performance.data}
+        isLoading={performance.isLoading}
+        months={historyMonths}
+        onMonthsChange={setHistoryMonths}
+      />
       <HistoryAnnotationsPanel data={annotations.data} isLoading={annotations.isLoading} />
 
       <HistoryTimeline data={query.data} />
