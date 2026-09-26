@@ -36,9 +36,11 @@ METRIC_FETCHERS: Dict[str, str] = {
     "lactate_threshold_pace": "__custom_lt_pace__",
     "easy_run_efficiency": "fitness.ef_30d",
     "hr_drift": "cardio.drift_score",
-    "decoupling": "__custom_decoupling__",
+    "decoupling": "cardio.drift_score",
     "critical_speed": "running.critical_speed",
     "ctl": "fitness.ctl",
+    "atl": "fitness.atl",
+    "consistency": "consistency.score",
     "resting_hr": "cardio.rhr_7d",
     "hrv_rmssd": "cardio.hrv_7d",
     "sleep_score": "__custom_sleep__",
@@ -122,8 +124,6 @@ class TrendAnalysisService:
     ) -> List[Tuple[date, float]]:
         custom = {
             "durability": self._durability_series,
-            "decoupling": lambda s, e: self._activity_metric_series(s, e, "decoupling_percent"),
-            "easy_run_efficiency": lambda s, e: self._activity_metric_series(s, e, "avg_efficiency_factor"),
             "lactate_threshold_hr": lambda s, e: self._lt_series(s, e, "hr"),
             "lactate_threshold_pace": lambda s, e: self._lt_series(s, e, "pace"),
             "vo2max": self._vo2max_series,
@@ -323,9 +323,14 @@ class TrendAnalysisService:
         }
         if not values:
             return summary
-        higher_is_better = True if contract is None else contract.direction != "lower_is_better"
-        best = max(values) if higher_is_better else min(values)
-        summary["best"] = round(best, 4)
+        rule = contract.direction if contract else "higher_is_better"
+        if rule == "lower_is_better":
+            best = min(values)
+        elif rule == "higher_is_better":
+            best = max(values)
+        else:
+            best = None
+        summary["best"] = round(best, 4) if best is not None else None
         if method == "median":
             level = summary["median"]
         elif method == "mean":
@@ -380,15 +385,18 @@ class TrendAnalysisService:
             int(period_a.get("effective_sample_count") or 0),
             int(period_b.get("effective_sample_count") or 0),
         )
-        higher_is_better = contract is None or contract.direction != "lower_is_better"
         if absolute is None or effective_n < 3 or crosses_zero:
             status = "uncertain"
         elif effect is not None and effect < 1.0:
             status = "stable_within_noise"
-        elif (absolute > 0) == higher_is_better:
-            status = "improving"
         else:
-            status = "declining"
+            status = self._direction(
+                metric,
+                float(absolute),
+                noise["threshold_absolute"],
+                effective_n,
+                max(int(period_a.get("raw_sample_count") or period_a.get("sample_count") or 0), MIN_SAMPLES_FOR_DIRECTION),
+            )
         return {
             "metric": metric,
             "unit": period_a.get("unit"),
@@ -490,12 +498,11 @@ class TrendAnalysisService:
         if slope is None:
             confidence *= 0.85
 
-        higher_is_better = metric not in {
-            "resting_hr",
-            "hr_drift",
-            "decoupling",
-            "lactate_threshold_pace",
-        }
+        rule = contract.direction if contract else "higher_is_better"
+        if rule == "context":
+            higher_is_better = None
+        else:
+            higher_is_better = rule != "lower_is_better"
         slope_per_week = slope * 7.0 if slope is not None else None
         standardized = None
         if slope_per_week is not None and noise["threshold_absolute"] > 0:
@@ -530,6 +537,7 @@ class TrendAnalysisService:
             "change_point": change_point,
             "meaningful_change": noise,
             "higher_is_better": higher_is_better,
+            "direction_rule": rule,
         }
 
     def _theil_sen_slope(self, series: List[Tuple[date, float]]) -> Optional[float]:
@@ -559,14 +567,13 @@ class TrendAnalysisService:
     ) -> TrendDirection:
         if sample_count < MIN_SAMPLES_FOR_DIRECTION or effective_n < 2:
             return "uncertain"
-        higher_is_better = metric not in {
-            "resting_hr",
-            "hr_drift",
-            "decoupling",
-            "lactate_threshold_pace",
-        }
         if abs(absolute_change) < max(noise_threshold, 0.0):
             return "stable_within_noise"
+        contract = contract_for_trend(metric)
+        rule = contract.direction if contract else "higher_is_better"
+        if rule == "context":
+            return "higher" if absolute_change > 0 else "lower"
+        higher_is_better = rule != "lower_is_better"
         improving = absolute_change > 0 if higher_is_better else absolute_change < 0
         return "improving" if improving else "declining"
 

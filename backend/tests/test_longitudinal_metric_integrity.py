@@ -27,9 +27,10 @@ from app.services.temporal_metric_contract import (
     effective_sample_count,
     speed_mps_to_kmh,
     stimulus_bounds,
+    stimulus_producer_family,
 )
-from app.services.trend_analysis_service import TrendAnalysisService
-from app.services.training_response_service import TrainingResponseService
+from app.services.trend_analysis_service import METRIC_FETCHERS, TrendAnalysisService
+from app.services.training_response_service import TrainingResponseService, residualize_outcomes
 
 
 def _session():
@@ -373,7 +374,7 @@ class HistorySemanticsTests(unittest.TestCase):
         self.db.close()
         self.tmp.cleanup()
 
-    def _month(self, year: int, month: int, distance: float) -> None:
+    def _month(self, year: int, month: int, distance: float, tss: float = 10) -> None:
         start = date(year, month, 1)
         if month == 12:
             end = date(year, 12, 31)
@@ -388,7 +389,7 @@ class HistorySemanticsTests(unittest.TestCase):
                 total_distance=distance,
                 total_duration=distance,
                 total_activities=1 if distance else 0,
-                total_tss=10,
+                total_tss=tss,
             )
         )
 
@@ -480,6 +481,133 @@ class HistorySemanticsTests(unittest.TestCase):
         self.assertEqual(context.get("metric"), "hrv_median")
         self.assertGreaterEqual(context.get("same_month_samples") or 0, 3)
         self.assertIsNotNone(context.get("percentile_vs_same_month"))
+
+    def test_period_all_starts_at_earliest_summary_not_ten_years(self):
+        from app.routers.analysis_workspace import _history_start
+
+        self._month(2014, 1, 500)
+        self.db.commit()
+        start, basis = _history_start(self.db, date(2026, 9, 26), "all")
+        self.assertEqual(basis, "earliest_monthly_summary")
+        self.assertEqual(start, date(2014, 1, 1))
+        self.assertLess(start, date(2026, 9, 26) - timedelta(days=3650))
+
+    def test_load_regimes_mark_a_durable_level_shift(self):
+        for index in range(16):
+            year = 2024 + index // 12
+            month = index % 12 + 1
+            self._month(year, month, 1000, tss=100 if index < 8 else 400)
+        self.db.commit()
+        payload = HistoryCockpitService(self.db, None).monthly_history(
+            start=date(2024, 1, 1),
+            end=date(2025, 4, 30),
+            period="all",
+        )
+        shifts = [row for row in payload["regimes"] if row["kind"] == "level_shift_up"]
+        self.assertTrue(shifts)
+        self.assertTrue(any(row["durable"] for row in payload["regimes"]))
+        self.assertTrue(all(row["interpretation"] == "load_regime" for row in payload["regimes"]))
+
+
+class ContractAlignmentTests(unittest.TestCase):
+    def test_domain_cards_map_atl_and_consistency(self):
+        from app.routers.analysis_workspace import DOMAIN_METRICS, _domain_from_block
+
+        by_domain = {row["domain"]: row for row in DOMAIN_METRICS}
+        self.assertEqual(by_domain["training_load"]["metric"], "atl")
+        self.assertEqual(by_domain["training_load"]["mcp_key"], "fitness.atl")
+        self.assertEqual(by_domain["consistency"]["metric"], "consistency")
+        self.assertEqual(by_domain["consistency"]["mcp_key"], "consistency.score")
+        self.assertNotEqual(by_domain["consistency"]["metric"], "vo2max")
+        self.assertEqual(by_domain["fitness"]["metric"], "ctl")
+
+        card = _domain_from_block(
+            by_domain["fitness"],
+            {
+                "direction": "improving",
+                "sample_count": 90,
+                "effective_sample_count": 2,
+                "confidence": 0.9,
+                "higher_is_better": True,
+            },
+            "90d",
+        )
+        self.assertEqual(card["evidence"], "insufficient")
+
+    def test_context_direction_is_not_called_improving(self):
+        tmp, db = _session()
+        try:
+            service = TrendAnalysisService(db, None)
+            self.assertEqual(service._direction("ctl", 12.0, 2.0, 10, 10), "higher")
+            self.assertEqual(service._direction("atl", -8.0, 2.0, 10, 10), "lower")
+            self.assertEqual(service._direction("vo2max", 2.0, 0.5, 10, 10), "improving")
+            self.assertEqual(service._direction("resting_hr", -3.0, 1.0, 10, 10), "improving")
+        finally:
+            db.close()
+            tmp.cleanup()
+
+    def test_efficiency_and_decoupling_use_canonical_producers(self):
+        tmp, db = _session()
+        try:
+            service = TrendAnalysisService(db, None)
+            self.assertEqual(METRIC_FETCHERS["easy_run_efficiency"], "fitness.ef_30d")
+            self.assertEqual(METRIC_FETCHERS["decoupling"], "cardio.drift_score")
+            with patch.object(
+                service._derived,
+                "metric_definition",
+                return_value={"scope": "daily"},
+            ), patch.object(
+                service._derived,
+                "query_timeseries",
+                return_value={"points": [{"date": "2026-09-01", "value": 1.25}]},
+            ) as query:
+                points = service._fetch_series(
+                    "easy_run_efficiency",
+                    date(2026, 9, 1),
+                    date(2026, 9, 1),
+                )
+            self.assertEqual(query.call_args.args[0], "fitness.ef_30d")
+            self.assertEqual(points, [(date(2026, 9, 1), 1.25)])
+        finally:
+            db.close()
+            tmp.cleanup()
+
+    def test_stimulus_aliases_share_one_producer_family(self):
+        self.assertEqual(stimulus_producer_family("easy_volume"), "zone_low")
+        self.assertEqual(stimulus_producer_family("stimulus.easy_minutes_7d"), "zone_low")
+        self.assertEqual(stimulus_producer_family("stimulus.easy_minutes_28d"), "zone_low")
+        self.assertEqual(stimulus_producer_family("weekly_tss"), "tss_sum")
+        self.assertEqual(stimulus_producer_family("stimulus.tss_28d"), "tss_sum")
+        self.assertEqual(stimulus_producer_family("stimulus.vo2_minutes_14d"), "vo2_intervals")
+        self.assertEqual(aggregation_window_days("stimulus.tss_28d"), 28)
+        self.assertEqual(aggregation_window_days("weekly_tss"), 7)
+        self.assertEqual(aggregation_window_days("stimulus.easy_minutes_28d"), 28)
+
+    def test_dose_buckets_residualize_time_season_and_ctl(self):
+        import math
+
+        rows = []
+        start = date(2023, 1, 1)
+        for index in range(24):
+            day = start + timedelta(days=21 * index)
+            time_index = float(21 * index)
+            ctl = 50.0 + 8.0 * math.sin(index / 2.5)
+            angle = 2.0 * math.pi * (day.timetuple().tm_yday / 365.25)
+            outcome = 0.04 * time_index + 0.3 * ctl + math.sin(angle) + 0.5 * math.cos(angle)
+            rows.append(
+                {
+                    "date": day,
+                    "outcome": outcome,
+                    "stimulus": float(index % 5),
+                    "ctl": ctl,
+                }
+            )
+        adjusted = residualize_outcomes(rows)
+        self.assertTrue(adjusted["controls_time"])
+        self.assertTrue(adjusted["controls_season"])
+        self.assertTrue(adjusted["controls_baseline_fitness"])
+        self.assertTrue(adjusted["fully_controlled"])
+        self.assertLess(max(abs(value) for value in adjusted["residuals"]), 1e-6)
 
 
 if __name__ == "__main__":

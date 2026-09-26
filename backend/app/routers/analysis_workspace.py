@@ -49,9 +49,9 @@ DOMAIN_METRICS = [
     {"domain": "threshold", "metric": "critical_speed", "mcp_key": "running.critical_speed", "label": "Critical speed"},
     {"domain": "aerobic_efficiency", "metric": "easy_run_efficiency", "mcp_key": "fitness.ef_30d", "label": "Aerobic efficiency"},
     {"domain": "durability", "metric": "durability", "mcp_key": "running.durability_score", "label": "Holdbarhet"},
-    {"domain": "training_load", "metric": "ctl", "mcp_key": "fitness.atl", "label": "Akutt belastning (ATL)"},
+    {"domain": "training_load", "metric": "atl", "mcp_key": "fitness.atl", "label": "Akutt belastning (ATL)"},
     {"domain": "recovery", "metric": "hrv_rmssd", "mcp_key": "cardio.hrv_7d", "label": "Restitusjon (HRV)"},
-    {"domain": "consistency", "metric": "vo2max", "mcp_key": "consistency.score", "label": "Konsistens"},
+    {"domain": "consistency", "metric": "consistency", "mcp_key": "consistency.score", "label": "Konsistens"},
 ]
 
 RELATIONSHIP_PRESETS = [
@@ -90,6 +90,16 @@ def _period_days(period: str) -> int:
     return PERIOD_DAYS.get(period, 90)
 
 
+def _history_start(db: Session, end: date, period: str) -> Tuple[date, str]:
+    """`period=all` starts at the earliest monthly summary, not a hidden 10-year cap."""
+    if period != "all":
+        return end - timedelta(days=_period_days(period) - 1), "period_window"
+    earliest = db.query(func.min(MonthlySummary.month_start_date)).scalar()
+    if earliest is None or earliest > end:
+        return end, "earliest_monthly_summary"
+    return earliest, "earliest_monthly_summary"
+
+
 def _resolve_range(
     period: str,
     end_date: Optional[date] = None,
@@ -126,15 +136,26 @@ def _evidence_label(confidence: Optional[float], sample_count: int) -> str:
     return "strong"
 
 
-def _direction_no(direction: str, higher_is_better: bool = True) -> str:
+def _direction_no(direction: str, higher_is_better: Optional[bool] = True) -> str:
     d = (direction or "uncertain").lower()
     if d == "improving":
         return "Forbedring"
     if d == "declining":
         return "Nedgang"
+    if d == "higher":
+        return "Høyere"
+    if d == "lower":
+        return "Lavere"
     if d in {"stable", "stable_within_noise"}:
         return "Stabil innenfor støy" if d == "stable_within_noise" else "Stabil"
     return "Usikker"
+
+
+def _evidence_sample_count(block: Dict[str, Any]) -> int:
+    """Rolling series are judged on effective N, not the raw point count."""
+    if block.get("effective_sample_count") is not None:
+        return int(block["effective_sample_count"])
+    return int(block.get("sample_count") or 0)
 
 
 def _domain_from_block(spec: Dict[str, Any], block: Optional[Dict[str, Any]], window: str) -> Dict[str, Any]:
@@ -151,20 +172,22 @@ def _domain_from_block(spec: Dict[str, Any], block: Optional[Dict[str, Any]], wi
             "change_point_detected": False,
             "window": window,
         }
-    hib = bool(block.get("higher_is_better", True))
+    hib = block.get("higher_is_better")
+    hib_flag = None if hib is None else bool(hib)
+    evidence_n = _evidence_sample_count(block)
     return {
         **spec,
         "direction": block.get("direction"),
-        "direction_label": _direction_no(str(block.get("direction")), hib),
+        "direction_label": _direction_no(str(block.get("direction")), hib_flag),
+        "direction_rule": block.get("direction_rule"),
         "relative_change_pct": block.get("relative_change_pct"),
         "absolute_change": block.get("absolute_change"),
         "current": block.get("current"),
         "baseline": block.get("baseline"),
         "sample_count": block.get("sample_count") or 0,
+        "effective_sample_count": block.get("effective_sample_count"),
         "confidence": block.get("confidence"),
-        "evidence": _evidence_label(
-            block.get("confidence"), int(block.get("sample_count") or 0)
-        ),
+        "evidence": _evidence_label(block.get("confidence"), evidence_n),
         "change_point_detected": bool(block.get("change_point_detected")),
         "window": window,
         "start_date": block.get("start_date"),
@@ -289,6 +312,10 @@ def get_timeseries(
         "durability": "running.durability_score",
         "critical_speed": "running.critical_speed",
         "resting_hr": "cardio.rhr_7d",
+        "atl": "fitness.atl",
+        "consistency": "consistency.score",
+        "decoupling": "cardio.drift_score",
+        "hr_drift": "cardio.drift_score",
     }
     resolved = [short_to_mcp.get(k, k) for k in keys]
 
@@ -673,13 +700,16 @@ def get_history(
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     end = end_date or date.today()
-    start = end - timedelta(days=_period_days(period) - 1)
+    start, range_basis = _history_start(db, end, period)
     try:
-        return HistoryCockpitService(db).monthly_history(
+        payload = HistoryCockpitService(db).monthly_history(
             start=start,
             end=end,
             period=period,
         )
+        payload["range_basis"] = range_basis
+        payload["capped"] = False
+        return payload
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -972,24 +1002,17 @@ def _stimulus_aggregate_series(
     end: date,
 ) -> List[Dict[str, Any]]:
     """Build weekly samples for stimulus.* aggregates via TrainingResponseService."""
-    spec = STIMULUS_AGGREGATES.get(key) or get_analytics_metric(key) or {}
-    window = int(spec.get("aggregation_days") or 28)
-    kind = str(spec.get("stimulus_kind") or "")
-    stimulus_id = {
-        "easy_volume": "easy_volume",
-        "threshold_volume": "threshold_volume",
-        "vo2_volume": "vo2_volume",
-        "long_run_volume": "long_run_volume",
-        "weekly_tss": "weekly_tss",
-    }.get(kind)
-    if not stimulus_id:
+    from ..services.temporal_metric_contract import aggregation_window_days, stimulus_producer_family
+
+    window = aggregation_window_days(key)
+    if stimulus_producer_family(key) == "unknown":
         return []
     tr = TrainingResponseService(db, storage)
     points: List[Dict[str, Any]] = []
     cursor = start + timedelta(days=window)
     while cursor <= end:
         win_start = cursor - timedelta(days=window - 1)
-        val = tr._stimulus_value(stimulus_id, win_start, cursor)  # noqa: SLF001
+        val = tr._stimulus_value(key, win_start, cursor)  # noqa: SLF001
         if val is not None:
             points.append({"date": cursor.isoformat(), "value": round(float(val), 3)})
         cursor += timedelta(days=7)
