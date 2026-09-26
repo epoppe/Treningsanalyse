@@ -5,7 +5,7 @@ Del av SyncService-oppdelingen: coordinator beholder offentlig API.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
@@ -31,6 +31,16 @@ from ...utils.activity_filters import is_indoor_type_key
 logger = logging.getLogger(__name__)
 
 ACTIVITY_SYNC_COMMIT_BATCH_SIZE = 100
+
+
+def refresh_summaries_after_sync(start: date, end: date) -> Dict[str, int]:
+    """Oppdater sammendrag for perioden som nettopp ble synket.
+
+    sync_modules ligger under app.services, så søskenmodulen er summary_service.
+    """
+    from ..summary_service import SummaryService
+
+    return SummaryService().bulk_update_summaries(start, end)
 
 
 def _link_recommendation_execution(db, activity: Activity) -> None:
@@ -496,11 +506,7 @@ class ActivitySyncService:
         if sync_result.get("total_fetched", 0) > 0:
             try:
                 logger.info("Starter automatisk oppdatering av sammendragstabeller...")
-                from ..services.summary_service import SummaryService
-                summary_service = SummaryService()
-                
-                # Oppdater sammendrag for perioden som ble synkronisert
-                summary_counts = summary_service.bulk_update_summaries(start_date.date(), end_date.date())
+                summary_counts = refresh_summaries_after_sync(start_date.date(), end_date.date())
                 logger.info(
                     "Oppdaterte sammendrag for berørt periode: "
                     f"dag={summary_counts.get('daily_count', 0)}, "

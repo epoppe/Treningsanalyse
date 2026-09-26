@@ -29,14 +29,29 @@ class CardioDriftScoreTests(unittest.TestCase):
 
     def test_fallback_drift_does_not_shadow_median_function(self):
         """Tidligere: median=5.0 overskrev statistics.median → TypeError."""
-        coaching_payload = {
-            "thresholds": {
-                "drift": {"recent_median_hr_drift_pct": 8.0},
-            },
-        }
-        with patch.object(self.service, "_coaching", return_value=coaching_payload):
+        with patch.object(self.service, "_recent_drift_median", return_value=8.0):
             score = self.service._cardio_drift_score(date(2026, 5, 31))
         self.assertEqual(score, 80.0)  # 100 - 8*2.5
+
+
+class ActivityDetailRequestCacheTests(unittest.TestCase):
+    def test_same_activity_is_read_once_per_request(self):
+        from app.services.coaching_request_cache import cached_activity_details, coaching_request_cache
+
+        class _Storage:
+            def __init__(self):
+                self.calls = 0
+
+            def get_activity_details(self, activity_id):
+                self.calls += 1
+                return None
+
+        storage = _Storage()
+        with coaching_request_cache():
+            self.assertIsNone(cached_activity_details(storage, 42))
+            self.assertIsNone(cached_activity_details(storage, 42))
+            self.assertIsNone(cached_activity_details(storage, 43))
+        self.assertEqual(storage.calls, 2)
 
 
 class PredictedRaceTimeTests(unittest.TestCase):

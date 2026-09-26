@@ -13,6 +13,7 @@ from ..database.models.activity import Activity, ActivityLap
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .coaching_analysis_service import CoachingAnalysisService
+from .coaching_request_cache import cached_get, cached_set, get_cache
 
 SESSION_TYPES = (
     "recovery_run",
@@ -77,6 +78,8 @@ class SessionClassifierService:
         self.db = db
         self.storage = storage
         self._coaching = coaching or CoachingAnalysisService(db, storage)
+        self._threshold_cache: Dict[Tuple[date, bool], Tuple[Optional[float], Optional[float]]] = {}
+        self._classification_cache: Dict[Tuple[Any, ...], Dict[str, Any]] = {}
 
     def classify_activity(
         self,
@@ -90,16 +93,66 @@ class SessionClassifierService:
         if not is_running_activity(activity, include_treadmill=include_treadmill):
             return self._result("unknown", 0.2, ["non_running_activity"], "activity_type")
 
+        ref_day = end_date or (activity.start_time.date() if activity.start_time else date.today())
         if lt1_hr is None or lt2_hr is None:
-            ref_day = end_date or (activity.start_time.date() if activity.start_time else date.today())
-            thresholds = self._coaching.build_coaching_analysis(
-                days=90,
-                end_date=ref_day,
-                include_treadmill=include_treadmill,
-            ).get("thresholds", {})
-            lt1_hr = lt1_hr or thresholds.get("lt1", {}).get("heart_rate_bpm")
-            lt2_hr = lt2_hr or thresholds.get("lt2", {}).get("heart_rate_bpm")
+            resolved_lt1, resolved_lt2 = self.resolve_thresholds(ref_day, include_treadmill)
+            lt1_hr = lt1_hr if lt1_hr is not None else resolved_lt1
+            lt2_hr = lt2_hr if lt2_hr is not None else resolved_lt2
 
+        cache_key = self._classification_key(activity, lt1_hr, lt2_hr, include_treadmill)
+        cached = self._classification_cache.get(cache_key)
+        if cached is None and get_cache() is not None:
+            cached = cached_get("session_class", self._request_class_key(cache_key))
+        if cached is not None:
+            return cached
+
+        result = self._score_activity(activity, lt1_hr, lt2_hr)
+        self._classification_cache[cache_key] = result
+        if get_cache() is not None:
+            cached_set("session_class", self._request_class_key(cache_key), result)
+        return result
+
+    def resolve_thresholds(
+        self,
+        ref_day: date,
+        include_treadmill: bool,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        key = (ref_day, include_treadmill)
+        cached = self._threshold_cache.get(key)
+        if cached is not None:
+            return cached
+        resolved = self._coaching.resolve_lt_heart_rates(
+            ref_day,
+            include_treadmill=include_treadmill,
+        )
+        self._threshold_cache[key] = resolved
+        return resolved
+
+    @staticmethod
+    def _classification_key(
+        activity: Activity,
+        lt1_hr: Optional[float],
+        lt2_hr: Optional[float],
+        include_treadmill: bool,
+    ) -> Tuple[Any, ...]:
+        identity = str(activity.activity_id) if activity.activity_id is not None else id(activity)
+        return (
+            identity,
+            None if lt1_hr is None else float(lt1_hr),
+            None if lt2_hr is None else float(lt2_hr),
+            bool(include_treadmill),
+        )
+
+    @staticmethod
+    def _request_class_key(cache_key: Tuple[Any, ...]) -> str:
+        return "|".join("" if part is None else str(part) for part in cache_key)
+
+    def _score_activity(
+        self,
+        activity: Activity,
+        lt1_hr: Optional[float],
+        lt2_hr: Optional[float],
+    ) -> Dict[str, Any]:
         buckets, method = self._coaching.get_activity_intensity_buckets(activity, lt1_hr, lt2_hr)
         profile = _ZoneProfile(
             low_s=buckets.get("low", 0.0),

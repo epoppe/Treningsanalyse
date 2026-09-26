@@ -52,3 +52,20 @@ def get_or_set(namespace: str, key: str, factory):
     if existing is not None:
         return existing
     return cached_set(namespace, key, factory())
+
+
+def cached_activity_details(storage: Any, activity_id: Any) -> Any:
+    """Read one activity's FIT rows at most once per coaching request."""
+    if storage is None or activity_id is None:
+        return None
+    store = get_cache()
+    cache_id = f"activity_details:{activity_id}"
+    if store is not None and cache_id in store:
+        return store[cache_id]
+    try:
+        frame = storage.get_activity_details(int(activity_id))
+    except Exception:
+        frame = None
+    if store is not None:
+        store[cache_id] = frame
+    return frame

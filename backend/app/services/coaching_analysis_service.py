@@ -13,6 +13,7 @@ from ..database.models.activity import Activity, AnalyticsSnapshot
 from ..database.models.lactate_threshold_history import LactateThresholdHistory
 from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
+from .coaching_request_cache import cached_activity_details, cached_get, cached_set, get_cache, get_or_set
 from .training_stress_service import TrainingStressService
 
 
@@ -43,6 +44,11 @@ class CoachingAnalysisService:
         persist_snapshot: bool = False,
     ) -> Dict[str, Any]:
         end_date = end_date or date.today()
+        analysis_key = f"{end_date.isoformat()}|{days}|{int(bool(include_treadmill))}"
+        if not persist_snapshot and get_cache() is not None:
+            cached = cached_get("coaching_analysis", analysis_key)
+            if cached is not None:
+                return cached
         start_date = end_date - timedelta(days=days - 1)
         warmup_start = start_date - timedelta(days=self.FITNESS_TAU_DAYS * 2)
 
@@ -87,7 +93,47 @@ class CoachingAnalysisService:
         }
         if persist_snapshot:
             self._persist_snapshot(payload)
+        elif get_cache() is not None:
+            cached_set("coaching_analysis", analysis_key, payload)
         return payload
+
+    def resolve_lt_heart_rates(
+        self,
+        end_date: date,
+        *,
+        include_treadmill: bool = False,
+        days: int = 90,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        """LT1/LT2 uten polarisert fordeling og uten detaljerte pulssamples.
+
+        Bruker siste terskelhistorikk når den finnes, ellers samme aktivitetsfallback
+        som build_coaching_analysis.
+        """
+
+        def _compute() -> Tuple[Optional[float], Optional[float]]:
+            history = self._latest_threshold_history(end_date)
+            if history is not None and history.lactate_threshold_heart_rate:
+                lt2 = float(history.lactate_threshold_heart_rate)
+                return (round(lt2 * 0.85, 0), round(lt2, 0))
+
+            start_date = end_date - timedelta(days=days - 1)
+            warmup_start = start_date - timedelta(days=self.FITNESS_TAU_DAYS * 2)
+            activities = self._activities(warmup_start, end_date, include_treadmill=include_treadmill)
+            running_activities = [
+                activity
+                for activity in activities
+                if is_running_activity(activity, include_treadmill=include_treadmill)
+            ]
+            thresholds = self._threshold_estimates(running_activities, end_date)
+            return (
+                thresholds.get("lt1", {}).get("heart_rate_bpm"),
+                thresholds.get("lt2", {}).get("heart_rate_bpm"),
+            )
+
+        key = f"{end_date.isoformat()}|{days}|{int(bool(include_treadmill))}"
+        if get_cache() is None:
+            return _compute()
+        return get_or_set("lt_heart_rates", key, _compute)
 
     def get_snapshot_payload(self) -> Optional[Dict[str, Any]]:
         snapshot = self.db.query(AnalyticsSnapshot).filter_by(metric_key=self.SNAPSHOT_KEY).first()
@@ -391,8 +437,11 @@ class CoachingAnalysisService:
                 if pd.isna(fallback):
                     fallback = 1.0
                 df["dt_s"] = dt.fillna(fallback).clip(lower=0.1, upper=10)
-                for _, row in df.iterrows():
-                    buckets[self._intensity_bucket(float(row["heart_rate"]), lt1_hr, lt2_hr)] += float(row["dt_s"])
+                hr = df["heart_rate"].to_numpy(dtype=float)
+                dt_s = df["dt_s"].to_numpy(dtype=float)
+                buckets["low"] = float(dt_s[hr <= float(lt1_hr)].sum())
+                buckets["high"] = float(dt_s[hr > float(lt2_hr)].sum())
+                buckets["threshold"] = float(dt_s[(hr > float(lt1_hr)) & (hr <= float(lt2_hr))].sum())
                 return buckets, "detailed_hr"
 
         if activity.average_heart_rate and activity.duration:
@@ -403,12 +452,7 @@ class CoachingAnalysisService:
         return buckets, "unknown"
 
     def _activity_details(self, activity: Activity) -> Optional[pd.DataFrame]:
-        if self.storage is None:
-            return None
-        try:
-            return self.storage.get_activity_details(int(activity.activity_id))
-        except Exception:
-            return None
+        return cached_activity_details(self.storage, activity.activity_id)
 
     def _intensity_bucket(self, heart_rate: float, lt1_hr: float, lt2_hr: float) -> str:
         if heart_rate <= lt1_hr:
