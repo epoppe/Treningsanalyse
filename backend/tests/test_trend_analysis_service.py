@@ -65,7 +65,8 @@ class TrendAnalysisServiceTests(unittest.TestCase):
     def test_change_point_detection(self):
         values = list(range(10, 20)) + list(range(30, 40))
         detected = self.service._detect_change_point([float(v) for v in values])
-        self.assertTrue(detected)
+        self.assertTrue(detected["change_detected"])
+        self.assertIsNotNone(detected["absolute_shift"])
 
     def test_no_lookahead_uses_only_past_data(self):
         """Seriedata filtreres av query — ingen fremtidige rader inkludert."""

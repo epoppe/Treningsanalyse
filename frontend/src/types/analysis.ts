@@ -112,6 +112,11 @@ export interface TimeseriesPayload {
       unit_note?: string;
       scope?: string;
       unit?: string;
+      canonical_unit?: string;
+      temporal_semantics?: string;
+      native_cadence_days?: number;
+      smoothing_window_days?: number | null;
+      show_gaps?: boolean;
       alignment?: string;
       note?: string;
     }
@@ -260,9 +265,12 @@ export interface HistoryPayload {
 
 export interface PeriodComparisonRow {
   metric: string;
+  unit?: string | null;
   period_a: { label: string; end: string; value?: number | null; sample_count: number };
   period_b: { label: string; end: string; value?: number | null; sample_count: number };
   difference?: number | null;
+  absolute_delta?: number | null;
+  relative_delta?: number | null;
   evidence: string;
   explanation?: string;
 }
@@ -270,6 +278,7 @@ export interface PeriodComparisonRow {
 export interface PeriodComparisonPayload {
   period: string;
   days: number;
+  exact_range?: boolean;
   rows: PeriodComparisonRow[];
   disclaimer?: string;
 }
@@ -377,10 +386,19 @@ export interface PerformanceRecoveryMonth {
   month: string;
   month_start?: string;
   month_end?: string;
+  partial?: boolean;
   volume_hours?: number | null;
   activity_count?: number | null;
+  tss?: number | null;
   ctl?: number | null;
+  ctl_end?: number | null;
+  ctl_mean?: number | null;
   hrv_delta_pct?: number | null;
+  hrv_median?: number | null;
+  hrv_coverage?: number | null;
+  rhr_median?: number | null;
+  easy_minutes?: number | null;
+  quality_sessions?: number | null;
 }
 
 export interface PerformanceRecoveryPayload {

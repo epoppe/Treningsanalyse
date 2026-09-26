@@ -504,7 +504,7 @@ STIMULUS_AGGREGATES: Dict[str, Dict[str, Any]] = {
         "supports_lag": True,
         "scope": "weekly",
         "unit": "min",
-        "explanation": "High-intensity / VO2 minutes over 14 days.",
+        "explanation": "Minutes in sessions classified as vo2_intervals over 14 days. Not all high-intensity time.",
     },
     "stimulus.long_run_minutes_28d": {
         "key": "stimulus.long_run_minutes_28d",
@@ -519,7 +519,7 @@ STIMULUS_AGGREGATES: Dict[str, Dict[str, Any]] = {
         "supports_lag": True,
         "scope": "weekly",
         "unit": "min",
-        "explanation": "Long-run oriented easy volume over 28 days (approx via easy zone).",
+        "explanation": "Minutes in sessions classified as long_aerobic over 28 days. Not easy-zone volume.",
     },
     "stimulus.tss_7d": {
         "key": "stimulus.tss_7d",
@@ -676,15 +676,22 @@ def list_analytics_metrics(*, include_stimulus: bool = True) -> List[Dict[str, A
     items = [dict(v) for v in ANALYTICS_METRICS.values() if v.get("expose_default", True)]
     if include_stimulus:
         items.extend(dict(v) for v in STIMULUS_AGGREGATES.values())
-    return sorted(items, key=lambda m: (m.get("group") or "", m.get("label") or m["key"]))
+    overlaid = [_overlay(item) for item in items]
+    return sorted(overlaid, key=lambda m: (m.get("group") or "", m.get("label") or m["key"]))
 
 
 def get_analytics_metric(key: str) -> Optional[Dict[str, Any]]:
     if key in ANALYTICS_METRICS:
-        return dict(ANALYTICS_METRICS[key])
+        return _overlay(dict(ANALYTICS_METRICS[key]))
     if key in STIMULUS_AGGREGATES:
-        return dict(STIMULUS_AGGREGATES[key])
+        return _overlay(dict(STIMULUS_AGGREGATES[key]))
     return None
+
+
+def _overlay(payload: Dict[str, Any]) -> Dict[str, Any]:
+    from .temporal_metric_contract import overlay_contract
+
+    return overlay_contract(payload)
 
 
 def dependency_relation(a: str, b: str) -> str:

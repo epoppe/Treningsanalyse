@@ -17,9 +17,15 @@ from .coaching_analysis_service import CoachingAnalysisService
 from .mcp_derived_metrics_service import McpDerivedMetricsService
 from .ppap_metrics_service import PpapMetricsService
 from .statistical_uncertainty import bootstrap_ci, evidence_band
+from .temporal_metric_contract import (
+    aggregation_window_days,
+    sample_overlap,
+    stimulus_bounds,
+)
 
 DEFAULT_LAG_WINDOWS = (7, 14, 21, 28)
-STIMULUS_WINDOW_DAYS = 7
+# Aggregation length is owned by metric metadata (STIMULUS_AGGREGATION_DAYS).
+# Lag is a separate offset: the stimulus window ends `lag` days before the outcome.
 MIN_EFFECT_FOR_RANKING = 0.25
 MIN_N_FOR_RANKING = 12
 
@@ -120,9 +126,11 @@ class TrainingResponseService:
         end = end_date or date.today()
         start = end - timedelta(days=lookback_days)
         pairs: List[Tuple[float, float]] = []
-        current = start + timedelta(days=lag_days + 7)
+        window_days = aggregation_window_days(stimulus)
+        current = start + timedelta(days=lag_days + window_days - 1)
         while current <= end:
-            stim = self._stimulus_value(stimulus, current - timedelta(days=lag_days), current)
+            bounds = stimulus_bounds(current, lag_days, aggregation_days=window_days)
+            stim = self._stimulus_value(stimulus, bounds["stimulus_start"], bounds["stimulus_end"])
             out = self._outcome_value(outcome, current)
             if stim is not None and out is not None:
                 pairs.append((stim, out))
@@ -206,11 +214,18 @@ class TrainingResponseService:
         lag_windows: Tuple[int, ...],
         *,
         family_size: int = 1,
+        aggregation_days: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         candidates: List[Dict[str, Any]] = []
         for lag in lag_windows:
             result = self._correlate(
-                stimulus, outcome, start, end, lag, family_size=family_size
+                stimulus,
+                outcome,
+                start,
+                end,
+                lag,
+                family_size=family_size,
+                aggregation_days=aggregation_days,
             )
             if result is not None:
                 candidates.append(result)
@@ -244,14 +259,23 @@ class TrainingResponseService:
         lag_days: int,
         *,
         family_size: int = 1,
+        aggregation_days: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
+        window_days = aggregation_window_days(stimulus, aggregation_days)
         pairs: List[Tuple[float, float]] = []
-        current = start + timedelta(days=lag_days + 7)
+        pair_dates: List[date] = []
+        current = start + timedelta(days=lag_days + window_days - 1)
         while current <= end:
-            stimulus_val = self._stimulus_value(stimulus, current - timedelta(days=lag_days), current)
+            bounds = stimulus_bounds(current, lag_days, aggregation_days=window_days)
+            stimulus_val = self._stimulus_value(
+                stimulus,
+                bounds["stimulus_start"],
+                bounds["stimulus_end"],
+            )
             outcome_val = self._outcome_value(outcome, current)
             if stimulus_val is not None and outcome_val is not None:
                 pairs.append((stimulus_val, outcome_val))
+                pair_dates.append(current)
             current += timedelta(days=7)
 
         if len(pairs) < 5:
@@ -262,6 +286,14 @@ class TrainingResponseService:
         r = _pearson(xs, ys)
         if r is None or math.isnan(r):
             return None
+        detrended = _first_difference_correlation(xs, ys)
+        overlap = sample_overlap(len(pairs), aggregation_days=window_days, step_days=7)
+        sign_conflict = (
+            detrended is not None
+            and abs(r) >= 0.2
+            and abs(detrended) >= 0.15
+            and (r > 0) != (detrended > 0)
+        )
 
         effect_size = round(r, 3)
         if abs(r) < 0.15:
@@ -278,35 +310,60 @@ class TrainingResponseService:
             raw_conf = min(raw_conf, 0.35)
         evidence_strength = round(raw_conf, 2)
         support = evidence_band(
-            sample_count=len(pairs),
+            sample_count=int(overlap["effective_pairs"]),
             effect_size=effect_size,
             min_n=MIN_N_FOR_RANKING,
             min_effect=adjusted_min,
+        )
+        limitations = [
+            "observational_correlation_not_causation",
+            "confounding_by_other_training_not_controlled",
+            "multiple_testing_across_stimulus_outcome_lag",
+            "overlapping_windows_effective_n_is_conservative",
+        ]
+        if sign_conflict:
+            support = "weak"
+            relationship = "uncertain"
+            limitations.append("raw_and_detrended_sign_conflict")
+        example = stimulus_bounds(
+            pair_dates[-1] if pair_dates else end,
+            lag_days,
+            aggregation_days=window_days,
         )
 
         return {
             "stimulus": stimulus,
             "outcome": outcome,
             "lag_days": lag_days,
+            "aggregation_days": window_days,
+            "stimulus_start": example["stimulus_start"].isoformat(),
+            "stimulus_end": example["stimulus_end"].isoformat(),
+            "outcome_date": example["outcome_date"],
             "relationship": relationship,
             "effect_size": effect_size,
+            "raw_correlation": effect_size,
+            "detrended_correlation": round(detrended, 3) if detrended is not None else None,
             "confidence": evidence_strength,  # compatibility alias
             "evidence_strength": evidence_strength,
             "decision_confidence": None,
             "statistical_support": support,
-            "ranking_eligible": support in {"moderate", "strong"},
+            "ranking_eligible": support in {"moderate", "strong"} and not sign_conflict,
             "multiple_testing_adjusted_min_effect": round(adjusted_min, 3),
             "sample_count": len(pairs),
-            "limitations": [
-                "observational_correlation_not_causation",
-                "confounding_by_other_training_not_controlled",
-                "multiple_testing_across_stimulus_outcome_lag",
-            ],
+            "raw_pairs": overlap["raw_pairs"],
+            "effective_pairs": overlap["effective_pairs"],
+            "sample_overlap": overlap["sample_overlap"],
+            "causal": False,
+            "limitations": limitations,
         }
 
     def _stimulus_value(self, stimulus: str, start: date, end: date) -> Optional[float]:
-        if stimulus == "weekly_tss":
+        if stimulus in {"weekly_tss", "tss_7d", "tss_28d"}:
             return self._weekly_tss_sum(start, end)
+        if stimulus == "long_run_volume":
+            return self._session_type_minutes(start, end, {"long_aerobic"})
+        if stimulus == "vo2_volume":
+            return self._session_type_minutes(start, end, {"vo2_intervals"})
 
         zone_key = {
             "easy_volume": "low",
@@ -378,6 +435,44 @@ class TrainingResponseService:
                 total += float(tss)
         return round(total, 1) if total > 0 else None
 
+    def _session_type_minutes(
+        self,
+        start: date,
+        end: date,
+        session_types: set,
+    ) -> Optional[float]:
+        """Minutes of canonical session types with activity date in [start, end]."""
+        from .session_classifier_service import SessionClassifierService
+
+        classifier = SessionClassifierService(self.db, self.storage, self._coaching)
+        lt1, lt2 = self._threshold_hr_bounds(end)
+        total_min = 0.0
+        activities = (
+            self.db.query(Activity)
+            .options(joinedload(Activity.activity_type))
+            .filter(
+                and_(
+                    func.date(Activity.start_time) >= start,
+                    func.date(Activity.start_time) <= end,
+                )
+            )
+            .all()
+        )
+        for activity in activities:
+            if not is_running_activity(activity) or not activity.duration or activity.start_time is None:
+                continue
+            if activity.start_time.date() > end:
+                continue
+            classification = classifier.classify_activity(
+                activity,
+                end_date=end,
+                lt1_hr=lt1,
+                lt2_hr=lt2,
+            )
+            if classification.get("session_type") in session_types:
+                total_min += float(activity.duration) / 60.0
+        return round(total_min, 1) if total_min > 0 else None
+
     def _fallback_stimulus_minutes(self, stimulus: str, start: date, end: date) -> Optional[float]:
         """Fallback når LT1/LT2 mangler — bruk session classifier som grov proxy."""
         from .session_classifier_service import SessionClassifierService
@@ -435,6 +530,15 @@ class TrainingResponseService:
             return None
         value = self._derived._daily_metric_value(metric_key, day)
         return float(value) if value is not None else None
+
+
+def _first_difference_correlation(xs: List[float], ys: List[float]) -> Optional[float]:
+    """Correlation of successive changes. Reduces shared-trend spurious association."""
+    if len(xs) < 4 or len(xs) != len(ys):
+        return None
+    dx = [xs[i] - xs[i - 1] for i in range(1, len(xs))]
+    dy = [ys[i] - ys[i - 1] for i in range(1, len(ys))]
+    return _pearson(dx, dy)
 
 
 def _pearson(xs: List[float], ys: List[float]) -> Optional[float]:

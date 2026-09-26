@@ -12,6 +12,8 @@ export function EvidenceBadge({ evidence }: { evidence: EvidenceBand | string })
     insufficient: "bg-slate-100 text-slate-600",
     moderate: "bg-sky-100 text-sky-800",
     weak: "bg-amber-100 text-amber-900",
+    uncertain: "bg-slate-100 text-slate-600",
+    stable_within_noise: "bg-slate-100 text-slate-700",
   };
   const labels: Record<string, string> = {
     strong: "Sterk evidens",
@@ -20,6 +22,8 @@ export function EvidenceBadge({ evidence }: { evidence: EvidenceBand | string })
     insufficient: "Utilstrekkelig",
     moderate: "Moderat",
     weak: "Svak",
+    uncertain: "Usikker",
+    stable_within_noise: "Stabil innenfor støy",
   };
   return (
     <span className={cn("inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium", styles[e] || styles.insufficient)}>
