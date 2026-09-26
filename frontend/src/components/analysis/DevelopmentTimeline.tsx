@@ -90,7 +90,7 @@ export function DevelopmentTimeline({
     if (!data) return unitGroups.map(() => []);
     return unitGroups.map((group) => seriesRows(data, group));
   }, [data, unitGroups]);
-  const rows = panelRows[0] || [];
+  const hasAnyPoints = panelRows.some((panel) => panel.length > 0);
 
   const hasSelection = Boolean(rangeFrom && rangeTo);
 
@@ -139,7 +139,7 @@ export function DevelopmentTimeline({
         })}
       </div>
       <div className="mt-3 space-y-3">
-        {rows.length === 0 ? (
+        {!hasAnyPoints ? (
           <p className="flex h-64 items-center justify-center text-xs text-slate-500">
             Ingen tidsseriedata for valgt periode.
           </p>
@@ -147,14 +147,16 @@ export function DevelopmentTimeline({
           unitGroups.map((group, groupIndex) => {
             const groupRows = panelRows[groupIndex] || [];
             const unit = seriesMeta[group[0]]?.unit || "";
-            const showGaps = group.some((key) => seriesMeta[key]?.showGaps);
+            const hasMeasuredGap = groupRows.some((row) =>
+              group.some((key) => row[key] == null),
+            );
             const isLast = groupIndex === unitGroups.length - 1;
             return (
               <div key={unit || group.join("-")} data-unit-panel={unit || "ukjent"}>
                 <p className="mb-1 text-[11px] font-medium text-slate-600">
                   {unit || "Ukjent enhet"}
                   {unitGroups.length > 1 ? " · eget panel" : ""}
-                  {showGaps ? " · hull er manglende målinger" : ""}
+                  {hasMeasuredGap ? " · hull er manglende målinger" : ""}
                 </p>
                 <div className="h-52 w-full">
                 {groupRows.length === 0 ? (
