@@ -19,8 +19,11 @@ from .ppap_metrics_service import PpapMetricsService
 from .statistical_uncertainty import bootstrap_ci, evidence_band
 from .temporal_metric_contract import (
     aggregation_window_days,
+    contract_for,
+    resolve_stimulus,
     sample_overlap,
     stimulus_bounds,
+    stimulus_producer_family,
 )
 
 DEFAULT_LAG_WINDOWS = (7, 14, 21, 28)
@@ -35,6 +38,85 @@ STIMULUS_METRICS = (
     "high_intensity_volume",
     "weekly_tss",
 )
+
+def _stimulus_kind(stimulus: str) -> str:
+    contract = resolve_stimulus(stimulus)
+    if contract is not None and contract.dependencies:
+        return str(contract.dependencies[0])
+    return stimulus
+
+
+def residualize_outcomes(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Residual of outcome after time, season, and baseline CTL.
+
+    Descriptive adjustment so dose buckets are not raw means along a time trend.
+    Not a causal training effect.
+    """
+    import numpy as np
+
+    outcomes = [float(row["outcome"]) for row in rows]
+    empty = {
+        "residuals": outcomes,
+        "covariates": [],
+        "controls_time": False,
+        "controls_season": False,
+        "controls_baseline_fitness": False,
+        "fully_controlled": False,
+    }
+    n = len(rows)
+    if n < 8:
+        return empty
+    ctl_present = [row.get("ctl") for row in rows if row.get("ctl") is not None]
+    use_ctl = len(ctl_present) / n >= 0.7
+    use_season = n >= 16
+    ctl_fill = float(sorted(ctl_present)[len(ctl_present) // 2]) if ctl_present else 0.0
+    origin = min(row["date"] for row in rows)
+    columns: List[List[float]] = []
+    names: List[str] = ["intercept", "time_index"]
+    for row in rows:
+        time_index = float((row["date"] - origin).days)
+        cols = [1.0, time_index]
+        if use_ctl:
+            ctl = row.get("ctl")
+            cols.append(float(ctl) if ctl is not None else ctl_fill)
+        if use_season:
+            angle = 2.0 * math.pi * (row["date"].timetuple().tm_yday / 365.25)
+            cols.extend([math.sin(angle), math.cos(angle)])
+        columns.append(cols)
+    if use_ctl:
+        names.append("baseline_ctl")
+    if use_season:
+        names.extend(["season_sin", "season_cos"])
+    design = np.asarray(columns, dtype=float)
+    target = np.asarray(outcomes, dtype=float)
+    try:
+        coef, _, rank, _ = np.linalg.lstsq(design, target, rcond=None)
+    except np.linalg.LinAlgError:
+        return empty
+    if int(rank) < design.shape[1]:
+        return empty
+    fitted = design @ coef
+    residuals = (target - fitted).tolist()
+    return {
+        "residuals": [float(value) for value in residuals],
+        "covariates": names,
+        "controls_time": True,
+        "controls_season": use_season,
+        "controls_baseline_fitness": use_ctl,
+        "fully_controlled": use_ctl and use_season,
+    }
+
+
+OUTCOME_CONTRACT_KEYS = {
+    "easy_efficiency": "fitness.ef_30d",
+    "critical_speed": "running.critical_speed",
+    "threshold_pace": "performance.threshold_pace",
+    "vo2max": "performance.vo2max",
+    "hrv": "cardio.hrv_7d",
+    "resting_hr": "cardio.rhr_7d",
+    "durability": "running.durability_score",
+}
+
 
 OUTCOME_METRICS = {
     "easy_efficiency": "fitness.ef_30d",
@@ -125,83 +207,118 @@ class TrainingResponseService:
         """Observational dose buckets. Ikke kalt optimal dose."""
         end = end_date or date.today()
         start = end - timedelta(days=lookback_days)
-        pairs: List[Tuple[float, float]] = []
+        rows: List[Dict[str, Any]] = []
         window_days = aggregation_window_days(stimulus)
+        self._ppap.prime_load_series(start, end)
         current = start + timedelta(days=lag_days + window_days - 1)
         while current <= end:
             bounds = stimulus_bounds(current, lag_days, aggregation_days=window_days)
             stim = self._stimulus_value(stimulus, bounds["stimulus_start"], bounds["stimulus_end"])
             out = self._outcome_value(outcome, current)
             if stim is not None and out is not None:
-                pairs.append((stim, out))
+                ctl = self._ppap.get_ctl(bounds["stimulus_end"])
+                rows.append(
+                    {
+                        "stimulus": float(stim),
+                        "outcome": float(out),
+                        "date": current,
+                        "ctl": None if ctl is None else float(ctl),
+                    }
+                )
             current += timedelta(days=7)
 
-        if len(pairs) < 6:
+        adjustment = residualize_outcomes(rows)
+        if len(rows) < 6:
             return {
                 "stimulus": stimulus,
                 "response": outcome,
                 "dose_response": [],
                 "best_supported_historical_range": None,
                 "confidence": 0.0,
-                "sample_count": len(pairs),
+                "sample_count": len(rows),
+                "adjustment": adjustment,
                 "disclaimer": "observational_association_not_causal_not_optimal",
             }
 
-        xs = sorted(p[0] for p in pairs)
+        xs = sorted(row["stimulus"] for row in rows)
         t1 = xs[len(xs) // 3]
         t2 = xs[(2 * len(xs)) // 3]
         buckets = [
-            {"range": [0, round(t1, 1)], "values": []},
-            {"range": [round(t1, 1), round(t2, 1)], "values": []},
-            {"range": [round(t2, 1), round(xs[-1], 1)], "values": []},
+            {"range": [0, round(t1, 1)], "residuals": [], "raw": []},
+            {"range": [round(t1, 1), round(t2, 1)], "residuals": [], "raw": []},
+            {"range": [round(t2, 1), round(xs[-1], 1)], "residuals": [], "raw": []},
         ]
-        # For pace, lower is better; for EF/VO2/CS higher is better.
-        invert = outcome in {"threshold_pace"}
-        for stim, out in pairs:
+        outcome_contract = contract_for(OUTCOME_CONTRACT_KEYS.get(outcome, ""))
+        invert = bool(outcome_contract and outcome_contract.direction == "lower_is_better")
+        for row, residual in zip(rows, adjustment["residuals"]):
+            stim = row["stimulus"]
             if stim <= t1:
-                buckets[0]["values"].append(out)
+                slot = buckets[0]
             elif stim <= t2:
-                buckets[1]["values"].append(out)
+                slot = buckets[1]
             else:
-                buckets[2]["values"].append(out)
+                slot = buckets[2]
+            slot["residuals"].append(float(residual))
+            slot["raw"].append(row["outcome"])
 
         dose_response = []
         best_idx = None
         best_score = None
         for idx, bucket in enumerate(buckets):
-            vals = bucket["values"]
+            vals = bucket["residuals"]
+            raw_vals = bucket["raw"]
             mean_v = sum(vals) / len(vals) if vals else None
+            raw_mean = sum(raw_vals) / len(raw_vals) if raw_vals else None
             score = (-mean_v if invert else mean_v) if mean_v is not None else None
             dose_response.append(
                 {
                     "range": bucket["range"],
                     "effect": round(mean_v, 3) if mean_v is not None else None,
+                    "raw_effect": round(raw_mean, 3) if raw_mean is not None else None,
                     "sample_count": len(vals),
                     "label": ("low", "moderate", "high")[idx],
                 }
             )
-            if score is not None and (best_score is None or score > best_score) and len(vals) >= 3:
+            if (
+                adjustment["fully_controlled"]
+                and score is not None
+                and (best_score is None or score > best_score)
+                and len(vals) >= 3
+            ):
                 best_score = score
                 best_idx = idx
 
         best_range = dose_response[best_idx]["range"] if best_idx is not None else None
-        conf = min(0.75, 0.2 + 0.02 * len(pairs))
+        conf = min(0.75, 0.2 + 0.02 * len(rows))
         if best_range is None:
             conf = min(conf, 0.3)
         effects = [b["effect"] for b in dose_response if b.get("effect") is not None]
         unc = bootstrap_ci(effects) if effects else {"estimate": None, "ci95": None, "sample_count": 0}
-        support = evidence_band(sample_count=len(pairs), effect_size=0.2 if best_range else 0.0)
+        support = evidence_band(sample_count=len(rows), effect_size=0.2 if best_range else 0.0)
         return {
             "stimulus": stimulus,
+            "canonical_stimulus": resolve_stimulus(stimulus).key if resolve_stimulus(stimulus) else None,
             "response": outcome,
             "lag_days": lag_days,
             "dose_response": dose_response,
             "best_supported_historical_range": best_range,
-            "confidence": round(conf, 2),  # compatibility alias
+            "confidence": round(conf, 2),
             "evidence_strength": round(conf, 2),
             "statistical_support": support,
             "uncertainty": unc,
-            "sample_count": len(pairs),
+            "sample_count": len(rows),
+            "adjustment": {
+                "method": "ols_residual" if adjustment["controls_time"] else "raw_mean",
+                "covariates": [name for name in adjustment["covariates"] if name != "intercept"],
+                "controls_time": adjustment["controls_time"],
+                "controls_season": adjustment["controls_season"],
+                "controls_baseline_fitness": adjustment["controls_baseline_fitness"],
+                "fully_controlled": adjustment["fully_controlled"],
+                "note": (
+                    "Bucket effect is the mean residual after the listed covariates. "
+                    "A historical range is reported only when time, season, and baseline CTL are all controlled."
+                ),
+            },
             "disclaimer": "observational_association_not_causal — not an optimal_range",
         }
 
@@ -358,24 +475,26 @@ class TrainingResponseService:
         }
 
     def _stimulus_value(self, stimulus: str, start: date, end: date) -> Optional[float]:
-        if stimulus in {"weekly_tss", "tss_7d", "tss_28d"}:
+        family = stimulus_producer_family(stimulus)
+        kind = _stimulus_kind(stimulus)
+        if family == "tss_sum":
             return self._weekly_tss_sum(start, end)
-        if stimulus == "long_run_volume":
+        if family == "long_aerobic":
             return self._session_type_minutes(start, end, {"long_aerobic"})
-        if stimulus == "vo2_volume":
+        if family == "vo2_intervals":
             return self._session_type_minutes(start, end, {"vo2_intervals"})
 
         zone_key = {
-            "easy_volume": "low",
-            "threshold_volume": "threshold",
-            "high_intensity_volume": "high",
-        }.get(stimulus)
+            "zone_low": "low",
+            "zone_threshold": "threshold",
+            "zone_high": "high",
+        }.get(family)
         if zone_key is None:
             return None
 
         lt1, lt2 = self._threshold_hr_bounds(end)
         if lt1 is None or lt2 is None:
-            return self._fallback_stimulus_minutes(stimulus, start, end)
+            return self._fallback_stimulus_minutes(kind, start, end)
 
         zone_seconds = self._zone_seconds_in_window(start, end, lt1, lt2)
         seconds = zone_seconds.get(zone_key, 0.0)

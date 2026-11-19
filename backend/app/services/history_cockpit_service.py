@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from calendar import monthrange
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from statistics import median
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, joinedload
@@ -17,6 +18,24 @@ from ..storage import DataStorage
 from ..utils.activity_filters import is_running_activity
 from .ppap_metrics_service import PpapMetricsService
 from .temporal_metric_contract import percentile_rank
+
+
+def _regime_split_dates(detector: Any, series: List[Tuple[date, float]], depth: int = 0) -> List[date]:
+    if len(series) < 8 or depth >= 2:
+        return []
+    hit = detector._detect_change_point(series)
+    if not hit.get("change_detected") or not hit.get("change_date"):
+        return []
+    split = date.fromisoformat(str(hit["change_date"]))
+    left = [item for item in series if item[0] < split]
+    right = [item for item in series if item[0] >= split]
+    if len(left) < 4 or len(right) < 4:
+        return [split]
+    return (
+        _regime_split_dates(detector, left, depth + 1)
+        + [split]
+        + _regime_split_dates(detector, right, depth + 1)
+    )
 
 
 class HistoryCockpitService:
@@ -391,6 +410,7 @@ class HistoryCockpitService:
             "capped": False,
             "available_month_count": len(payloads),
             "month_count": len(payloads),
+            "regimes": self._load_regimes(payloads),
             "buckets": buckets,
             "years": [
                 {"year": year, "months": items}
@@ -402,6 +422,62 @@ class HistoryCockpitService:
                 "10+ years add an annual overview. Months are not dropped."
             ),
         }
+
+    def _load_regimes(self, monthly_rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Median-shift blocks on monthly TSS.
+
+        A durable block lasted at least three months. The shift is a load-level
+        change, not a performance improvement.
+        """
+        from .trend_analysis_service import TrendAnalysisService
+
+        series: List[Tuple[date, float]] = []
+        for row in monthly_rows:
+            start_raw = row.get("month_start")
+            if not start_raw:
+                continue
+            series.append((date.fromisoformat(str(start_raw)[:10]), float(row.get("total_tss") or 0.0)))
+        series.sort(key=lambda item: item[0])
+        if not series:
+            return []
+        detector = TrendAnalysisService(self.db, self.storage)
+        splits = sorted(set(_regime_split_dates(detector, series)))
+        indices = [0]
+        for split in splits:
+            index = next((i for i, (day, _value) in enumerate(series) if day >= split), None)
+            if index is not None and 0 < index < len(series):
+                indices.append(index)
+        indices.append(len(series))
+        indices = sorted(set(indices))
+        regimes: List[Dict[str, Any]] = []
+        previous_level: Optional[float] = None
+        for left, right in zip(indices, indices[1:]):
+            segment = series[left:right]
+            if not segment:
+                continue
+            level = float(median(value for _day, value in segment))
+            shift = None if previous_level is None else round(level - previous_level, 1)
+            if shift is None:
+                kind = "baseline"
+            elif shift > 0:
+                kind = "level_shift_up"
+            else:
+                kind = "level_shift_down"
+            regimes.append(
+                {
+                    "start": segment[0][0].isoformat(),
+                    "end": segment[-1][0].isoformat(),
+                    "metric": "total_tss",
+                    "level": round(level, 1),
+                    "months": len(segment),
+                    "shift_from_previous": shift,
+                    "kind": kind,
+                    "durable": len(segment) >= 3,
+                    "interpretation": "load_regime",
+                }
+            )
+            previous_level = level
+        return regimes
 
     def annotations(self, *, end_date: Optional[date] = None, limit: int = 24) -> Dict[str, Any]:
         end_date = end_date or date.today()

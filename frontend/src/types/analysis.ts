@@ -254,12 +254,26 @@ export interface HistoryMonth {
   total_tss?: number | null;
 }
 
+export interface LoadRegime {
+  start: string;
+  end: string;
+  metric: string;
+  level: number;
+  months: number;
+  shift_from_previous?: number | null;
+  kind: "baseline" | "level_shift_up" | "level_shift_down" | string;
+  durable: boolean;
+  interpretation: string;
+}
+
 export interface HistoryPayload {
   start_date: string;
   end_date: string;
   period: string;
   years: Array<{ year: string; months: HistoryMonth[] }>;
   month_count: number;
+  regimes?: LoadRegime[];
+  range_basis?: string;
   note?: string;
 }
 

@@ -13,9 +13,50 @@ function fmtHours(seconds?: number | null) {
   return `${(seconds / 3600).toFixed(1)} t`;
 }
 
+function regimeLabel(kind: string, durable: boolean) {
+  if (kind === "level_shift_up") {
+    return durable ? "Varig høyere belastning" : "Høyere belastning";
+  }
+  if (kind === "level_shift_down") {
+    return durable ? "Varig lavere belastning" : "Lavere belastning";
+  }
+  return "Utgangsnivå";
+}
+
 export function HistoryTimeline({ data }: { data: HistoryPayload }) {
+  const regimes = data.regimes ?? [];
   return (
     <section className="space-y-3">
+      {regimes.length > 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <h3 className="text-sm font-semibold text-slate-900">Belastningsblokker</h3>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            Median-skift i månedlig TSS. En varig blokk holder nivået i minst tre måneder.
+            Dette er belastningsnivå, ikke en prestasjonsforbedring.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {regimes.map((regime) => (
+              <li
+                key={`${regime.start}-${regime.end}`}
+                className="flex flex-wrap items-baseline justify-between gap-2 text-xs text-slate-700"
+              >
+                <span>
+                  {regime.start} – {regime.end}
+                  <span className="ml-2 text-slate-500">
+                    {regimeLabel(regime.kind, regime.durable)} · {regime.months} mnd
+                  </span>
+                </span>
+                <span className="tabular-nums text-slate-600">
+                  TSS {regime.level}
+                  {regime.shift_from_previous != null
+                    ? ` (${regime.shift_from_previous > 0 ? "+" : ""}${regime.shift_from_previous})`
+                    : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {data.years.length === 0 ? (
         <p className="text-sm text-slate-500">Ingen månedssammendrag i perioden.</p>
       ) : (
