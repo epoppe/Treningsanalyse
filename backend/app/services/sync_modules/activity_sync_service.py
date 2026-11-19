@@ -27,20 +27,42 @@ from ..sync_run_service import (
     update_sync_run_checkpoint,
 )
 from ...utils.activity_filters import is_indoor_type_key
+from .metric_isolation import (
+    DERIVED_METRICS_INCOMPLETE_FACTOR,
+    confidence_payload,
+    merge_pending_metric_ids,
+    run_metric_batch,
+    update_derived_metrics_state,
+)
 
 logger = logging.getLogger(__name__)
 
 ACTIVITY_SYNC_COMMIT_BATCH_SIZE = 100
 
 
-def refresh_summaries_after_sync(start: date, end: date) -> Dict[str, int]:
+def refresh_summaries_after_sync(start: date, end: date) -> Dict[str, Any]:
     """Oppdater sammendrag for perioden som nettopp ble synket.
 
-    sync_modules ligger under app.services, så søskenmodulen er summary_service.
+    Sammendraget bygges fra committet grunndata (distanse, tid, puls).
+    Hvis avledede metrikker ble hoppet over, merkes confidence som redusert.
     """
     from ..summary_service import SummaryService
 
-    return SummaryService().bulk_update_summaries(start, end)
+    counts: Dict[str, Any] = SummaryService().bulk_update_summaries(start, end)
+    counts["data_basis"] = "base_activity_fields"
+    try:
+        from ...database.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            counts.update(confidence_payload(db))
+        finally:
+            db.close()
+    except Exception:
+        logger.debug("Kunne ikke lese metrikk-confidence etter sammendrag", exc_info=True)
+        counts.setdefault("metrics_confidence", "normal")
+        counts.setdefault("confidence_factor", 1.0)
+    return counts
 
 
 def _link_recommendation_execution(db, activity: Activity) -> None:
@@ -424,7 +446,12 @@ class ActivitySyncService:
                 logger.info(f"Starter chunket FIT-data nedlasting for periode på {days_diff} dager")
                 chunk_success = 0
                 chunk_total = 0
-                metrics_agg = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
+                metrics_agg = {
+                    "negative_split": 0,
+                    "decoupling": 0,
+                    "hrv_available": 0,
+                    "skipped": 0,
+                }
                 chunk_start = start_date
                 while chunk_start <= end_date:
                     chunk_end = min(chunk_start + timedelta(days=6), end_date)
@@ -436,6 +463,10 @@ class ActivitySyncService:
                     metrics_agg["negative_split"] += int(m.get("negative_split", 0))
                     metrics_agg["decoupling"] += int(m.get("decoupling", 0))
                     metrics_agg["hrv_available"] += int(m.get("hrv_available", 0))
+                    metrics_agg["skipped"] += int(m.get("skipped", 0))
+                    if m.get("metrics_confidence") == "reduced" or m.get("snapshot_timed_out"):
+                        metrics_agg["metrics_confidence"] = "reduced"
+                        metrics_agg["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
                     chunk_start = chunk_end + timedelta(days=1)
                 fit_result = {
                     "status": "Fullført",
@@ -515,22 +546,57 @@ class ActivitySyncService:
                     f"år={summary_counts.get('yearly_count', 0)}"
                 )
                 
+                if sync_result.get("metrics_confidence") == "reduced":
+                    summary_counts["metrics_confidence"] = "reduced"
+                    summary_counts["confidence_factor"] = min(
+                        float(summary_counts.get("confidence_factor") or 1),
+                        DERIVED_METRICS_INCOMPLETE_FACTOR,
+                    )
+                confidence_note = ""
+                if summary_counts.get("metrics_confidence") == "reduced":
+                    confidence_note = " Confidence er senket fordi avledede metrikker mangler."
+                    logger.warning(
+                        "Sammendrag oppdatert fra grunndata med lavere confidence (faktor %s).",
+                        summary_counts.get("confidence_factor"),
+                    )
                 summary_result = {
-                    "status": "Fullført", 
+                    "status": "Fullført",
                     "message": (
                         f"Sammendrag oppdatert for perioden {start_date.date()} til {end_date.date()} "
                         f"(dag={summary_counts.get('daily_count', 0)}, "
                         f"uke={summary_counts.get('weekly_count', 0)}, "
                         f"måned={summary_counts.get('monthly_count', 0)}, "
-                        f"år={summary_counts.get('yearly_count', 0)})"
-                    )
+                        f"år={summary_counts.get('yearly_count', 0)})."
+                        f"{confidence_note}"
+                    ),
+                    "metrics_confidence": summary_counts.get("metrics_confidence", "normal"),
+                    "confidence_factor": summary_counts.get("confidence_factor", 1.0),
+                    "data_basis": summary_counts.get("data_basis", "base_activity_fields"),
                 }
                 logger.info("Sammendragstabeller oppdatert automatisk")
             except Exception as e:
                 logger.error(f"Feil under automatisk oppdatering av sammendrag: {e}")
                 summary_result = {"status": "Feil", "message": str(e)}
         
-        # Kombiner resultater
+        # Kombiner resultater. Ufullstendige metrikker er ikke en feilet synk:
+        # grunndata er lagret, og sammendrag/råd kjører med lavere confidence.
+        metrics_confidence = sync_result.get("metrics_confidence") or summary_result.get(
+            "metrics_confidence", "normal"
+        )
+        fit_metrics = fit_result.get("metrics_calculated") or {}
+        if fit_metrics.get("metrics_confidence") == "reduced":
+            metrics_confidence = "reduced"
+        confidence_factor = (
+            DERIVED_METRICS_INCOMPLETE_FACTOR
+            if metrics_confidence == "reduced"
+            else sync_result.get("confidence_factor", summary_result.get("confidence_factor", 1.0))
+        )
+        combined_status = "Fullført med FIT-data, HRV, Training Effect, vær og sammendrag"
+        if metrics_confidence == "reduced":
+            combined_status = (
+                "Fullført med grunndata. Avledede metrikker er ufullstendige, "
+                "så sammendrag og råd bruker lavere confidence."
+            )
         combined_result = {
             "sync_result": sync_result,
             "fit_data_result": fit_result,
@@ -539,7 +605,9 @@ class ActivitySyncService:
             "weather_result": weather_result,
             "post_te_metrics": post_te_metrics,
             "summary_result": summary_result,
-            "status": "Fullført med FIT-data, HRV, Training Effect, vær og sammendrag",
+            "metrics_confidence": metrics_confidence,
+            "confidence_factor": confidence_factor,
+            "status": combined_status,
             "summary": {
                 "activities_synced": sync_result.get("total_fetched", 0),
                 "fit_data_downloaded": fit_result.get("success_count", 0),
@@ -559,11 +627,83 @@ class ActivitySyncService:
                 "weather_status": weather_result.get("status", "Ukjent"),
                 "summary_status": summary_result.get("status", "Ukjent"),
                 "post_te_metrics": post_te_metrics,
+                "metrics_confidence": metrics_confidence,
+                "confidence_factor": confidence_factor,
+                "data_basis": "base_activity_fields",
             }
         }
         
         logger.info(f"Utvidet synkronisering fullført: {combined_result['summary']}")
         return combined_result
+
+    def _run_isolated_metric_batch(self, summary: dict, metrics_ids: list[str]) -> None:
+        """Kjør isolert metrikk-batch og skriv resultatet inn i synk-sammendraget."""
+        if not metrics_ids:
+            summary["metrics_calculated"] = {
+                "total_activities": 0,
+                "skipped_activities": 0,
+                "metrics_confidence": "normal",
+                "confidence_factor": 1.0,
+            }
+            summary["metrics_confidence"] = "normal"
+            summary["confidence_factor"] = 1.0
+            if summary.get("status") in {None, "Startet"}:
+                summary["status"] = "Fullført"
+            return
+        logger.info("Starter isolert beregning av metrics for %s aktiviteter...", len(metrics_ids))
+        try:
+            batch = run_metric_batch(self.db, metrics_ids)
+        except Exception as metrics_exc:
+            logger.error(
+                "Metrikk-batch feilet etter committet grunnsynk: %s",
+                metrics_exc,
+                exc_info=True,
+            )
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            try:
+                update_derived_metrics_state(
+                    self.db,
+                    skipped=[str(activity_id) for activity_id in metrics_ids],
+                    timed_out=[str(activity_id) for activity_id in metrics_ids],
+                )
+            except Exception:
+                logger.warning("Kunne ikke merke ufullstendige metrikker", exc_info=True)
+            summary["metrics_calculated"] = {
+                "total_activities": len(metrics_ids),
+                "skipped_activities": len(metrics_ids),
+            }
+            summary["metrics_confidence"] = "reduced"
+            summary["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+            summary["metrics_error"] = str(metrics_exc)
+            summary["status"] = "Fullført med ufullstendige metrikker"
+        else:
+            metrics_summary = batch["summary"]
+            summary["metrics_calculated"] = metrics_summary
+            summary["metrics_confidence"] = metrics_summary["metrics_confidence"]
+            summary["confidence_factor"] = metrics_summary["confidence_factor"]
+            logger.info(
+                "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
+                "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s, hoppet over=%s",
+                metrics_summary["total_activities"],
+                metrics_summary["tss"],
+                metrics_summary["power"],
+                metrics_summary["running_economy"],
+                metrics_summary["negative_split"],
+                metrics_summary["decoupling"],
+                metrics_summary["hrv_available"],
+                metrics_summary["skipped_activities"],
+            )
+            if metrics_summary["metrics_confidence"] == "reduced":
+                summary["status"] = "Fullført med ufullstendige metrikker"
+            else:
+                summary["status"] = "Fullført"
+        try:
+            self.db.expire_all()
+        except Exception:
+            pass
 
     async def sync_activities(
         self,
@@ -581,7 +721,8 @@ class ActivitySyncService:
         uten FIT-nedlasting eller metrics-beregning — raskere for historisk backfill.
         """
         summary = {"total_fetched": 0, "periods_synced": 0, "status": "Startet"}
-        
+        base_sync_committed = False
+
         try:
             if not await self.garmin_client.initialize():
                 logger.error("Kunne ikke initialisere Garmin-klient.")
@@ -619,6 +760,16 @@ class ActivitySyncService:
             existing_ids = self.storage.get_existing_activity_ids(self.db, candidate_ids)
 
             if not activities_to_save:
+                pending = [] if skip_fit_download else merge_pending_metric_ids(self.db, [])
+                if pending:
+                    logger.info(
+                        "Ingen nye aktiviteter hos Garmin. Prøver metrikker på nytt for %s tidligere hoppede.",
+                        len(pending),
+                    )
+                    self.db.commit()
+                    base_sync_committed = True
+                    self._run_isolated_metric_batch(summary, pending)
+                    return summary
                 summary["status"] = "Fant ingen nye aktiviteter med GPS-data hos Garmin."
                 logger.info(summary["status"])
                 return summary
@@ -958,55 +1109,45 @@ class ActivitySyncService:
                 updated_count,
                 unchanged_count,
             )
-            # Beregn metrics for nye + oppdaterte (rikere data kan påvirke beregninger)
-            metrics_ids = list(dict.fromkeys(inserted_activity_ids + updated_activity_ids))
+            # Grunnsynken (aktivitetsrader) er committet i batchene over.
+            # Metrikk-feil skal ikke rulle den tilbake.
+            self.db.commit()
+            base_sync_committed = True
+
+            # Nye/oppdaterte pluss aktiviteter som timet ut i en tidligere kjøring.
+            fresh_ids = list(dict.fromkeys(inserted_activity_ids + updated_activity_ids))
             if skip_fit_download:
-                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(metrics_ids)}
+                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(fresh_ids)}
+                summary["metrics_confidence"] = "normal"
+                summary["confidence_factor"] = 1.0
+                summary["status"] = "Fullført"
             else:
-                logger.info("Starter beregning av alle metrics for nye/oppdaterte aktiviteter...")
-                metrics_results = []
-                self.metrics_service.begin_batch()
-                try:
-                    for aid in metrics_ids:
-                        metrics_result = self._calculate_metrics_for_new_activity(aid)
-                        metrics_results.append(metrics_result)
-                finally:
-                    self.metrics_service.end_batch()
-
-                successful_tss = sum(1 for r in metrics_results if r["tss_calculated"])
-                successful_power = sum(1 for r in metrics_results if r["power_calculated"])
-                successful_running_economy = sum(1 for r in metrics_results if r["running_economy_calculated"])
-                successful_negative_splits = sum(1 for r in metrics_results if r["negative_split_calculated"])
-                successful_decouplings = sum(1 for r in metrics_results if r["decoupling_calculated"])
-                successful_hrv = sum(1 for r in metrics_results if r["hrv_calculated"])
-
-                logger.info(
-                    "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
-                    "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s",
-                    len(metrics_results),
-                    successful_tss,
-                    successful_power,
-                    successful_running_economy,
-                    successful_negative_splits,
-                    successful_decouplings,
-                    successful_hrv,
-                )
-                summary["metrics_calculated"] = {
-                    "tss": successful_tss,
-                    "power": successful_power,
-                    "running_economy": successful_running_economy,
-                    "negative_split": successful_negative_splits,
-                    "decoupling": successful_decouplings,
-                    "hrv_available": successful_hrv,
-                    "total_activities": len(metrics_results),
-                }
-            summary["status"] = "Fullført"
-            logger.info(f"Synkronisering fra Garmin fullført. La til {added_count} nye aktiviteter i databasen.")
+                metrics_ids = merge_pending_metric_ids(self.db, fresh_ids)
+                self._run_isolated_metric_batch(summary, metrics_ids)
+            logger.info(
+                "Synkronisering fra Garmin fullført (%s). La til %s nye aktiviteter i databasen.",
+                summary["status"],
+                added_count,
+            )
 
         except Exception as e:
             logger.critical(f"En alvorlig feil oppstod under Garmin-synkronisering: {e}", exc_info=True)
-            self.db.rollback()  # Rull tilbake endringer ved feil
-            summary["status"] = f"Feil: {e}"
+            if base_sync_committed:
+                logger.error(
+                    "Grunnsynken er committet. Ruller ikke tilbake aktiviteter etter feil i etterarbeid: %s",
+                    e,
+                )
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                summary["status"] = "Fullført med ufullstendige metrikker"
+                summary["metrics_confidence"] = "reduced"
+                summary["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+                summary["metrics_error"] = str(e)
+            else:
+                self.db.rollback()
+                summary["status"] = f"Feil: {e}"
         
         return summary 
 

@@ -9,6 +9,8 @@ from typing import Any, Dict, Optional, Tuple
 _STALE_PENALTY = 0.15
 _MISSING_CORE_PENALTY = 0.25
 _AGING_PENALTY = 0.05
+# Hengende metrikk-steg: tydelig lavere confidence, samme faktor som synk-isoleringen.
+DERIVED_METRICS_INCOMPLETE_FACTOR = 0.55
 
 _CORE_METRICS = ("lt2", "hrv_baseline", "critical_speed")
 
@@ -52,11 +54,25 @@ def apply_data_quality_to_evidence(
         confidence *= 0.85
         factors.append("low_data_quality_score")
 
+    derived = freshness.get("derived_activity_metrics") or {}
+    derived_status = derived.get("status") or derived.get("freshness")
+    if derived_status in {"incomplete", "degraded"}:
+        strength *= DERIVED_METRICS_INCOMPLETE_FACTOR
+        confidence *= DERIVED_METRICS_INCOMPLETE_FACTOR
+        factors.append("derived_metrics_incomplete")
+
+    note = "Missing/stale evidence reduces confidence; it does not auto-force rest."
+    if "derived_metrics_incomplete" in factors:
+        note = (
+            "Avledede metrikker mangler etter synk. Rådet bruker ferske grunndata "
+            "med tydelig lavere confidence, og endrer ikke økttypen av den grunn."
+        )
+
     return {
         "evidence_strength": round(max(0.0, min(1.0, strength)), 3),
         "decision_confidence": round(max(0.0, min(1.0, confidence)), 3),
         "decision_changed": False,
         "confidence_reduced": bool(factors),
         "quality_factors": factors,
-        "note": "Missing/stale evidence reduces confidence; it does not auto-force rest.",
+        "note": note,
     }

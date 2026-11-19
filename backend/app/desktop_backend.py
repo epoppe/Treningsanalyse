@@ -7,11 +7,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing
 import os
 import sys
 
 
 def main() -> None:
+    # PyInstaller på Windows starter metrikk-arbeidere på nytt med
+    # --multiprocessing-fork. freeze_support() må kjøre før argparse,
+    # ellers avviser entrypointen arbeideren.
+    multiprocessing.freeze_support()
     parser = argparse.ArgumentParser(description="Treningsanalyse backend (desktop)")
     parser.add_argument("--host", default=os.environ.get("BACKEND_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("BACKEND_PORT", "8000")))
@@ -53,6 +58,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     # Ensure backend package root is on sys.path when frozen or run as script
     if getattr(sys, "frozen", False):
         # PyInstaller

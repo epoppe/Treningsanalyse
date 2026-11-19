@@ -23,6 +23,7 @@ from ...services.activity_data_validation import (
 )
 from ...utils.activity_filters import should_download_fit
 from ...config import data_path
+from .metric_isolation import DERIVED_METRICS_INCOMPLETE_FACTOR, IsolatedMetricCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +231,24 @@ class FitSyncService:
             metrics_calculated["decoupling"] += 1
         if metrics_result.get("hrv_calculated"):
             metrics_calculated["hrv_available"] += 1
+        if metrics_result.get("timed_out") or metrics_result.get("isolated_failure"):
+            metrics_calculated["skipped"] = int(metrics_calculated.get("skipped", 0)) + 1
+            metrics_calculated["metrics_confidence"] = "reduced"
+            metrics_calculated["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+        if metrics_result.get("snapshot_timed_out"):
+            metrics_calculated["snapshot_timed_out"] = True
+            metrics_calculated["metrics_confidence"] = "reduced"
+            metrics_calculated["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
 
-    async def download_and_store_fit_file(self, activity_id: int) -> tuple[bool, dict | None]:
+    async def download_and_store_fit_file(
+        self,
+        activity_id: int,
+        *,
+        metrics_calculator: IsolatedMetricCalculator | None = None,
+        defer_snapshots: bool = False,
+    ) -> tuple[bool, dict | None]:
+        owned_calculator = False
+        calculator = metrics_calculator
         try:
             logger.info(f"Laster ned FIT-data for aktivitet {activity_id}...")
             fit_data = await self.sync_service.garmin_client.get_activity_details(activity_id)
@@ -272,7 +289,15 @@ class FitSyncService:
                 logger.info(f"Oppdaterte database med FIT-data for aktivitet {activity_id}")
 
                 logger.info(f"Beregner metrics for aktivitet {activity_id} etter FIT-data nedlasting...")
-                metrics_result = self.sync_service._calculate_metrics_for_new_activity(str(activity_id))
+                if calculator is None:
+                    calculator = IsolatedMetricCalculator(self.sync_service.db)
+                    owned_calculator = True
+                metrics_result = calculator.calculate(str(activity_id))
+                if owned_calculator and not defer_snapshots:
+                    snapshot = calculator.recalculate_snapshots()
+                    if not snapshot.get("ok"):
+                        metrics_result = dict(metrics_result or {})
+                        metrics_result["snapshot_timed_out"] = True
                 logger.info(
                     "Metrics-beregning for aktivitet %s: Negative split=%s, Decoupling=%s",
                     activity_id,
@@ -302,6 +327,9 @@ class FitSyncService:
         except Exception as exc:
             logger.error(f"Feil ved nedlasting av FIT-data for aktivitet {activity_id}: {exc}")
             return False, None
+        finally:
+            if owned_calculator and calculator is not None:
+                calculator.close()
 
     def get_existing_fit_ids(self) -> set[int]:
         try:
@@ -358,15 +386,28 @@ class FitSyncService:
 
             success_count = 0
             total_count = len(activity_ids)
-            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
+            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0, "skipped": 0}
+            calculator = IsolatedMetricCalculator(self.sync_service.db)
 
-            for i, activity_id in enumerate(activity_ids):
-                logger.debug("Prosesserer aktivitet %s (%s/%s)", activity_id, i + 1, total_count)
-                ok, metrics_result = await self.download_and_store_fit_file(activity_id)
-                if ok:
-                    success_count += 1
-                    self._aggregate_metrics_counts(metrics_calculated, metrics_result)
-                await asyncio.sleep(0.5)
+            try:
+                for i, activity_id in enumerate(activity_ids):
+                    logger.debug("Prosesserer aktivitet %s (%s/%s)", activity_id, i + 1, total_count)
+                    ok, metrics_result = await self.download_and_store_fit_file(
+                        activity_id,
+                        metrics_calculator=calculator,
+                        defer_snapshots=True,
+                    )
+                    if ok:
+                        success_count += 1
+                        self._aggregate_metrics_counts(metrics_calculated, metrics_result)
+                    await asyncio.sleep(0.5)
+                snapshot = calculator.recalculate_snapshots()
+                if not snapshot.get("ok"):
+                    metrics_calculated["snapshot_timed_out"] = True
+                    metrics_calculated["metrics_confidence"] = "reduced"
+                    metrics_calculated["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+            finally:
+                calculator.close()
 
             message = f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter"
             logger.info(message)
@@ -427,20 +468,33 @@ class FitSyncService:
 
             success_count = 0
             total_count = len(missing_fit_activities)
-            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0}
-            for i, activity in enumerate(missing_fit_activities):
-                logger.debug(
-                    "Prosesserer aktivitet %s (%s/%s) %s",
-                    activity.activity_id,
-                    i + 1,
-                    total_count,
-                    activity.start_time.strftime("%Y-%m-%d"),
-                )
-                ok, metrics_result = await self.download_and_store_fit_file(activity.activity_id)
-                if ok:
-                    success_count += 1
-                    self._aggregate_metrics_counts(metrics_calculated, metrics_result)
-                await asyncio.sleep(1)
+            metrics_calculated = {"negative_split": 0, "decoupling": 0, "hrv_available": 0, "skipped": 0}
+            calculator = IsolatedMetricCalculator(self.sync_service.db)
+            try:
+                for i, activity in enumerate(missing_fit_activities):
+                    logger.debug(
+                        "Prosesserer aktivitet %s (%s/%s) %s",
+                        activity.activity_id,
+                        i + 1,
+                        total_count,
+                        activity.start_time.strftime("%Y-%m-%d"),
+                    )
+                    ok, metrics_result = await self.download_and_store_fit_file(
+                        activity.activity_id,
+                        metrics_calculator=calculator,
+                        defer_snapshots=True,
+                    )
+                    if ok:
+                        success_count += 1
+                        self._aggregate_metrics_counts(metrics_calculated, metrics_result)
+                    await asyncio.sleep(1)
+                snapshot = calculator.recalculate_snapshots()
+                if not snapshot.get("ok"):
+                    metrics_calculated["snapshot_timed_out"] = True
+                    metrics_calculated["metrics_confidence"] = "reduced"
+                    metrics_calculated["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+            finally:
+                calculator.close()
 
             message = (
                 f"Lastet ned FIT-data for {success_count} av {total_count} aktiviteter i perioden "
