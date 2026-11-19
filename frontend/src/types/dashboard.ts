@@ -42,6 +42,10 @@ export interface PostSyncSummaryPayload {
   };
   interpretation?: string;
   plan_effect?: { note?: string };
+  metrics_confidence?: "reduced" | "normal" | string;
+  confidence_factor?: number;
+  data_basis?: string;
+  metrics_note?: string | null;
 }
 
 export interface RecommendationHistoryItem {

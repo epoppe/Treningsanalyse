@@ -113,7 +113,7 @@ export interface TodayDashboardPayload {
     relative_change_pct?: number | null;
     current?: number | null;
   }>;
-  freshness?: Record<string, unknown>;
+  freshness?: Record<string, { status?: string; freshness?: string; note?: string | null } | unknown>;
   warnings?: string[];
   system_status?: string;
   plan_adaptation?: Record<string, unknown>;

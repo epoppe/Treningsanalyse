@@ -49,6 +49,16 @@ export function PostSyncSummaryCard({ data }: { data: PostSyncSummaryPayload }) 
         <p className="mt-2 text-xs text-slate-600">{data.interpretation}</p>
       ) : null}
 
+      {data.metrics_confidence === "reduced" ? (
+        <p className="mt-2 rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+          {data.metrics_note ||
+            "Sammendraget bruker ferske grunndata. Avledede metrikker mangler, så konfidensen er senket."}
+          {quality?.confidence != null
+            ? ` Konfidens ${Math.round(quality.confidence * 100)}%.`
+            : ""}
+        </p>
+      ) : null}
+
       {data.activity_id ? (
         <Link
           href={`/activities/${data.activity_id}`}

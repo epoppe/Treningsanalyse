@@ -128,6 +128,8 @@ class CoachingHealthService:
                 findings.append(self._finding(f"missing_{metric}"))
             elif payload.get("status") == "stale" and metric in {"lt2", "critical_speed"}:
                 findings.append(self._finding(f"stale_{metric}"))
+        if (freshness.get("derived_activity_metrics") or {}).get("status") == "incomplete":
+            findings.append(self._finding("derived_metrics_incomplete"))
 
         status = HealthStatusPolicy.aggregate(f["code"] for f in findings)
         return {
@@ -242,6 +244,9 @@ class CoachingHealthService:
             cal_day,
             SourceType.OBSERVED if cal_day else SourceType.MISSING,
         )
+        from .sync_modules.metric_isolation import derived_metrics_freshness
+
+        out["derived_activity_metrics"] = derived_metrics_freshness(self.db)
         return out
 
     @staticmethod

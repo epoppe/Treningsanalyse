@@ -23,6 +23,13 @@ function TargetRow({ label, value }: { label: string; value: string | null }) {
   );
 }
 
+function derivedMetricsIncomplete(data: TodayDashboardPayload): boolean {
+  const raw = data.freshness?.derived_activity_metrics;
+  if (!raw || typeof raw !== "object") return false;
+  const entry = raw as { status?: string; freshness?: string };
+  return (entry.status || entry.freshness) === "incomplete";
+}
+
 function AlternativeCard({ option, index }: { option: Record<string, unknown>; index: number }) {
   const type = String(option.workout_type || option.type || "easy_run");
   const prescription = (option.prescription || option.workout_prescription) as
@@ -93,6 +100,11 @@ export function NextWorkoutCard({ data }: { data: TodayDashboardPayload }) {
       </div>
 
       <div className="space-y-3 px-4 py-4">
+        {derivedMetricsIncomplete(data) ? (
+          <p className="rounded-md bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+            Rådet bruker ferske grunndata. Avledede metrikker mangler, så konfidensen er senket.
+          </p>
+        ) : null}
         {!isAbstain ? (
           <>
             <div className="space-y-1.5">

@@ -23,6 +23,7 @@ from ..services.plan_vs_actual_service import PlanVsActualService
 from ..services.ppap_metrics_service import PpapMetricsService
 from ..services.recommendation_ledger_service import RecommendationLedgerService
 from ..services.session_quality_service import SessionQualityService
+from ..services.sync_modules.metric_isolation import confidence_payload
 from ..services.training_phase_service import TrainingPhaseService
 from ..services.training_plan_store import TrainingPlanStore
 from ..services.update_delta_service import UpdateDeltaService
@@ -261,6 +262,16 @@ def get_post_sync_summary(
     quality = SessionQualityService(db, storage).evaluate(activity)
     comparable = ComparableSessionService(db, storage).compare_to_personal_baseline(str(activity_id))
 
+    metrics_confidence = confidence_payload(db, activity_id=str(activity_id))
+    factor = float(metrics_confidence["confidence_factor"])
+    quality_flags = list(quality.get("flags") or [])
+    quality_confidence = quality.get("confidence")
+    if factor < 1:
+        if quality_confidence is not None:
+            quality_confidence = round(float(quality_confidence) * factor, 2)
+        if "derived_metrics_incomplete" not in quality_flags:
+            quality_flags.append("derived_metrics_incomplete")
+
     quality_label = "unknown"
     score = quality.get("quality_score")
     if score is not None:
@@ -289,8 +300,8 @@ def get_post_sync_summary(
         "session_quality": {
             "label": quality_label,
             "score": score,
-            "flags": quality.get("flags") or [],
-            "confidence": quality.get("confidence"),
+            "flags": quality_flags,
+            "confidence": quality_confidence,
         },
         "comparable": {
             "count": comparable.get("comparable_count") or 0,
@@ -302,6 +313,10 @@ def get_post_sync_summary(
         "plan_effect": {
             "note": "Plan impact evaluated on next coaching refresh.",
         },
+        "metrics_confidence": metrics_confidence["metrics_confidence"],
+        "confidence_factor": factor,
+        "data_basis": metrics_confidence["data_basis"],
+        "metrics_note": metrics_confidence["metrics_note"],
     }
 
 

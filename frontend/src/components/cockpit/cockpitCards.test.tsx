@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { NextWorkoutCard } from "@/components/cockpit/NextWorkoutCard";
+import { PostSyncSummaryCard } from "@/components/cockpit/PostSyncSummaryCard";
 import { WhyThisWorkout } from "@/components/cockpit/WhyThisWorkout";
 import { WhatChangedCard } from "@/components/cockpit/WhatChangedCard";
 import { ComparableSessionsCard } from "@/components/cockpit/ComparableSessionsCard";
@@ -63,12 +64,45 @@ const abstainPayload: TodayDashboardPayload = {
   },
 };
 
+describe("PostSyncSummaryCard", () => {
+  it("shows base-data confidence note when metrics were skipped", () => {
+    render(
+      <PostSyncSummaryCard
+        data={{
+          activity_name: "Rolig tur",
+          session_type: "easy_aerobic",
+          session_quality: { label: "moderate", score: 62, confidence: 0.44 },
+          metrics_confidence: "reduced",
+          metrics_note:
+            "Avledede metrikker ble hoppet over. Sammendrag og råd bruker ferske grunndata med lavere confidence.",
+        }}
+      />,
+    );
+    expect(screen.getByText(/lavere confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/Konfidens 44%/i)).toBeInTheDocument();
+  });
+});
+
 describe("NextWorkoutCard", () => {
   it("renders a normal threshold recommendation", () => {
     render(<NextWorkoutCard data={thresholdPayload} />);
     expect(screen.getByText(/3 x 10 min controlled threshold/i)).toBeInTheDocument();
     expect(screen.getByText(/158–164 slag\/min/i)).toBeInTheDocument();
     expect(screen.getByText(/5:35\/km–5:45\/km/i)).toBeInTheDocument();
+  });
+
+  it("shows lowered confidence when derived metrics were skipped", () => {
+    render(
+      <NextWorkoutCard
+        data={{
+          ...thresholdPayload,
+          freshness: { derived_activity_metrics: { status: "incomplete" } },
+        }}
+      />,
+    );
+    expect(
+      screen.getByText(/Rådet bruker ferske grunndata. Avledede metrikker mangler/i),
+    ).toBeInTheDocument();
   });
 
   it("renders abstain alternatives instead of a single prescription", () => {

@@ -31,6 +31,7 @@ DEGRADED_CODES: Set[str] = {
     "no_sync_state",
     "no_validation_run",
     "missing_optional_metric",
+    "derived_metrics_incomplete",
 }
 
 

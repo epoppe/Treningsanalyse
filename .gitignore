@@ -145,6 +145,7 @@ test_*.py
 !backend/tests/test_sync_batch_commits.py
 !backend/tests/test_sync_checkpoint.py
 !backend/tests/test_activity_sync_service.py
+!backend/tests/test_metric_isolation.py
 !backend/tests/test_performance_sync_service.py
 !backend/tests/test_metric_dependency_graph.py
 !backend/tests/test_settings.py
