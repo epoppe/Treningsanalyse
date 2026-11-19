@@ -46,7 +46,8 @@ class SyncMetricsService:
         if self._snapshot_recalc_pending:
             self._recalculate_performance_snapshots_once()
 
-    def _recalculate_performance_snapshots_once(self) -> None:
+    def _recalculate_performance_snapshots_once(self) -> bool:
+        """Returnerer False når snapshot-beregningen feiler, så kallet ikke ser ut som suksess."""
         try:
             from ..performance_metrics_service import PerformanceMetricsService
 
@@ -57,8 +58,10 @@ class SyncMetricsService:
             performance_service.recalculate_performance_snapshots()
             self._snapshot_recalc_pending = False
             logger.info("✅ Performance snapshots oppdatert (batch)")
+            return True
         except Exception as exc:
             logger.warning(f"Kunne ikke oppdatere performance snapshots: {exc}")
+            return False
 
     def refresh_metrics_after_te_sync(self, start_date: datetime, end_date: datetime) -> dict:
         """

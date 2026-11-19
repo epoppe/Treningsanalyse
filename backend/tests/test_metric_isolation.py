@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -16,6 +16,8 @@ from app.database.models import Base
 from app.services.coaching_health_service import CoachingHealthService
 from app.services.evidence_quality_propagation import apply_data_quality_to_evidence
 from app.services.sync_modules.activity_sync_service import ActivitySyncService
+from app.desktop_backend import main as desktop_main
+from app.services.sync_modules.metrics_service import SyncMetricsService
 from app.services.sync_modules.metric_isolation import (
     DERIVED_METRICS_INCOMPLETE_FACTOR,
     IsolatedMetricCalculator,
@@ -23,6 +25,7 @@ from app.services.sync_modules.metric_isolation import (
     confidence_payload,
     derived_metrics_freshness,
     failure_result,
+    merge_pending_metric_ids,
     run_metric_batch,
     update_derived_metrics_state,
 )
@@ -79,9 +82,14 @@ class MetricBatchContinuationTests(unittest.TestCase):
 
     def test_sync_keeps_base_commit_outside_metric_failure(self):
         source = inspect.getsource(ActivitySyncService.sync_activities)
+        batch_source = inspect.getsource(ActivitySyncService._run_isolated_metric_batch)
         self.assertIn("base_sync_committed", source)
-        self.assertIn("run_metric_batch", source)
-        self.assertLess(source.index("base_sync_committed = True"), source.index("run_metric_batch"))
+        self.assertIn("run_metric_batch", batch_source)
+        self.assertEqual(source.count("merge_pending_metric_ids"), 2)
+        self.assertLess(
+            source.index("base_sync_committed = True"),
+            source.index("_run_isolated_metric_batch"),
+        )
 
 
 class DerivedMetricsConfidenceTests(unittest.TestCase):
@@ -107,6 +115,11 @@ class DerivedMetricsConfidenceTests(unittest.TestCase):
         self.assertEqual(payload["metrics_confidence"], "reduced")
         other = confidence_payload(self.db, activity_id="9")
         self.assertEqual(other["metrics_confidence"], "normal")
+
+    def test_pending_skipped_ids_join_the_next_batch(self):
+        update_derived_metrics_state(self.db, timed_out=["old"])
+        self.assertEqual(merge_pending_metric_ids(self.db, ["new"]), ["new", "old"])
+        self.assertEqual(merge_pending_metric_ids(self.db, []), ["old"])
 
     def test_advice_confidence_drops_without_changing_decision(self):
         update_derived_metrics_state(self.db, timed_out=["42"])
@@ -142,6 +155,38 @@ class DerivedMetricsConfidenceTests(unittest.TestCase):
             for finding in service.report(date.today())["findings"]
             if finding["code"] == "derived_metrics_incomplete"
         ])
+
+
+class ReviewFollowUpTests(unittest.TestCase):
+    def test_desktop_entry_freezes_before_parsing_args(self):
+        source = inspect.getsource(desktop_main)
+        self.assertLess(source.index("freeze_support"), source.index("parse_args"))
+
+    def test_snapshot_failure_is_not_reported_as_success(self):
+        metrics = SyncMetricsService(MagicMock())
+        with patch(
+            "app.services.performance_metrics_service.PerformanceMetricsService",
+            side_effect=RuntimeError("snapshot"),
+        ):
+            self.assertFalse(metrics._recalculate_performance_snapshots_once())
+
+    def test_parent_cache_is_invalidated_from_worker_result(self):
+        calc = IsolatedMetricCalculator(None)
+        payload = {
+            "activity_id": "55",
+            "timed_out": False,
+            "isolated_failure": False,
+            "cache_invalidated": ["tss"],
+            "tss_calculated": True,
+        }
+        with patch.object(calc, "_run", return_value=payload):
+            with patch("app.cache.cache_manager.get_cache_manager") as get_cache:
+                result = calc.calculate("55")
+        get_cache.return_value.invalidate_activity.assert_called_once_with(
+            "55",
+            cache_types=["tss"],
+        )
+        self.assertFalse(result["timed_out"])
 
 
 class ProcessIsolationTests(unittest.TestCase):

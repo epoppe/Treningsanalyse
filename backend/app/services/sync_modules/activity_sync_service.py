@@ -30,6 +30,7 @@ from ...utils.activity_filters import is_indoor_type_key
 from .metric_isolation import (
     DERIVED_METRICS_INCOMPLETE_FACTOR,
     confidence_payload,
+    merge_pending_metric_ids,
     run_metric_batch,
     update_derived_metrics_state,
 )
@@ -635,6 +636,75 @@ class ActivitySyncService:
         logger.info(f"Utvidet synkronisering fullført: {combined_result['summary']}")
         return combined_result
 
+    def _run_isolated_metric_batch(self, summary: dict, metrics_ids: list[str]) -> None:
+        """Kjør isolert metrikk-batch og skriv resultatet inn i synk-sammendraget."""
+        if not metrics_ids:
+            summary["metrics_calculated"] = {
+                "total_activities": 0,
+                "skipped_activities": 0,
+                "metrics_confidence": "normal",
+                "confidence_factor": 1.0,
+            }
+            summary["metrics_confidence"] = "normal"
+            summary["confidence_factor"] = 1.0
+            if summary.get("status") in {None, "Startet"}:
+                summary["status"] = "Fullført"
+            return
+        logger.info("Starter isolert beregning av metrics for %s aktiviteter...", len(metrics_ids))
+        try:
+            batch = run_metric_batch(self.db, metrics_ids)
+        except Exception as metrics_exc:
+            logger.error(
+                "Metrikk-batch feilet etter committet grunnsynk: %s",
+                metrics_exc,
+                exc_info=True,
+            )
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            try:
+                update_derived_metrics_state(
+                    self.db,
+                    skipped=[str(activity_id) for activity_id in metrics_ids],
+                    timed_out=[str(activity_id) for activity_id in metrics_ids],
+                )
+            except Exception:
+                logger.warning("Kunne ikke merke ufullstendige metrikker", exc_info=True)
+            summary["metrics_calculated"] = {
+                "total_activities": len(metrics_ids),
+                "skipped_activities": len(metrics_ids),
+            }
+            summary["metrics_confidence"] = "reduced"
+            summary["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
+            summary["metrics_error"] = str(metrics_exc)
+            summary["status"] = "Fullført med ufullstendige metrikker"
+        else:
+            metrics_summary = batch["summary"]
+            summary["metrics_calculated"] = metrics_summary
+            summary["metrics_confidence"] = metrics_summary["metrics_confidence"]
+            summary["confidence_factor"] = metrics_summary["confidence_factor"]
+            logger.info(
+                "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
+                "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s, hoppet over=%s",
+                metrics_summary["total_activities"],
+                metrics_summary["tss"],
+                metrics_summary["power"],
+                metrics_summary["running_economy"],
+                metrics_summary["negative_split"],
+                metrics_summary["decoupling"],
+                metrics_summary["hrv_available"],
+                metrics_summary["skipped_activities"],
+            )
+            if metrics_summary["metrics_confidence"] == "reduced":
+                summary["status"] = "Fullført med ufullstendige metrikker"
+            else:
+                summary["status"] = "Fullført"
+        try:
+            self.db.expire_all()
+        except Exception:
+            pass
+
     async def sync_activities(
         self,
         start_date: datetime,
@@ -690,6 +760,16 @@ class ActivitySyncService:
             existing_ids = self.storage.get_existing_activity_ids(self.db, candidate_ids)
 
             if not activities_to_save:
+                pending = [] if skip_fit_download else merge_pending_metric_ids(self.db, [])
+                if pending:
+                    logger.info(
+                        "Ingen nye aktiviteter hos Garmin. Prøver metrikker på nytt for %s tidligere hoppede.",
+                        len(pending),
+                    )
+                    self.db.commit()
+                    base_sync_committed = True
+                    self._run_isolated_metric_batch(summary, pending)
+                    return summary
                 summary["status"] = "Fant ingen nye aktiviteter med GPS-data hos Garmin."
                 logger.info(summary["status"])
                 return summary
@@ -1034,69 +1114,16 @@ class ActivitySyncService:
             self.db.commit()
             base_sync_committed = True
 
-            # Beregn metrics for nye + oppdaterte (rikere data kan påvirke beregninger).
-            # Hver aktivitet isoleres med timeout, så ett hengende steg ikke stopper synken.
-            metrics_ids = list(dict.fromkeys(inserted_activity_ids + updated_activity_ids))
+            # Nye/oppdaterte pluss aktiviteter som timet ut i en tidligere kjøring.
+            fresh_ids = list(dict.fromkeys(inserted_activity_ids + updated_activity_ids))
             if skip_fit_download:
-                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(metrics_ids)}
+                summary["metrics_calculated"] = {"skipped": True, "total_activities": len(fresh_ids)}
                 summary["metrics_confidence"] = "normal"
                 summary["confidence_factor"] = 1.0
                 summary["status"] = "Fullført"
             else:
-                logger.info("Starter isolert beregning av metrics for nye/oppdaterte aktiviteter...")
-                try:
-                    batch = run_metric_batch(self.db, metrics_ids)
-                except Exception as metrics_exc:
-                    logger.error(
-                        "Metrikk-batch feilet etter committet grunnsynk: %s",
-                        metrics_exc,
-                        exc_info=True,
-                    )
-                    try:
-                        self.db.rollback()
-                    except Exception:
-                        pass
-                    try:
-                        update_derived_metrics_state(
-                            self.db,
-                            skipped=[str(activity_id) for activity_id in metrics_ids],
-                            timed_out=[str(activity_id) for activity_id in metrics_ids],
-                        )
-                    except Exception:
-                        logger.warning("Kunne ikke merke ufullstendige metrikker", exc_info=True)
-                    summary["metrics_calculated"] = {
-                        "total_activities": len(metrics_ids),
-                        "skipped_activities": len(metrics_ids),
-                    }
-                    summary["metrics_confidence"] = "reduced"
-                    summary["confidence_factor"] = DERIVED_METRICS_INCOMPLETE_FACTOR
-                    summary["metrics_error"] = str(metrics_exc)
-                    summary["status"] = "Fullført med ufullstendige metrikker"
-                else:
-                    metrics_summary = batch["summary"]
-                    summary["metrics_calculated"] = metrics_summary
-                    summary["metrics_confidence"] = metrics_summary["metrics_confidence"]
-                    summary["confidence_factor"] = metrics_summary["confidence_factor"]
-                    logger.info(
-                        "Metrics-beregning fullført for %s aktiviteter: TSS=%s, power=%s, "
-                        "løpsøkonomi=%s, negative split=%s, decoupling=%s, HRV=%s, hoppet over=%s",
-                        metrics_summary["total_activities"],
-                        metrics_summary["tss"],
-                        metrics_summary["power"],
-                        metrics_summary["running_economy"],
-                        metrics_summary["negative_split"],
-                        metrics_summary["decoupling"],
-                        metrics_summary["hrv_available"],
-                        metrics_summary["skipped_activities"],
-                    )
-                    if metrics_summary["metrics_confidence"] == "reduced":
-                        summary["status"] = "Fullført med ufullstendige metrikker"
-                    else:
-                        summary["status"] = "Fullført"
-                try:
-                    self.db.expire_all()
-                except Exception:
-                    pass
+                metrics_ids = merge_pending_metric_ids(self.db, fresh_ids)
+                self._run_isolated_metric_batch(summary, metrics_ids)
             logger.info(
                 "Synkronisering fra Garmin fullført (%s). La til %s nye aktiviteter i databasen.",
                 summary["status"],

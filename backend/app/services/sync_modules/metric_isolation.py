@@ -175,8 +175,13 @@ def _snapshot_process_entry(conn) -> None:
                 storage=storage,
                 analysis_service=AnalysisService(storage),
             )
-            SyncMetricsService(sync)._recalculate_performance_snapshots_once()
-            conn.send({"ok": True, "timed_out": False})
+            ok = bool(SyncMetricsService(sync)._recalculate_performance_snapshots_once())
+            conn.send({
+                "ok": ok,
+                "timed_out": False,
+                "isolated_failure": not ok,
+                "error": None if ok else "performance snapshot ble ikke oppdatert",
+            })
         finally:
             db.close()
     except Exception as exc:
@@ -189,6 +194,43 @@ def _snapshot_process_entry(conn) -> None:
             conn.close()
         except Exception:
             pass
+
+
+def merge_pending_metric_ids(db, activity_ids: list[str]) -> list[str]:
+    """Ta med aktiviteter som timet ut tidligere, selv om metadata ikke endret seg."""
+    ordered = [str(activity_id) for activity_id in activity_ids if activity_id]
+    try:
+        pending = [str(item) for item in (_read_meta(db).get("skipped_activity_ids") or [])]
+    except Exception:
+        logger.warning("Kunne ikke lese aktiviteter som venter på metrikk-retry", exc_info=True)
+        return list(dict.fromkeys(ordered))
+    merged = list(dict.fromkeys([*ordered, *pending]))
+    extra = [activity_id for activity_id in merged if activity_id not in set(ordered)]
+    if extra:
+        logger.info(
+            "Tar med %s tidligere hoppede aktiviteter i metrikk-kjøringen: %s",
+            len(extra),
+            ", ".join(extra[:12]),
+        )
+    return merged
+
+
+def _invalidate_parent_cache(result: dict) -> None:
+    """Workerens cache er et annet minne. Foreldreprosessen må invalideres også."""
+    activity_id = result.get("activity_id")
+    cache_types = result.get("cache_invalidated")
+    if not activity_id or not cache_types:
+        return
+    try:
+        from ...cache.cache_manager import get_cache_manager
+
+        get_cache_manager().invalidate_activity(str(activity_id), cache_types=cache_types)
+    except Exception:
+        logger.debug(
+            "Kunne ikke invalidere parent-cache for aktivitet %s",
+            activity_id,
+            exc_info=True,
+        )
 
 
 def _read_meta(db) -> dict:
@@ -475,6 +517,7 @@ class IsolatedMetricCalculator:
                     result.get("errors"),
                 )
         self._persist_activity_result(result)
+        _invalidate_parent_cache(result)
         return result
 
     def recalculate_snapshots(self) -> dict:
